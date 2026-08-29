@@ -3,7 +3,6 @@ import type { NostrEvent } from '@nostrify/nostrify';
 import { CrtTv } from '@/components/CrtTv';
 import { WhiteNoise } from '@/components/WhiteNoise';
 import { useNsiteCover } from '@/hooks/useNsiteCover';
-import { getNsiteSubdomain } from '@/lib/nsiteSubdomain';
 import { getTvDesign } from '@/lib/tvDesign';
 
 interface ChannelTileProps {
@@ -14,14 +13,14 @@ interface ChannelTileProps {
 }
 
 /**
- * One television on the channel wall. The set is built from the site's
- * identity, so it arrives fully formed; only the picture on its screen is
- * waited on, and until that lands the channel plays static. Clicking tunes in.
+ * One television on the channel wall. The set belongs to the slot and is
+ * already standing there; this only tunes a channel into it, showing the site's
+ * og:image as the running picture and static until it lands. Clicking tunes in.
  */
 export function ChannelTile({ event, channel, onSelect }: ChannelTileProps) {
   const name = event.tags.find(([n]) => n === 'd')?.[1] ?? '???';
   const { data: cover } = useNsiteCover(event);
-  const design = getTvDesign(getNsiteSubdomain(event));
+  const design = getTvDesign(channel);
   const ch = String(channel).padStart(2, '0');
 
   return (

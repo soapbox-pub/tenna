@@ -63,12 +63,13 @@ const Index = () => {
             Array.from({ length: 10 }).map((_, i) => (
               <div key={i} className="flex h-full flex-col items-center justify-end">
                 {/*
-                  Dimmed and drained of color, so an empty slot reads as a slot
-                  waiting for a channel rather than as somebody's television.
+                  The very set that will hold channel i + 1, since the wall
+                  doesn't depend on the lineup. Nothing about the television
+                  changes when the channel arrives — only what's on its screen.
                 */}
                 <CrtTv
-                  design={getTvDesign(`tuning-${i}`)}
-                  className="w-full opacity-40 grayscale"
+                  design={getTvDesign(i + 1)}
+                  className="w-full"
                   screenClassName="aspect-[4/3]"
                 >
                   <WhiteNoise className="absolute inset-0" />
@@ -88,7 +89,7 @@ const Index = () => {
 
         {empty && (
           <div className="mx-auto max-w-xs">
-            <CrtTv design={getTvDesign('no-signal')} screenClassName="aspect-[4/3]">
+            <CrtTv design={getTvDesign(0)} screenClassName="aspect-[4/3]">
               <WhiteNoise className="absolute inset-0 opacity-60" />
               <span className="crt-osd absolute inset-0 flex items-center justify-center font-crt text-3xl uppercase tracking-widest text-[#7CFC9B]">
                 No signal

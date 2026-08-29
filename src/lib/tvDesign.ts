@@ -1,14 +1,15 @@
 /**
- * Every nsite gets its own television, assembled from a body style, an antenna
- * style, and a color palette. The assembly is a pure function of the site's
- * identity: the same site produces the same set on every load, fully formed
- * before any network request resolves.
+ * The televisions on the channel wall, each assembled from a body style, an
+ * antenna style, and a color palette.
  *
- * The palette comes from the identity rather than from the site's own declared
- * brand color, even though the brand color would be a nicer likeness. That
- * color has to be fetched out of the site's document, which lands well after
- * the set is on screen — and a television that repaints itself once you're
- * already looking at it reads as a glitch, not as a flourish.
+ * A set belongs to its slot on the wall, not to the site playing on it. The
+ * wall is furniture: the same television stands in slot 3 whether or not the
+ * lineup has loaded, so a slot can be drawn before anything is known about the
+ * channel, and nothing about the set changes when the channel tunes in. Tying
+ * the set to the site instead meant every television on the wall changed shape
+ * the moment the lineup arrived, which is the one thing furniture must not do.
+ *
+ * Sites still bring their own picture — that's the part that belongs to them.
  */
 
 /** Cabinet shapes. */
@@ -64,14 +65,7 @@ const PRESET_SHELLS: ReadonlyArray<readonly [ShellColors, number]> = [
 /** Knob and lamp accents. */
 const ACCENTS = ['#FEF960', '#DA1F52', '#7CFC9B', '#ACD2DE', '#F96C91'] as const;
 
-/**
- * FNV-1a with a murmur3 finalizer, to turn a site's identity into a seed.
- *
- * The finalizer earns its keep here. Sites under one publisher share a long
- * common identity prefix and differ only in a short suffix, which plain FNV-1a
- * maps to a tight cluster of seeds — and a tight cluster of near-identical
- * televisions. Avalanching the result scatters them.
- */
+/** FNV-1a with a murmur3 finalizer. The finalizer supplies the avalanche. */
 function hashString(input: string): number {
   let h = 0x811c9dc5;
   for (let i = 0; i < input.length; i++) {
@@ -86,72 +80,88 @@ function hashString(input: string): number {
   return h >>> 0;
 }
 
-/** mulberry32 — small, fast, and good enough to pick television parts. */
-function mulberry32(seed: number): () => number {
-  let a = seed;
-  const next = () => {
-    a = (a + 0x6d2b79f5) | 0;
-    let t = Math.imul(a ^ (a >>> 15), 1 | a);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-  // Discard the first outputs, which stay correlated between nearby seeds.
-  next();
-  next();
-  return next;
+/**
+ * A uniform value in [0, 1) for one attribute of one set.
+ *
+ * Every attribute is hashed independently rather than drawn in sequence from a
+ * single seeded generator. Slot names are short and nearly identical, and
+ * successive draws from one stream stay visibly correlated across seeds that
+ * close together — which showed up as runs of matching bodies and clusters of
+ * ball tips down the wall. Salting the hash per attribute costs nothing and
+ * decorrelates them completely.
+ */
+function unit(identity: string, attribute: string): number {
+  return hashString(`${identity}#${attribute}`) / 4294967296;
+}
+
+/** Deterministic Fisher–Yates. */
+function shuffle<T>(items: T[], salt: string): T[] {
+  const out = [...items];
+  for (let i = out.length - 1; i > 0; i--) {
+    const j = Math.floor(unit(salt, `shuffle-${i}`) * (i + 1));
+    [out[i], out[j]] = [out[j], out[i]];
+  }
+  return out;
+}
+
+/**
+ * Cabinets are dealt from a reshuffling deck rather than drawn independently,
+ * so every run of five slots shows all four of them. Independent draws are
+ * correct on average and clumpy in the small — six slabs in the first twelve
+ * slots, on the seed this shipped with — and a dozen tiles is the whole wall,
+ * not a sample of it. Classic appears twice; it's the everyday set.
+ */
+const BODY_DECK = ['classic', 'classic', 'console', 'portable', 'slab'] as const;
+
+function dealBody(slot: number): TvBodyStyle {
+  const round = Math.floor(slot / BODY_DECK.length);
+  return shuffle([...BODY_DECK], `body-deck-${round}`)[slot % BODY_DECK.length];
 }
 
 /** Draw one option, respecting relative weights. */
-function pick<T>(rng: () => number, options: ReadonlyArray<readonly [T, number]>): T {
+function pick<T>(n: number, options: ReadonlyArray<readonly [T, number]>): T {
   const total = options.reduce((sum, [, weight]) => sum + weight, 0);
-  let n = rng() * total;
+  let remaining = n * total;
   for (const [value, weight] of options) {
-    n -= weight;
-    if (n < 0) return value;
+    remaining -= weight;
+    if (remaining < 0) return value;
   }
   return options[options.length - 1][0];
 }
 
 /**
- * Assemble the television for a site.
+ * Build the television standing in a given slot on the wall.
  *
- * `identity` should be something stable and unique per site — its NIP-5A
- * subdomain. Everything the set needs is in that string, so a tile can draw its
- * final television the moment the channel lineup arrives.
+ * Slot 0 is the spare set, used for placeholders and the no-signal card.
  */
-export function getTvDesign(identity: string): TvDesign {
-  const rng = mulberry32(hashString(identity));
+export function getTvDesign(slot: number): TvDesign {
+  const id = `slot-${slot}`;
 
-  const body = pick(rng, [
-    ['classic', 3],
-    ['console', 2],
-    ['portable', 2],
-    ['slab', 2],
-  ] as const);
+  const body = dealBody(slot);
 
-  const antenna = pick(rng, [
+  const antenna = pick(unit(id, 'antenna'), [
     ['pair', 4],
     ['single', 4],
     ['none', 3],
   ] as const);
 
-  const antennaFlipped = rng() < 0.5;
+  const antennaFlipped = unit(id, 'antenna-flip') < 0.5;
 
   // Ball tips are loud, and a matched pair of them is louder still — the set
   // stops being furniture and starts being the thing you look at. Keep them
   // scarce, and scarcer on two rods than on one.
-  const antennaBalls = rng() < (antenna === 'pair' ? 0.07 : 0.18);
+  const antennaBalls = unit(id, 'antenna-balls') < (antenna === 'pair' ? 0.07 : 0.18);
 
-  const shell = pick(rng, PRESET_SHELLS);
+  const shell = pick(unit(id, 'shell'), PRESET_SHELLS);
 
-  const first = ACCENTS[Math.floor(rng() * ACCENTS.length)];
+  const first = ACCENTS[Math.floor(unit(id, 'knob-a') * ACCENTS.length)];
   const rest = ACCENTS.filter((color) => color !== first);
-  const second = rest[Math.floor(rng() * rest.length)];
+  const second = rest[Math.floor(unit(id, 'knob-b') * rest.length)];
 
-  const scanlineGap = 2 + Math.floor(rng() * 4);
-  const roll = rng() < 0.4;
-  const rollDuration = 6 + rng() * 5;
-  const rollDelay = -(rng() * 6);
+  const scanlineGap = 2 + Math.floor(unit(id, 'scanline-gap') * 4);
+  const roll = unit(id, 'roll') < 0.4;
+  const rollDuration = 6 + unit(id, 'roll-duration') * 5;
+  const rollDelay = -(unit(id, 'roll-delay') * 6);
 
   return {
     body,

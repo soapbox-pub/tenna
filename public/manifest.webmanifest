@@ -1,0 +1,10 @@
+{
+  "name": "Tenna",
+  "short_name": "Tenna",
+  "description": "Pick a channel. Tenna is an nsite browser — your entrypoint to Nostr.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#150609",
+  "theme_color": "#150609",
+  "icons": []
+}

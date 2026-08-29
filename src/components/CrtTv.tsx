@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import type { CSSProperties, ReactNode } from 'react';
 
 import { cn } from '@/lib/utils';
 
@@ -8,13 +8,15 @@ interface CrtTvProps {
   className?: string;
   /** Extra classes for the screen area (e.g. an aspect ratio). */
   screenClassName?: string;
+  /** Scanline pitch in px — vary it per set so the wall doesn't repeat. */
+  scanlineGap?: number;
 }
 
 /**
  * A little television set: V antennae with ball tips, an aged-plastic lilac
  * shell, a curved glass screen with scanlines, a control strip, and feet.
  */
-export function CrtTv({ children, className, screenClassName }: CrtTvProps) {
+export function CrtTv({ children, className, screenClassName, scanlineGap = 3 }: CrtTvProps) {
   return (
     <div className={cn('relative', className)}>
       {/* Antennae */}
@@ -34,12 +36,16 @@ export function CrtTv({ children, className, screenClassName }: CrtTvProps) {
         {/* Screen */}
         <div
           className={cn(
-            'relative overflow-hidden rounded-xl bg-black ring-2 ring-black/70',
+            'relative overflow-hidden rounded-[8%/11%] bg-black ring-2 ring-black/70',
             screenClassName,
           )}
         >
           {children}
-          <div className="crt-scanlines pointer-events-none absolute inset-0 opacity-40" />
+          <div className="crt-rgb pointer-events-none absolute inset-0" />
+          <div
+            className="crt-scanlines pointer-events-none absolute inset-0 opacity-40"
+            style={{ '--scanline-gap': `${scanlineGap}px` } as CSSProperties}
+          />
           <div className="crt-vignette pointer-events-none absolute inset-0" />
           <div className="crt-glare pointer-events-none absolute inset-0" />
         </div>

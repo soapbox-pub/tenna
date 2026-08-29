@@ -51,9 +51,6 @@ export function ChannelTile({ event, channel, onSelect }: ChannelTileProps) {
           CH {ch}
         </span>
       </CrtTv>
-      <span className="crt-osd mt-1 font-crt text-xl uppercase tracking-wider text-[#FEF960] group-hover:motion-safe:animate-[blink_0.6s_steps(2)_2]">
-        {name}
-      </span>
     </button>
   );
 }

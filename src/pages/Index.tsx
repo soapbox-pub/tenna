@@ -69,7 +69,6 @@ const Index = () => {
                 >
                   <WhiteNoise className="absolute inset-0" />
                 </CrtTv>
-                <span className="crt-osd mt-1 font-crt text-xl text-[#7CFC9B]/60">— — —</span>
               </div>
             ))}
 

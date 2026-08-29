@@ -61,7 +61,13 @@ const Index = () => {
           {isLoading &&
             Array.from({ length: 10 }).map((_, i) => (
               <div key={i} className="flex flex-col items-center">
-                <CrtTv className="w-full" screenClassName="aspect-[4/3]" scanlineGap={2 + (i % 4)}>
+                <CrtTv
+                  className="w-full"
+                  screenClassName="aspect-[4/3]"
+                  scanlineGap={2 + (i % 4)}
+                  rollDuration={6 + ((i * 1.7) % 5)}
+                  rollDelay={-((i * 2.3) % 6)}
+                >
                   <WhiteNoise className="absolute inset-0" />
                 </CrtTv>
                 <span className="crt-osd mt-1 font-crt text-xl text-[#7CFC9B]/60">— — —</span>

@@ -130,6 +130,7 @@ export function NsiteViewer({ event, channel, onClose }: NsiteViewerProps) {
           >
             <WhiteNoise className="h-full w-full" />
             <div className="crt-scanlines absolute inset-0 opacity-40" />
+            <div className="crt-rollbar absolute inset-0" />
             <span className="crt-osd absolute left-6 top-5 font-crt text-4xl text-[#7CFC9B]">
               CH {ch}
             </span>

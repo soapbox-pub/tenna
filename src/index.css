@@ -217,6 +217,50 @@
   );
 }
 
+/*
+ * Rolling hum bar — a horizontal band of brightness distortion that sweeps
+ * the screen top to bottom, like an AC-hum roll or filming a tube at the
+ * wrong shutter speed. The band is a child pseudo-element so the transform
+ * animation stays compositor-only.
+ */
+.crt-rollbar {
+  --roll-duration: 8s;
+  --roll-delay: 0s;
+  overflow: hidden;
+}
+
+.crt-rollbar::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 34%;
+  background: linear-gradient(
+    to bottom,
+    transparent 0%,
+    rgba(0, 0, 0, 0.16) 30%,
+    rgba(0, 0, 0, 0.3) 55%,
+    rgba(255, 255, 255, 0.1) 78%,
+    rgba(255, 255, 255, 0.16) 84%,
+    transparent 100%
+  );
+  animation: crt-roll var(--roll-duration) linear var(--roll-delay) infinite;
+}
+
+/* Band is 34% tall, so ~300% translate carries it fully off the bottom. */
+@keyframes crt-roll {
+  0% { transform: translateY(-100%) skewX(-4deg); }
+  100% { transform: translateY(300%) skewX(-4deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .crt-rollbar::before {
+    animation: none;
+    content: none;
+  }
+}
+
 /* Tone curve for pictures shown on a tube. */
 .crt-filter {
   filter: contrast(1.08) saturate(1.15) brightness(0.92);

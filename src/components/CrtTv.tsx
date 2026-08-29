@@ -10,13 +10,24 @@ interface CrtTvProps {
   screenClassName?: string;
   /** Scanline pitch in px — vary it per set so the wall doesn't repeat. */
   scanlineGap?: number;
+  /** Rolling hum-bar sweep period in seconds — vary it per set. */
+  rollDuration?: number;
+  /** Rolling hum-bar phase offset in seconds (negative desyncs the wall). */
+  rollDelay?: number;
 }
 
 /**
  * A little television set: V antennae with ball tips, an aged-plastic lilac
  * shell, a curved glass screen with scanlines, a control strip, and feet.
  */
-export function CrtTv({ children, className, screenClassName, scanlineGap = 3 }: CrtTvProps) {
+export function CrtTv({
+  children,
+  className,
+  screenClassName,
+  scanlineGap = 3,
+  rollDuration = 8,
+  rollDelay = 0,
+}: CrtTvProps) {
   return (
     <div className={cn('relative', className)}>
       {/* Antennae */}
@@ -45,6 +56,13 @@ export function CrtTv({ children, className, screenClassName, scanlineGap = 3 }:
           <div
             className="crt-scanlines pointer-events-none absolute inset-0 opacity-40"
             style={{ '--scanline-gap': `${scanlineGap}px` } as CSSProperties}
+          />
+          <div
+            className="crt-rollbar pointer-events-none absolute inset-0"
+            style={{
+              '--roll-duration': `${rollDuration}s`,
+              '--roll-delay': `${rollDelay}s`,
+            } as CSSProperties}
           />
           <div className="crt-vignette pointer-events-none absolute inset-0" />
           <div className="crt-glare pointer-events-none absolute inset-0" />

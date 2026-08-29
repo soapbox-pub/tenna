@@ -1,101 +1,226 @@
 import type { CSSProperties, ReactNode } from 'react';
 
+import { TvAntenna } from '@/components/TvAntenna';
+import type { TvDesign } from '@/lib/tvDesign';
 import { cn } from '@/lib/utils';
 
 interface CrtTvProps {
-  /** Screen content (static, video, icons...). */
+  /** The set to build — body, antenna, and palette. */
+  design: TvDesign;
+  /** Screen content (static, pictures, OSD text...). */
   children: ReactNode;
   className?: string;
   /** Extra classes for the screen area (e.g. an aspect ratio). */
   screenClassName?: string;
-  /** Scanline pitch in px — vary it per set so the wall doesn't repeat. */
-  scanlineGap?: number;
-  /**
-   * Whether this set has a rolling hum bar. Only some sets on a wall should —
-   * a bad tube here and there reads as interference; every set rolling reads
-   * as a screensaver.
-   */
-  roll?: boolean;
-  /** Rolling hum-bar sweep period in seconds — vary it per set. */
-  rollDuration?: number;
-  /** Rolling hum-bar phase offset in seconds (negative desyncs the wall). */
-  rollDelay?: number;
 }
 
+const SHELL_SHADOW = 'shadow-[0_10px_30px_rgba(0,0,0,0.55)]';
+
 /**
- * A little television set: V antennae with ball tips, an aged-plastic lilac
- * shell, a curved glass screen with scanlines, a control strip, and feet.
+ * A little television set, assembled from its design: an antenna (or not), a
+ * molded shell in the site's colors, and a curved tube behind glass.
  */
-export function CrtTv({
-  children,
-  className,
-  screenClassName,
-  scanlineGap = 3,
-  roll = false,
-  rollDuration = 8,
-  rollDelay = 0,
-}: CrtTvProps) {
+export function CrtTv({ design, children, className, screenClassName }: CrtTvProps) {
+  const { palette } = design;
+
+  const shellStyle: CSSProperties = {
+    backgroundImage: `linear-gradient(to bottom, ${palette.shellLight}, ${palette.shellMid} 58%, ${palette.shellDark})`,
+  };
+
+  const screen = (
+    <Screen design={design} className={screenClassName}>
+      {children}
+    </Screen>
+  );
+
   return (
     <div className={cn('relative', className)}>
-      {/* Antennae */}
-      <svg
-        viewBox="0 0 120 40"
-        aria-hidden="true"
-        className="mx-auto w-1/2 translate-y-[3px]"
+      <TvAntenna design={design} className="mx-auto w-1/2 translate-y-[3px]" />
+
+      {design.body === 'classic' && <ClassicBody design={design} shellStyle={shellStyle} screen={screen} />}
+      {design.body === 'console' && <ConsoleBody design={design} shellStyle={shellStyle} screen={screen} />}
+      {design.body === 'portable' && <PortableBody design={design} shellStyle={shellStyle} screen={screen} />}
+      {design.body === 'slab' && <SlabBody design={design} shellStyle={shellStyle} screen={screen} />}
+    </div>
+  );
+}
+
+interface BodyProps {
+  design: TvDesign;
+  shellStyle: CSSProperties;
+  screen: ReactNode;
+}
+
+/** The everyday set: knobs and a speaker under the picture, up on two feet. */
+function ClassicBody({ design, shellStyle, screen }: BodyProps) {
+  const { knobs, trim } = design.palette;
+
+  return (
+    <>
+      <div
+        className={cn('relative rounded-2xl border-2 border-black/60 p-2.5 pb-1', SHELL_SHADOW)}
+        style={shellStyle}
       >
-        <line x1="60" y1="40" x2="22" y2="10" stroke="#2D2D33" strokeWidth="5" strokeLinecap="round" />
-        <line x1="60" y1="40" x2="98" y2="10" stroke="#2D2D33" strokeWidth="5" strokeLinecap="round" />
-        <circle cx="20" cy="8" r="7" fill="#A193ED" stroke="#2D2D33" strokeWidth="2.5" />
-        <circle cx="100" cy="8" r="7" fill="#A193ED" stroke="#2D2D33" strokeWidth="2.5" />
-      </svg>
-
-      {/* Shell */}
-      <div className="relative rounded-2xl border-2 border-black/60 bg-gradient-to-b from-[#E3CCFB] via-[#A193ED] to-[#5D5FA4] p-2.5 pb-1 shadow-[0_10px_30px_rgba(0,0,0,0.55)]">
-        {/* Screen */}
-        <div
-          className={cn(
-            'relative overflow-hidden rounded-[8%/11%] bg-black ring-2 ring-black/70',
-            screenClassName,
-          )}
-        >
-          {children}
-          <div className="crt-rgb pointer-events-none absolute inset-0" />
-          <div
-            className="crt-scanlines pointer-events-none absolute inset-0 opacity-40"
-            style={{ '--scanline-gap': `${scanlineGap}px` } as CSSProperties}
-          />
-          {roll && (
-            <div
-              className="crt-rollbar pointer-events-none absolute inset-0"
-              style={{
-                '--roll-duration': `${rollDuration}s`,
-                '--roll-delay': `${rollDelay}s`,
-              } as CSSProperties}
-            />
-          )}
-          <div className="crt-vignette pointer-events-none absolute inset-0" />
-          <div className="crt-glare pointer-events-none absolute inset-0" />
-        </div>
-
-        {/* Control strip: knobs + speaker slits */}
+        {screen}
         <div className="flex items-center justify-between px-1.5 pb-1 pt-1.5">
           <div className="flex gap-1.5">
-            <span className="size-2.5 rounded-full border border-black/50 bg-[#FEF960]" />
-            <span className="size-2.5 rounded-full border border-black/50 bg-[#DA1F52]" />
+            <Knob color={knobs[0]} className="size-2.5" />
+            <Knob color={knobs[1]} className="size-2.5" />
           </div>
-          <div className="flex gap-[3px]">
+          <Slits count={4} className="h-2.5" />
+        </div>
+      </div>
+      <div className="mx-auto flex w-3/4 justify-between px-2">
+        <span className="h-2 w-4 rounded-b-md" style={{ background: trim }} />
+        <span className="h-2 w-4 rounded-b-md" style={{ background: trim }} />
+      </div>
+    </>
+  );
+}
+
+/** A floor cabinet: speaker panel beside the picture, splayed legs beneath. */
+function ConsoleBody({ design, shellStyle, screen }: BodyProps) {
+  const { knobs, trim } = design.palette;
+
+  return (
+    <>
+      <div
+        className={cn('relative flex gap-2 rounded-md border-2 border-black/60 p-2', SHELL_SHADOW)}
+        style={shellStyle}
+      >
+        <div className="min-w-0 flex-1">{screen}</div>
+        <div className="flex w-[15%] min-w-6 flex-col items-center">
+          <div className="flex w-full flex-1 items-stretch justify-center gap-[3px] rounded-sm bg-black/15 px-1 py-1.5">
             {[0, 1, 2, 3].map((i) => (
-              <span key={i} className="h-2.5 w-[3px] rounded-full bg-black/30" />
+              <span key={i} className="w-[3px] rounded-full bg-black/35" />
             ))}
+          </div>
+          <div className="flex gap-1 pt-1.5">
+            <Knob color={knobs[0]} className="size-2" />
+            <Knob color={knobs[1]} className="size-2" />
           </div>
         </div>
       </div>
-
-      {/* Feet */}
-      <div className="mx-auto flex w-3/4 justify-between px-2">
-        <span className="h-2 w-4 rounded-b-md bg-[#2D2D33]" />
-        <span className="h-2 w-4 rounded-b-md bg-[#2D2D33]" />
+      <div className="mx-auto flex w-2/3 justify-between">
+        <span className="h-3 w-1.5 origin-top -rotate-12 rounded-b-sm" style={{ background: trim }} />
+        <span className="h-3 w-1.5 origin-top rotate-12 rounded-b-sm" style={{ background: trim }} />
       </div>
+    </>
+  );
+}
+
+/** A small round-cornered portable: pinhole speaker and one fat tuning dial. */
+function PortableBody({ design, shellStyle, screen }: BodyProps) {
+  const { knobs, trim } = design.palette;
+
+  return (
+    <>
+      <div
+        className={cn('relative rounded-3xl border-2 border-black/60 p-3 pb-1.5', SHELL_SHADOW)}
+        style={shellStyle}
+      >
+        {screen}
+        <div className="flex items-center justify-between px-1 pt-2">
+          <div className="flex gap-[3px]">
+            {[0, 1, 2, 3, 4, 5].map((i) => (
+              <span key={i} className="size-1 rounded-full bg-black/25" />
+            ))}
+          </div>
+          <span
+            className="flex size-4 items-start justify-center rounded-full border-2 border-black/50"
+            style={{ background: knobs[0] }}
+          >
+            <span className="mt-px h-1.5 w-px bg-black/60" />
+          </span>
+        </div>
+      </div>
+      <div className="mx-auto flex w-1/2 justify-between">
+        <span className="h-1.5 w-5 rounded-b-sm" style={{ background: trim }} />
+        <span className="h-1.5 w-5 rounded-b-sm" style={{ background: trim }} />
+      </div>
+    </>
+  );
+}
+
+/** A squared-off set with almost no bezel, sitting flat on a plinth. */
+function SlabBody({ design, shellStyle, screen }: BodyProps) {
+  const { knobs, trim } = design.palette;
+
+  return (
+    <>
+      <div
+        className={cn('relative rounded-md border-2 border-black/60 p-1.5 pb-1', SHELL_SHADOW)}
+        style={shellStyle}
+      >
+        {screen}
+        <div className="flex items-center justify-between px-1 pt-1">
+          <div className="flex gap-1">
+            <Knob color={knobs[0]} className="size-1.5" />
+            <Knob color={knobs[1]} className="size-1.5" />
+            <Knob color={knobs[0]} className="size-1.5" />
+          </div>
+          <span
+            className="size-1.5 rounded-full"
+            style={{ background: knobs[1], boxShadow: `0 0 6px ${knobs[1]}` }}
+          />
+        </div>
+      </div>
+      <div className="mx-auto h-1.5 w-[70%] rounded-b-md" style={{ background: trim }} />
+    </>
+  );
+}
+
+interface ScreenProps {
+  design: TvDesign;
+  className?: string;
+  children: ReactNode;
+}
+
+/** The tube: curved glass, shadow mask, scanlines, vignette, and glare. */
+function Screen({ design, className, children }: ScreenProps) {
+  return (
+    <div
+      className={cn(
+        'relative overflow-hidden rounded-[8%/11%] bg-black ring-2 ring-black/70',
+        className,
+      )}
+    >
+      {children}
+      <div className="crt-rgb pointer-events-none absolute inset-0" />
+      <div
+        className="crt-scanlines pointer-events-none absolute inset-0 opacity-40"
+        style={{ '--scanline-gap': `${design.scanlineGap}px` } as CSSProperties}
+      />
+      {design.roll && (
+        <div
+          className="crt-rollbar pointer-events-none absolute inset-0"
+          style={{
+            '--roll-duration': `${design.rollDuration}s`,
+            '--roll-delay': `${design.rollDelay}s`,
+          } as CSSProperties}
+        />
+      )}
+      <div className="crt-vignette pointer-events-none absolute inset-0" />
+      <div className="crt-glare pointer-events-none absolute inset-0" />
+    </div>
+  );
+}
+
+function Knob({ color, className }: { color: string; className?: string }) {
+  return (
+    <span
+      className={cn('rounded-full border border-black/50', className)}
+      style={{ background: color }}
+    />
+  );
+}
+
+function Slits({ count, className }: { count: number; className?: string }) {
+  return (
+    <div className={cn('flex items-stretch gap-[3px]', className)}>
+      {Array.from({ length: count }).map((_, i) => (
+        <span key={i} className="w-[3px] rounded-full bg-black/30" />
+      ))}
     </div>
   );
 }

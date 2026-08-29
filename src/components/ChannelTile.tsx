@@ -2,7 +2,9 @@ import type { NostrEvent } from '@nostrify/nostrify';
 
 import { CrtTv } from '@/components/CrtTv';
 import { WhiteNoise } from '@/components/WhiteNoise';
-import { useNsiteOgImage } from '@/hooks/useNsiteOgImage';
+import { useNsiteAppearance } from '@/hooks/useNsiteAppearance';
+import { getNsiteSubdomain } from '@/lib/nsiteSubdomain';
+import { getTvDesign } from '@/lib/tvDesign';
 
 interface ChannelTileProps {
   event: NostrEvent;
@@ -12,12 +14,14 @@ interface ChannelTileProps {
 }
 
 /**
- * One television on the channel wall. The screen shows the site's og:image
- * as the running picture, falling back to static; clicking tunes in.
+ * One television on the channel wall. The set is built from the site's own
+ * identity and colors; its screen shows the site's og:image as the running
+ * picture, falling back to static. Clicking tunes in.
  */
 export function ChannelTile({ event, channel, onSelect }: ChannelTileProps) {
   const name = event.tags.find(([n]) => n === 'd')?.[1] ?? '???';
-  const { data: cover } = useNsiteOgImage(event);
+  const { data: appearance } = useNsiteAppearance(event);
+  const design = getTvDesign(getNsiteSubdomain(event), appearance?.themeColor);
   const ch = String(channel).padStart(2, '0');
 
   return (
@@ -25,19 +29,16 @@ export function ChannelTile({ event, channel, onSelect }: ChannelTileProps) {
       type="button"
       onClick={onSelect}
       aria-label={`Channel ${ch}: ${name}`}
-      className="group flex flex-col items-center outline-none motion-safe:transition-transform motion-safe:duration-200 hover:-translate-y-1.5 hover:-rotate-1 focus-visible:-translate-y-1.5"
+      className="group flex h-full flex-col items-center justify-end outline-none motion-safe:transition-transform motion-safe:duration-200 hover:-translate-y-1.5 hover:-rotate-1 focus-visible:-translate-y-1.5"
     >
       <CrtTv
+        design={design}
         className="w-full transition-[filter] duration-200 group-hover:drop-shadow-[0_0_18px_rgba(218,31,82,0.6)] group-focus-visible:drop-shadow-[0_0_18px_rgba(254,249,96,0.75)]"
         screenClassName="aspect-[4/3]"
-        scanlineGap={2 + (channel % 4)}
-        roll={(channel * 5) % 7 < 3}
-        rollDuration={6 + ((channel * 1.7) % 5)}
-        rollDelay={-((channel * 2.3) % 6)}
       >
-        {cover ? (
+        {appearance?.cover ? (
           <img
-            src={cover}
+            src={appearance.cover}
             alt=""
             decoding="async"
             loading="lazy"

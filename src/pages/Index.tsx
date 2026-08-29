@@ -7,6 +7,7 @@ import { CrtTv } from '@/components/CrtTv';
 import { NsiteViewer } from '@/components/NsiteViewer';
 import { WhiteNoise } from '@/components/WhiteNoise';
 import { useNsites } from '@/hooks/useNsites';
+import { getTvDesign } from '@/lib/tvDesign';
 
 /** Decorative star field scattered around the channel wall. */
 const STARS: Array<{ top: string; left: string; color: string; delay: string; size: string }> = [
@@ -60,14 +61,11 @@ const Index = () => {
         <div className="grid grid-cols-2 gap-x-6 gap-y-10 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
           {isLoading &&
             Array.from({ length: 10 }).map((_, i) => (
-              <div key={i} className="flex flex-col items-center">
+              <div key={i} className="flex h-full flex-col items-center justify-end">
                 <CrtTv
+                  design={getTvDesign(`tuning-${i}`)}
                   className="w-full"
                   screenClassName="aspect-[4/3]"
-                  scanlineGap={2 + (i % 4)}
-                  roll={(i * 5) % 7 < 3}
-                  rollDuration={6 + ((i * 1.7) % 5)}
-                  rollDelay={-((i * 2.3) % 6)}
                 >
                   <WhiteNoise className="absolute inset-0" />
                 </CrtTv>
@@ -87,7 +85,7 @@ const Index = () => {
 
         {empty && (
           <div className="mx-auto max-w-xs">
-            <CrtTv screenClassName="aspect-[4/3]">
+            <CrtTv design={getTvDesign('no-signal')} screenClassName="aspect-[4/3]">
               <WhiteNoise className="absolute inset-0 opacity-60" />
               <span className="crt-osd absolute inset-0 flex items-center justify-center font-crt text-3xl uppercase tracking-widest text-[#7CFC9B]">
                 No signal

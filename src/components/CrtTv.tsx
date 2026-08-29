@@ -12,6 +12,11 @@ interface CrtTvProps {
   className?: string;
   /** Extra classes for the screen area (e.g. an aspect ratio). */
   screenClassName?: string;
+  /**
+   * Picture to throw as light onto the wall behind the set. Pass whatever is
+   * playing on the screen; without it the set glows its own phosphor color.
+   */
+  glowSrc?: string;
 }
 
 const SHELL_SHADOW = 'shadow-[0_10px_30px_rgba(0,0,0,0.55)]';
@@ -20,7 +25,7 @@ const SHELL_SHADOW = 'shadow-[0_10px_30px_rgba(0,0,0,0.55)]';
  * A little television set, assembled from its design: an antenna (or not), a
  * molded shell in the site's colors, and a curved tube behind glass.
  */
-export function CrtTv({ design, children, className, screenClassName }: CrtTvProps) {
+export function CrtTv({ design, children, className, screenClassName, glowSrc }: CrtTvProps) {
   const { palette } = design;
 
   const shellStyle: CSSProperties = {
@@ -34,13 +39,40 @@ export function CrtTv({ design, children, className, screenClassName }: CrtTvPro
   );
 
   return (
-    <div className={cn('relative', className)}>
-      <TvAntenna design={design} className="mx-auto w-1/2 translate-y-[3px]" />
+    <div
+      className={cn('relative isolate', className)}
+      style={{
+        '--flicker-duration': `${design.flickerDuration}s`,
+        '--flicker-delay': `${design.flickerDelay}s`,
+      } as CSSProperties}
+    >
+      {/*
+        Light off the tube, landing on the wall behind the set. It sits in its
+        own layer at z-0 with the television at z-10: the bodies paint in normal
+        flow, so without the explicit order this positioned layer would cover
+        them. A negative z-index would fall behind the page background instead.
+      */}
+      <div aria-hidden="true" className="pointer-events-none absolute inset-0 z-0">
+        {glowSrc ? (
+          <img
+            src={glowSrc}
+            alt=""
+            decoding="async"
+            className="crt-bloom h-full w-full scale-110 object-cover opacity-50 blur-2xl saturate-[1.6]"
+          />
+        ) : (
+          <div className="crt-bloom h-full w-full scale-105 bg-[radial-gradient(ellipse_at_center,rgba(196,228,255,0.5),transparent_68%)] opacity-50 blur-xl" />
+        )}
+      </div>
 
-      {design.body === 'classic' && <ClassicBody design={design} shellStyle={shellStyle} screen={screen} />}
-      {design.body === 'console' && <ConsoleBody design={design} shellStyle={shellStyle} screen={screen} />}
-      {design.body === 'portable' && <PortableBody design={design} shellStyle={shellStyle} screen={screen} />}
-      {design.body === 'slab' && <SlabBody design={design} shellStyle={shellStyle} screen={screen} />}
+      <div className="relative z-10">
+        <TvAntenna design={design} className="mx-auto w-1/2 translate-y-[3px]" />
+
+        {design.body === 'classic' && <ClassicBody design={design} shellStyle={shellStyle} screen={screen} />}
+        {design.body === 'console' && <ConsoleBody design={design} shellStyle={shellStyle} screen={screen} />}
+        {design.body === 'portable' && <PortableBody design={design} shellStyle={shellStyle} screen={screen} />}
+        {design.body === 'slab' && <SlabBody design={design} shellStyle={shellStyle} screen={screen} />}
+      </div>
     </div>
   );
 }
@@ -200,6 +232,7 @@ function Screen({ design, className, children }: ScreenProps) {
           } as CSSProperties}
         />
       )}
+      <div className="crt-flicker-veil pointer-events-none absolute inset-0" />
       <div className="crt-vignette pointer-events-none absolute inset-0" />
       <div className="crt-glare pointer-events-none absolute inset-0" />
     </div>

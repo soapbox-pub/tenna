@@ -261,6 +261,68 @@
   }
 }
 
+/*
+ * A tube's brightness never sits perfectly still — mains ripple and phosphor
+ * decay keep it wandering by a percent or two. The amplitude here is tiny on
+ * purpose: this should register as the set being alive, not as a fault.
+ *
+ * Timing comes from --flicker-duration / --flicker-delay, inherited from the
+ * television, so a screen and the light it throws breathe together. The
+ * variables are read with fallbacks rather than declared, since declaring them
+ * here would shadow the inherited values.
+ */
+.crt-flicker-veil {
+  background: #fff;
+  animation: crt-flicker var(--flicker-duration, 4s) linear var(--flicker-delay, 0s) infinite;
+}
+
+@keyframes crt-flicker {
+  0% { opacity: 0.02; }
+  9% { opacity: 0.048; }
+  17% { opacity: 0.014; }
+  26% { opacity: 0.038; }
+  34% { opacity: 0.022; }
+  43% { opacity: 0.055; }
+  51% { opacity: 0.018; }
+  62% { opacity: 0.032; }
+  70% { opacity: 0.012; }
+  79% { opacity: 0.044; }
+  88% { opacity: 0.021; }
+  100% { opacity: 0.02; }
+}
+
+/* Light thrown off the screen onto the wall behind the set. */
+.crt-bloom {
+  animation: crt-bloom var(--flicker-duration, 4s) linear var(--flicker-delay, 0s) infinite;
+}
+
+@keyframes crt-bloom {
+  0% { opacity: 0.42; }
+  9% { opacity: 0.6; }
+  17% { opacity: 0.36; }
+  26% { opacity: 0.54; }
+  34% { opacity: 0.44; }
+  43% { opacity: 0.64; }
+  51% { opacity: 0.4; }
+  62% { opacity: 0.5; }
+  70% { opacity: 0.34; }
+  79% { opacity: 0.58; }
+  88% { opacity: 0.43; }
+  100% { opacity: 0.42; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .crt-flicker-veil {
+    animation: none;
+    opacity: 0.025;
+  }
+
+  .crt-bloom {
+    animation: none;
+    opacity: 0.46;
+  }
+}
+
 /* Tone curve for pictures shown on a tube. */
 .crt-filter {
   filter: contrast(1.08) saturate(1.15) brightness(0.92);

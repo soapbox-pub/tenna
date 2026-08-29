@@ -47,6 +47,10 @@ export interface TvDesign {
   rollDuration: number;
   /** Hum-bar phase offset in seconds — negative desyncs the wall. */
   rollDelay: number;
+  /** Brightness-flicker period in seconds. */
+  flickerDuration: number;
+  /** Flicker phase offset in seconds — negative desyncs the wall. */
+  flickerDelay: number;
 }
 
 /** Shell colors without the accents, as stored in the house presets. */
@@ -163,6 +167,9 @@ export function getTvDesign(slot: number): TvDesign {
   const rollDuration = 6 + unit(id, 'roll-duration') * 5;
   const rollDelay = -(unit(id, 'roll-delay') * 6);
 
+  const flickerDuration = 3 + unit(id, 'flicker-duration') * 3;
+  const flickerDelay = -(unit(id, 'flicker-delay') * 6);
+
   return {
     body,
     antenna,
@@ -173,5 +180,7 @@ export function getTvDesign(slot: number): TvDesign {
     roll,
     rollDuration,
     rollDelay,
+    flickerDuration,
+    flickerDelay,
   };
 }

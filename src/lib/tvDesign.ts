@@ -1,12 +1,14 @@
 /**
  * Every nsite gets its own television, assembled from a body style, an antenna
- * style, and a color palette. The assembly is deterministic: the same site
- * always produces the same set, so the wall is stable across reloads and
- * channel numbers stay recognizable by silhouette.
+ * style, and a color palette. The assembly is a pure function of the site's
+ * identity: the same site produces the same set on every load, fully formed
+ * before any network request resolves.
  *
- * A site's own colors take priority when it declares them (meta `theme-color`
- * or a webmanifest `theme_color`); otherwise the palette is drawn from the
- * house set.
+ * The palette comes from the identity rather than from the site's own declared
+ * brand color, even though the brand color would be a nicer likeness. That
+ * color has to be fetched out of the site's document, which lands well after
+ * the set is on screen — and a television that repaints itself once you're
+ * already looking at it reads as a glitch, not as a flourish.
  */
 
 /** Cabinet shapes. */
@@ -110,79 +112,14 @@ function pick<T>(rng: () => number, options: ReadonlyArray<readonly [T, number]>
   return options[options.length - 1][0];
 }
 
-/** Format numeric components as a CSS color. */
-function hsl(h: number, s: number, l: number): string {
-  return `hsl(${Math.round(h)} ${Math.round(s)}% ${Math.round(l)}%)`;
-}
-
-interface Hsl {
-  h: number;
-  s: number;
-  l: number;
-}
-
-/**
- * Parse a strict `#rgb` / `#rrggbb` color into HSL components.
- *
- * Colors here come from untrusted site documents and end up in CSS, so nothing
- * is passed through verbatim: the input must match the hex pattern exactly, and
- * what comes back out is rebuilt from numbers.
- */
-function parseHexToHsl(value: string): Hsl | null {
-  const match = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(value.trim());
-  if (!match) return null;
-
-  const digits = match[1];
-  const hex = digits.length === 3 ? [...digits].map((d) => d + d).join('') : digits;
-  const r = parseInt(hex.slice(0, 2), 16) / 255;
-  const g = parseInt(hex.slice(2, 4), 16) / 255;
-  const b = parseInt(hex.slice(4, 6), 16) / 255;
-
-  const max = Math.max(r, g, b);
-  const min = Math.min(r, g, b);
-  const l = (max + min) / 2;
-  const delta = max - min;
-
-  if (delta === 0) return { h: 0, s: 0, l: l * 100 };
-
-  const s = delta / (1 - Math.abs(2 * l - 1));
-  let h: number;
-  if (max === r) h = ((g - b) / delta) % 6;
-  else if (max === g) h = (b - r) / delta + 2;
-  else h = (r - g) / delta + 4;
-  h = (h * 60 + 360) % 360;
-
-  return { h, s: s * 100, l: l * 100 };
-}
-
-/**
- * Build a molded-plastic shell around a site's own hue.
- *
- * Lightness is discarded and saturation is clamped: a site's brand color is a
- * hue suggestion, not a paint job, and the shell has to stay a shell — a pure
- * black `theme_color` should not produce a black television.
- */
-function shellFromColor({ h, s }: Hsl): ShellColors {
-  const sat = Math.min(Math.max(s, 16), 68);
-  return {
-    shellLight: hsl(h, sat * 0.7, 88),
-    shellMid: hsl(h, sat, 68),
-    shellDark: hsl(h, sat * 0.85, 38),
-    trim: hsl(h, Math.min(sat, 22), 16),
-  };
-}
-
 /**
  * Assemble the television for a site.
  *
  * `identity` should be something stable and unique per site — its NIP-5A
- * subdomain. `themeColor` is the site's declared brand color, if it has one;
- * anything that isn't a plain hex color is ignored.
- *
- * The random stream is consumed in a fixed order and the theme color is applied
- * last, so a set doesn't rearrange itself when its colors arrive late.
+ * subdomain. Everything the set needs is in that string, so a tile can draw its
+ * final television the moment the channel lineup arrives.
  */
-export function getTvDesign(identity: string, themeColor?: string | null): TvDesign {
+export function getTvDesign(identity: string): TvDesign {
   const rng = mulberry32(hashString(identity));
 
   const body = pick(rng, [
@@ -205,7 +142,7 @@ export function getTvDesign(identity: string, themeColor?: string | null): TvDes
   // scarce, and scarcer on two rods than on one.
   const antennaBalls = rng() < (antenna === 'pair' ? 0.07 : 0.18);
 
-  const preset = pick(rng, PRESET_SHELLS);
+  const shell = pick(rng, PRESET_SHELLS);
 
   const first = ACCENTS[Math.floor(rng() * ACCENTS.length)];
   const rest = ACCENTS.filter((color) => color !== first);
@@ -215,9 +152,6 @@ export function getTvDesign(identity: string, themeColor?: string | null): TvDes
   const roll = rng() < 0.4;
   const rollDuration = 6 + rng() * 5;
   const rollDelay = -(rng() * 6);
-
-  const declared = themeColor ? parseHexToHsl(themeColor) : null;
-  const shell = declared ? shellFromColor(declared) : preset;
 
   return {
     body,

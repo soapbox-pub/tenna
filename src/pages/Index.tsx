@@ -62,9 +62,13 @@ const Index = () => {
           {isLoading &&
             Array.from({ length: 10 }).map((_, i) => (
               <div key={i} className="flex h-full flex-col items-center justify-end">
+                {/*
+                  Dimmed and drained of color, so an empty slot reads as a slot
+                  waiting for a channel rather than as somebody's television.
+                */}
                 <CrtTv
                   design={getTvDesign(`tuning-${i}`)}
-                  className="w-full"
+                  className="w-full opacity-40 grayscale"
                   screenClassName="aspect-[4/3]"
                 >
                   <WhiteNoise className="absolute inset-0" />

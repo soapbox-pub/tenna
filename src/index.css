@@ -364,10 +364,6 @@
   to { opacity: 0; }
 }
 
-@keyframes blink {
-  50% { opacity: 0; }
-}
-
 @keyframes twinkle {
   0%, 100% { opacity: 0.9; transform: scale(1); }
   50% { opacity: 0.25; transform: scale(0.8); }

@@ -53,11 +53,6 @@ const Index = () => {
       ))}
 
       <div className="relative mx-auto max-w-6xl px-6 pb-24 pt-10 sm:pt-14">
-        <p className="crt-osd mb-10 text-center font-crt text-2xl uppercase tracking-widest text-[#7CFC9B]">
-          Select a channel
-          <span className="motion-safe:animate-[blink_1.2s_steps(2)_infinite]">▮</span>
-        </p>
-
         <div className="grid grid-cols-2 gap-x-6 gap-y-10 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
           {isLoading &&
             Array.from({ length: 10 }).map((_, i) => (

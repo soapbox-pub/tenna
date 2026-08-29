@@ -52,8 +52,8 @@ const Index = () => {
         </span>
       ))}
 
-      <div className="relative mx-auto max-w-6xl px-6 pb-24 pt-10 sm:pt-14">
-        <div className="grid grid-cols-2 gap-x-6 gap-y-10 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+      <div className="relative mx-auto max-w-3xl px-6 pb-24 pt-10 sm:pt-14">
+        <div className="grid grid-cols-2 gap-x-6 gap-y-10 sm:grid-cols-3 lg:grid-cols-4">
           {isLoading &&
             Array.from({ length: 10 }).map((_, i) => (
               <div key={i} className="flex h-full flex-col items-center justify-end">

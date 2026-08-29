@@ -34,7 +34,6 @@ export function ChannelTile({ event, channel, onSelect }: ChannelTileProps) {
         design={design}
         className="w-full transition-[filter] duration-200 group-hover:drop-shadow-[0_0_18px_rgba(218,31,82,0.6)] group-focus-visible:drop-shadow-[0_0_18px_rgba(254,249,96,0.75)]"
         screenClassName="aspect-[4/3]"
-        glowSrc={cover ?? undefined}
       >
         {cover ? (
           <img

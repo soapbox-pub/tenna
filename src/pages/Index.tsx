@@ -65,6 +65,7 @@ const Index = () => {
                   className="w-full"
                   screenClassName="aspect-[4/3]"
                   scanlineGap={2 + (i % 4)}
+                  roll={(i * 5) % 7 < 3}
                   rollDuration={6 + ((i * 1.7) % 5)}
                   rollDelay={-((i * 2.3) % 6)}
                 >

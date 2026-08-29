@@ -10,6 +10,12 @@ interface CrtTvProps {
   screenClassName?: string;
   /** Scanline pitch in px — vary it per set so the wall doesn't repeat. */
   scanlineGap?: number;
+  /**
+   * Whether this set has a rolling hum bar. Only some sets on a wall should —
+   * a bad tube here and there reads as interference; every set rolling reads
+   * as a screensaver.
+   */
+  roll?: boolean;
   /** Rolling hum-bar sweep period in seconds — vary it per set. */
   rollDuration?: number;
   /** Rolling hum-bar phase offset in seconds (negative desyncs the wall). */
@@ -25,6 +31,7 @@ export function CrtTv({
   className,
   screenClassName,
   scanlineGap = 3,
+  roll = false,
   rollDuration = 8,
   rollDelay = 0,
 }: CrtTvProps) {
@@ -57,13 +64,15 @@ export function CrtTv({
             className="crt-scanlines pointer-events-none absolute inset-0 opacity-40"
             style={{ '--scanline-gap': `${scanlineGap}px` } as CSSProperties}
           />
-          <div
-            className="crt-rollbar pointer-events-none absolute inset-0"
-            style={{
-              '--roll-duration': `${rollDuration}s`,
-              '--roll-delay': `${rollDelay}s`,
-            } as CSSProperties}
-          />
+          {roll && (
+            <div
+              className="crt-rollbar pointer-events-none absolute inset-0"
+              style={{
+                '--roll-duration': `${rollDuration}s`,
+                '--roll-delay': `${rollDelay}s`,
+              } as CSSProperties}
+            />
+          )}
           <div className="crt-vignette pointer-events-none absolute inset-0" />
           <div className="crt-glare pointer-events-none absolute inset-0" />
         </div>

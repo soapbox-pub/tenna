@@ -355,9 +355,12 @@
 
 /*
  * A single burst of tracking trouble, played once when a pointer lands on a
- * screen: the picture jumps, shears, and flares, then settles. Amplitude
- * decays across the keyframes so it reads as a set recovering its lock rather
- * than as a loop.
+ * screen: the picture snaps sideways and flares, then settles.
+ *
+ * The movement is one quick sideways knock and back, over and done inside
+ * 180ms; the flare outlasts it by a good margin, so the set reads as having
+ * been startled rather than as shaking. Horizontal only — a tube that loses
+ * its lock jumps across the line, not around the screen.
  *
  * Every displaced frame is scaled up by more than it is moved, so the shifted
  * picture still covers the glass and no black gap opens at the edge. The
@@ -366,12 +369,10 @@
  */
 @keyframes crt-glitch {
   0% { transform: none; filter: none; }
-  10% { transform: translate(-2%, 0.8%) scale(1.06) skewX(-2deg); filter: brightness(1.45) contrast(1.3) saturate(1.5); }
-  22% { transform: translate(1.8%, -0.6%) scale(1.05) skewX(1.5deg); filter: brightness(0.85) saturate(1.2); }
-  34% { transform: translate(-1.2%, 0.4%) scale(1.04) skewX(-1deg); filter: brightness(1.25); }
-  48% { transform: translate(0.8%, -0.3%) scale(1.03); filter: brightness(0.95); }
-  64% { transform: translate(-0.4%, 0.15%) scale(1.02); }
-  82% { transform: translate(0.15%, 0) scale(1.01); }
+  10% { transform: translateX(-1.2%) scale(1.03); filter: brightness(1.45) contrast(1.3) saturate(1.5); }
+  26% { transform: translateX(0.5%) scale(1.02); filter: brightness(1.2) contrast(1.22) saturate(1.35); }
+  42% { transform: none; filter: brightness(1.1) contrast(1.14) saturate(1.2); }
+  70% { transform: none; filter: brightness(1.04) contrast(1.06) saturate(1.08); }
   100% { transform: none; filter: none; }
 }
 

@@ -28,12 +28,9 @@ export function ChannelTile({ event, channel, onSelect }: ChannelTileProps) {
       type="button"
       onClick={onSelect}
       aria-label={`Channel ${ch}: ${name}`}
-      className="group block w-full outline-none motion-safe:transition-transform motion-safe:duration-200 hover:-translate-y-1.5 hover:-rotate-1 focus-visible:-translate-y-1.5"
+      className="group block w-full outline-none motion-safe:transition-transform motion-safe:duration-200 hover:scale-[1.04] focus-visible:scale-[1.04]"
     >
-      <CrtScreen
-        design={design}
-        className="w-full transition-[filter] duration-200 group-hover:drop-shadow-[0_0_18px_rgba(218,31,82,0.6)] group-focus-visible:drop-shadow-[0_0_18px_rgba(254,249,96,0.75)]"
-      >
+      <CrtScreen design={design} className="w-full">
         {cover ? (
           <img
             src={cover}
@@ -45,8 +42,12 @@ export function ChannelTile({ event, channel, onSelect }: ChannelTileProps) {
         ) : (
           <WhiteNoise className="absolute inset-0" />
         )}
-        {/* Held clear of the corner, which the tube's curve cuts away. */}
-        <span className="crt-osd absolute right-3 top-3 font-crt text-base leading-none text-[#7CFC9B] sm:text-lg">
+        {/*
+          Held clear of the corner the tube's curve cuts away. The inset is a
+          percentage because the curve is one too — a fixed inset that clears
+          the corner on a small screen sits outside the glass on a large one.
+        */}
+        <span className="crt-osd absolute right-[6%] top-[8%] font-crt text-lg leading-none text-[#7CFC9B] sm:text-xl">
           CH {ch}
         </span>
       </CrtScreen>

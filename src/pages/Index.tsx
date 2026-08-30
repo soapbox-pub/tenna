@@ -52,8 +52,12 @@ const Index = () => {
         </span>
       ))}
 
-      <div className="relative mx-auto max-w-3xl px-6 pb-24 pt-10 sm:pt-14">
-        <div className="grid grid-cols-2 gap-6 sm:grid-cols-3 lg:grid-cols-4">
+      {/*
+        Sized so three screens across land at the same size two do on a narrow
+        window: 5xl of container, less the gutters and two 14-unit gaps.
+      */}
+      <div className="relative mx-auto max-w-5xl px-6 pb-24 pt-10 sm:pt-14">
+        <div className="grid grid-cols-1 gap-12 sm:grid-cols-2 sm:gap-14 lg:grid-cols-3">
           {isLoading &&
             Array.from({ length: 10 }).map((_, i) => (
               /*
@@ -77,7 +81,7 @@ const Index = () => {
         </div>
 
         {empty && (
-          <div className="mx-auto max-w-xs">
+          <div className="mx-auto max-w-md">
             <CrtScreen design={getScreenDesign(0)}>
               <WhiteNoise className="absolute inset-0 opacity-60" />
               <span className="crt-osd absolute inset-0 flex items-center justify-center font-crt text-3xl uppercase tracking-widest text-[#7CFC9B]">

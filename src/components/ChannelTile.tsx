@@ -47,7 +47,7 @@ export function ChannelTile({ event, channel, onSelect }: ChannelTileProps) {
           percentage because the curve is one too — a fixed inset that clears
           the corner on a small screen sits outside the glass on a large one.
         */}
-        <span className="crt-osd absolute right-[6%] top-[8%] font-crt text-lg leading-none text-[#7CFC9B] sm:text-xl">
+        <span className="crt-osd absolute right-[6%] top-[8%] font-crt text-[10px] leading-none text-[#7CFC9B] sm:text-base lg:text-xl">
           CH {ch}
         </span>
       </CrtScreen>

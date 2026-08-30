@@ -222,11 +222,32 @@
  * than one: a tight contact shadow to seat the tube, and a wide, far-thrown
  * one to put it well off the page. A `filter` beats a `box-shadow` here for
  * the same reason the mask does — it follows the curve of the glass.
+ *
+ * The offsets step up with the breakpoints because they have to stay in
+ * proportion to the screen: roughly 3% of its width for the contact shadow
+ * and 9% for the throw. Desktop's numbers on a phone-sized tube read as a
+ * dark blob sitting under a thumbnail.
  */
 .crt-cast {
   filter:
-    drop-shadow(0 8px 10px rgba(0, 0, 0, 0.45))
-    drop-shadow(0 26px 34px rgba(0, 0, 0, 0.55));
+    drop-shadow(0 3px 4px rgba(0, 0, 0, 0.45))
+    drop-shadow(0 8px 11px rgba(0, 0, 0, 0.55));
+}
+
+@media (width >= 40rem) {
+  .crt-cast {
+    filter:
+      drop-shadow(0 5px 6px rgba(0, 0, 0, 0.45))
+      drop-shadow(0 16px 21px rgba(0, 0, 0, 0.55));
+  }
+}
+
+@media (width >= 64rem) {
+  .crt-cast {
+    filter:
+      drop-shadow(0 8px 10px rgba(0, 0, 0, 0.45))
+      drop-shadow(0 26px 34px rgba(0, 0, 0, 0.55));
+  }
 }
 
 .crt-scanlines {

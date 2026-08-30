@@ -53,13 +53,15 @@ const Index = () => {
       ))}
 
       {/*
-        Sized so three screens across land at the same size two do on a narrow
-        window: 5xl of container, less the gutters and two 14-unit gaps.
+        Three across at every width — the wall keeps its shape and the screens
+        take whatever room is left, from thumbnails on a phone up to 288px at
+        the widest, which is the 5xl container less its gutters and two
+        14-unit gaps.
       */}
       <div className="relative mx-auto max-w-5xl px-6 pb-24 pt-10 sm:pt-14">
-        <div className="grid grid-cols-1 gap-12 sm:grid-cols-2 sm:gap-14 lg:grid-cols-3">
+        <div className="grid grid-cols-3 gap-4 sm:gap-8 lg:gap-14">
           {isLoading &&
-            Array.from({ length: 10 }).map((_, i) => (
+            Array.from({ length: 12 }).map((_, i) => (
               /*
                 The very tube that will hold channel i + 1, since the wall
                 doesn't depend on the lineup. Nothing about the screen changes

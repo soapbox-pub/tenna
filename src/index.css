@@ -209,61 +209,30 @@
   overflow: hidden;
 }
 
-/* CRT design language: tube shape, scanlines, curvature, glare, OSD text */
-
 /*
- * The face of the tube: top and bottom edges bowed outward, sides dead
- * straight, corners rounded off — the silhouette left behind when the cabinet
- * is taken away.
+ * The shape of an app icon: a superellipse, not a rounded rectangle. Its
+ * corners have no seam where the straight edge meets the arc — the curvature
+ * comes on gradually, which is what makes a home screen icon look like one
+ * rather than like a button.
  *
- * The path is drawn in a 4:3 viewBox and stretched over the element with
- * preserveAspectRatio='none'. Every screen on the wall is 4:3, so the shape
- * lands exactly as drawn; on any other aspect it would bulge. A mask beats
- * clip-path with a fragment reference here because it carries no dependency on
- * an SVG living elsewhere in the document.
+ * The outline is sampled as a polygon rather than fitted with beziers. The
+ * flat runs need no points at all and the corners get a dozen each, so at icon
+ * sizes the segments land well under a pixel. The viewBox is square and every
+ * tile is square, so the shape lands exactly as drawn. A mask beats clip-path
+ * with a fragment reference here because it carries no dependency on an SVG
+ * living elsewhere in the document.
  */
-.crt-shape {
-  --crt-shape: url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%20400%20300'%20preserveAspectRatio='none'%3E%3Cpath%20fill='%23fff'%20d='M36,15C140,-3,260,-3,364,15C384,18.45,400,27,400,42L400,258C400,273,384,281.55,364,285C260,303,140,303,36,285C16,281.55,0,273,0,258L0,42C0,27,16,18.45,36,15Z'/%3E%3C/svg%3E");
-  -webkit-mask-image: var(--crt-shape);
-  mask-image: var(--crt-shape);
+.app-squircle {
+  --app-squircle: url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%20100%20100'%3E%3Cpath%20fill='%23fff'%20d='M100,50L99.9,69.75L99.61,76.01L99.13,80.49L98.44,84.05L97.55,87.01L96.44,89.52L95.11,91.68L93.53,93.53L91.68,95.11L89.52,96.44L87.01,97.55L84.05,98.44L80.49,99.13L76.01,99.61L69.75,99.9L50,100L30.25,99.9L23.99,99.61L19.51,99.13L15.95,98.44L12.99,97.55L10.48,96.44L8.32,95.11L6.47,93.53L4.89,91.68L3.56,89.52L2.45,87.01L1.56,84.05L0.87,80.49L0.39,76.01L0.1,69.75L0,50L0.1,30.25L0.39,23.99L0.87,19.51L1.56,15.95L2.45,12.99L3.56,10.48L4.89,8.32L6.47,6.47L8.32,4.89L10.48,3.56L12.99,2.45L15.95,1.56L19.51,0.87L23.99,0.39L30.25,0.1L50,0L69.75,0.1L76.01,0.39L80.49,0.87L84.05,1.56L87.01,2.45L89.52,3.56L91.68,4.89L93.53,6.47L95.11,8.32L96.44,10.48L97.55,12.99L98.44,15.95L99.13,19.51L99.61,23.99L99.9,30.25Z'/%3E%3C/svg%3E");
+  -webkit-mask-image: var(--app-squircle);
+  mask-image: var(--app-squircle);
   -webkit-mask-size: 100% 100%;
   mask-size: 100% 100%;
   -webkit-mask-repeat: no-repeat;
   mask-repeat: no-repeat;
 }
 
-/*
- * The shadow a screen casts on the room behind it. Two drop-shadows rather
- * than one: a tight contact shadow to seat the tube, and a wide, far-thrown
- * one to put it well off the page. A `filter` beats a `box-shadow` here for
- * the same reason the mask does — it follows the curve of the glass.
- *
- * The offsets step up with the breakpoints because they have to stay in
- * proportion to the screen: roughly 3% of its width for the contact shadow
- * and 9% for the throw. Desktop's numbers on a phone-sized tube read as a
- * dark blob sitting under a thumbnail.
- */
-.crt-cast {
-  filter:
-    drop-shadow(0 3px 4px rgba(0, 0, 0, 0.45))
-    drop-shadow(0 8px 11px rgba(0, 0, 0, 0.55));
-}
-
-@media (width >= 40rem) {
-  .crt-cast {
-    filter:
-      drop-shadow(0 5px 6px rgba(0, 0, 0, 0.45))
-      drop-shadow(0 16px 21px rgba(0, 0, 0, 0.55));
-  }
-}
-
-@media (width >= 64rem) {
-  .crt-cast {
-    filter:
-      drop-shadow(0 8px 10px rgba(0, 0, 0, 0.45))
-      drop-shadow(0 26px 34px rgba(0, 0, 0, 0.55));
-  }
-}
+/* CRT design language: scanlines, hum bar, OSD text, tube power transitions */
 
 .crt-scanlines {
   --scanline-gap: 3px;
@@ -273,16 +242,6 @@
     rgba(0, 0, 0, 0.35) 1px,
     transparent 1px,
     transparent var(--scanline-gap)
-  );
-}
-
-/* Shadow-mask RGB stripes — the pixel structure of a tube. */
-.crt-rgb {
-  background-image: repeating-linear-gradient(
-    90deg,
-    rgba(255, 0, 0, 0.07) 0px 1px,
-    rgba(0, 255, 0, 0.07) 1px 2px,
-    rgba(0, 0, 255, 0.07) 2px 3px
   );
 }
 
@@ -317,21 +276,6 @@
   animation: crt-roll var(--roll-duration) linear var(--roll-delay) infinite;
 }
 
-/*
- * Pointing at a set drives its hum bar into a fast sweep for as long as the
- * pointer stays. Only sets that have a bar answer at all, so the wall responds
- * unevenly — which is the point, and truer to a room of mistuned televisions
- * than every screen doing the same thing.
- *
- * Retiming a running animation doesn't restart it; the elapsed time is
- * remeasured against the new duration, so the band jumps to wherever it would
- * have been by now and carries on. On a hum bar that misstep reads as part of
- * the fault.
- */
-.group:hover .crt-rollbar::before {
-  animation-duration: calc(var(--roll-duration) / 6);
-}
-
 /* Band is 34% tall, so ~300% translate carries it fully off the bottom. */
 @keyframes crt-roll {
   0% { transform: translateY(-100%) skewX(-4deg); }
@@ -343,57 +287,6 @@
     animation: none;
     content: none;
   }
-}
-
-/*
- * A tube's brightness never sits perfectly still — mains ripple and phosphor
- * decay keep it wandering by a percent or two. The amplitude here is tiny on
- * purpose: this should register as the set being alive, not as a fault.
- *
- * Timing comes from --flicker-duration / --flicker-delay, inherited from the
- * television so it can vary per set. The variables are read with fallbacks
- * rather than declared, since declaring them here would shadow the inherited
- * values.
- */
-.crt-flicker-veil {
-  background: #fff;
-  animation: crt-flicker var(--flicker-duration, 4s) linear var(--flicker-delay, 0s) infinite;
-}
-
-@keyframes crt-flicker {
-  0% { opacity: 0.02; }
-  9% { opacity: 0.048; }
-  17% { opacity: 0.014; }
-  26% { opacity: 0.038; }
-  34% { opacity: 0.022; }
-  43% { opacity: 0.055; }
-  51% { opacity: 0.018; }
-  62% { opacity: 0.032; }
-  70% { opacity: 0.012; }
-  79% { opacity: 0.044; }
-  88% { opacity: 0.021; }
-  100% { opacity: 0.02; }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .crt-flicker-veil {
-    animation: none;
-    opacity: 0.025;
-  }
-}
-
-/* Tone curve for pictures shown on a tube. */
-.crt-filter {
-  filter: contrast(1.08) saturate(1.15) brightness(0.92);
-}
-
-.crt-vignette {
-  background: radial-gradient(ellipse at center, transparent 55%, rgba(0, 0, 0, 0.5) 100%);
-  box-shadow: inset 0 0 24px rgba(0, 0, 0, 0.65);
-}
-
-.crt-glare {
-  background: linear-gradient(115deg, transparent 30%, rgba(255, 255, 255, 0.09) 40%, transparent 55%);
 }
 
 /* Phosphor glow + slight chromatic fringing for on-screen-display text. */

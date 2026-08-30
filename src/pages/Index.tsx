@@ -2,14 +2,12 @@ import type { NostrEvent } from '@nostrify/nostrify';
 import { useSeoMeta } from '@unhead/react';
 import { useState } from 'react';
 
-import { ChannelTile } from '@/components/ChannelTile';
-import { CrtScreen } from '@/components/CrtScreen';
+import { AppIcon } from '@/components/AppIcon';
 import { NsiteViewer } from '@/components/NsiteViewer';
-import { WhiteNoise } from '@/components/WhiteNoise';
 import { useNsites } from '@/hooks/useNsites';
-import { getScreenDesign } from '@/lib/screenDesign';
+import { getTileGradient } from '@/lib/iconTile';
 
-/** Decorative star field scattered around the channel wall. */
+/** Decorative star field scattered behind the apps. */
 const STARS: Array<{ top: string; left: string; color: string; delay: string; size: string }> = [
   { top: '8%', left: '6%', color: '#FEF960', delay: '0s', size: 'text-xl' },
   { top: '14%', left: '88%', color: '#F96C91', delay: '0.7s', size: 'text-sm' },
@@ -24,7 +22,7 @@ const STARS: Array<{ top: string; left: string; color: string; delay: string; si
 const Index = () => {
   useSeoMeta({
     title: 'Tenna',
-    description: 'Pick a channel. Tenna is an nsite browser — your entrypoint to Nostr.',
+    description: 'Pick an app. Tenna is an nsite browser — your entrypoint to Nostr.',
   });
 
   const { data: nsites, isLoading } = useNsites();
@@ -34,13 +32,12 @@ const Index = () => {
 
   return (
     <main className="relative min-h-screen overflow-hidden bg-[#150609] text-white">
-      {/* Stage glow */}
+      {/* Wallpaper */}
       <div
         aria-hidden="true"
-        className="pointer-events-none absolute inset-x-0 top-0 h-96 bg-[radial-gradient(ellipse_at_top,rgba(250,43,56,0.22),transparent_70%)]"
+        className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_top,rgba(250,43,56,0.28),transparent_60%),radial-gradient(ellipse_at_bottom_left,rgba(172,210,222,0.16),transparent_55%)]"
       />
 
-      {/* Stars */}
       {STARS.map((star, i) => (
         <span
           key={i}
@@ -53,52 +50,42 @@ const Index = () => {
       ))}
 
       {/*
-        Three across at every width — the wall keeps its shape and the screens
-        take whatever room is left, from thumbnails on a phone up to 288px at
-        the widest, which is the 5xl container less its gutters and two
-        14-unit gaps.
+        Four across on a phone, the way a home screen is, widening to six on a
+        large display rather than blowing the icons up to fill it. The
+        container stops well short of the viewport for the same reason: past a
+        certain size a grid of app icons stops reading as a home screen and
+        starts reading as a poster.
       */}
-      <div className="relative mx-auto max-w-5xl px-6 pb-24 pt-10 sm:pt-14">
-        <div className="grid grid-cols-3 gap-4 sm:gap-8 lg:gap-14">
+      <div className="relative mx-auto max-w-2xl px-5 pb-20 pt-10 sm:px-8 sm:pt-16">
+        <div className="grid grid-cols-4 gap-x-4 gap-y-7 sm:grid-cols-5 sm:gap-x-6 sm:gap-y-9 lg:grid-cols-6">
           {isLoading &&
             Array.from({ length: 12 }).map((_, i) => (
-              /*
-                The very tube that will hold channel i + 1, since the wall
-                doesn't depend on the lineup. Nothing about the screen changes
-                when the channel arrives — only what's playing on it.
-              */
-              <CrtScreen key={i} design={getScreenDesign(i + 1)} className="w-full">
-                <WhiteNoise className="absolute inset-0" />
-              </CrtScreen>
+              <div key={i} className="flex w-full flex-col items-center gap-2">
+                <div
+                  className="app-squircle aspect-square w-full opacity-40 motion-safe:animate-pulse"
+                  style={{ background: getTileGradient(`slot-${i}`) }}
+                />
+                <div className="h-3 w-3/4 rounded-full bg-white/15 motion-safe:animate-pulse" />
+              </div>
             ))}
 
           {nsites?.map((event, i) => (
-            <ChannelTile
+            <AppIcon
               key={event.id}
               event={event}
-              channel={i + 1}
               onSelect={() => setActive({ event, channel: i + 1 })}
             />
           ))}
         </div>
 
         {empty && (
-          <div className="mx-auto max-w-md">
-            <CrtScreen design={getScreenDesign(0)}>
-              <WhiteNoise className="absolute inset-0 opacity-60" />
-              <span className="crt-osd absolute inset-0 flex items-center justify-center font-crt text-3xl uppercase tracking-widest text-[#7CFC9B]">
-                No signal
-              </span>
-            </CrtScreen>
+          <div className="mx-auto max-w-md rounded-xl border border-dashed border-white/20 px-8 py-12 text-center">
+            <p className="mx-auto max-w-sm text-white/70">
+              No apps here yet. Check your relay connection, or give it a moment to load.
+            </p>
           </div>
         )}
       </div>
-
-      {/* Checkerboard trim */}
-      <div
-        aria-hidden="true"
-        className="pointer-events-none absolute inset-x-0 bottom-0 h-6 opacity-25 [background:repeating-conic-gradient(#fff_0%_25%,#000_0%_50%)_0_0/24px_24px]"
-      />
 
       {active && (
         <NsiteViewer

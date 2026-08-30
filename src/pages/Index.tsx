@@ -3,11 +3,11 @@ import { useSeoMeta } from '@unhead/react';
 import { useState } from 'react';
 
 import { ChannelTile } from '@/components/ChannelTile';
-import { CrtTv } from '@/components/CrtTv';
+import { CrtScreen } from '@/components/CrtScreen';
 import { NsiteViewer } from '@/components/NsiteViewer';
 import { WhiteNoise } from '@/components/WhiteNoise';
 import { useNsites } from '@/hooks/useNsites';
-import { getTvDesign } from '@/lib/tvDesign';
+import { getScreenDesign } from '@/lib/screenDesign';
 
 /** Decorative star field scattered around the channel wall. */
 const STARS: Array<{ top: string; left: string; color: string; delay: string; size: string }> = [
@@ -53,23 +53,17 @@ const Index = () => {
       ))}
 
       <div className="relative mx-auto max-w-3xl px-6 pb-24 pt-10 sm:pt-14">
-        <div className="grid grid-cols-2 gap-x-6 gap-y-10 sm:grid-cols-3 lg:grid-cols-4">
+        <div className="grid grid-cols-2 gap-6 sm:grid-cols-3 lg:grid-cols-4">
           {isLoading &&
             Array.from({ length: 10 }).map((_, i) => (
-              <div key={i} className="flex h-full flex-col items-center justify-end">
-                {/*
-                  The very set that will hold channel i + 1, since the wall
-                  doesn't depend on the lineup. Nothing about the television
-                  changes when the channel arrives — only what's on its screen.
-                */}
-                <CrtTv
-                  design={getTvDesign(i + 1)}
-                  className="w-full"
-                  screenClassName="aspect-[4/3]"
-                >
-                  <WhiteNoise className="absolute inset-0" />
-                </CrtTv>
-              </div>
+              /*
+                The very tube that will hold channel i + 1, since the wall
+                doesn't depend on the lineup. Nothing about the screen changes
+                when the channel arrives — only what's playing on it.
+              */
+              <CrtScreen key={i} design={getScreenDesign(i + 1)} className="w-full">
+                <WhiteNoise className="absolute inset-0" />
+              </CrtScreen>
             ))}
 
           {nsites?.map((event, i) => (
@@ -84,12 +78,12 @@ const Index = () => {
 
         {empty && (
           <div className="mx-auto max-w-xs">
-            <CrtTv design={getTvDesign(0)} screenClassName="aspect-[4/3]">
+            <CrtScreen design={getScreenDesign(0)}>
               <WhiteNoise className="absolute inset-0 opacity-60" />
               <span className="crt-osd absolute inset-0 flex items-center justify-center font-crt text-3xl uppercase tracking-widest text-[#7CFC9B]">
                 No signal
               </span>
-            </CrtTv>
+            </CrtScreen>
           </div>
         )}
       </div>

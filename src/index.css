@@ -194,7 +194,28 @@
   }
 }
 
-/* CRT design language: scanlines, curvature, glare, OSD text */
+/* CRT design language: tube shape, scanlines, curvature, glare, OSD text */
+
+/*
+ * The face of the tube: top and bottom edges bowed outward, sides dead
+ * straight, corners rounded off — the silhouette left behind when the cabinet
+ * is taken away.
+ *
+ * The path is drawn in a 4:3 viewBox and stretched over the element with
+ * preserveAspectRatio='none'. Every screen on the wall is 4:3, so the shape
+ * lands exactly as drawn; on any other aspect it would bulge. A mask beats
+ * clip-path with a fragment reference here because it carries no dependency on
+ * an SVG living elsewhere in the document.
+ */
+.crt-shape {
+  --crt-shape: url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%20400%20300'%20preserveAspectRatio='none'%3E%3Cpath%20fill='%23fff'%20d='M36,15C140,-3,260,-3,364,15C384,18.45,400,27,400,42L400,258C400,273,384,281.55,364,285C260,303,140,303,36,285C16,281.55,0,273,0,258L0,42C0,27,16,18.45,36,15Z'/%3E%3C/svg%3E");
+  -webkit-mask-image: var(--crt-shape);
+  mask-image: var(--crt-shape);
+  -webkit-mask-size: 100% 100%;
+  mask-size: 100% 100%;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+}
 
 .crt-scanlines {
   --scanline-gap: 3px;

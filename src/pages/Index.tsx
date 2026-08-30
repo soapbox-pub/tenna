@@ -2,10 +2,9 @@ import type { NostrEvent } from '@nostrify/nostrify';
 import { useSeoMeta } from '@unhead/react';
 import { useState } from 'react';
 
-import { AppIcon } from '@/components/AppIcon';
+import { AppIcon, AppIconSkeleton } from '@/components/AppIcon';
 import { NsiteViewer } from '@/components/NsiteViewer';
 import { useNsites } from '@/hooks/useNsites';
-import { getTileGradient } from '@/lib/iconTile';
 
 /** Decorative star field scattered behind the apps. */
 const STARS: Array<{ top: string; left: string; color: string; delay: string; size: string }> = [
@@ -59,15 +58,7 @@ const Index = () => {
       <div className="relative mx-auto max-w-2xl px-5 pb-20 pt-10 sm:px-8 sm:pt-16">
         <div className="grid grid-cols-4 gap-x-4 gap-y-7 sm:grid-cols-5 sm:gap-x-6 sm:gap-y-9 lg:grid-cols-6">
           {isLoading &&
-            Array.from({ length: 6 }).map((_, i) => (
-              <div key={i} className="flex w-full flex-col items-center gap-2">
-                <div
-                  className="app-squircle aspect-square w-full opacity-40 motion-safe:animate-pulse"
-                  style={{ background: getTileGradient(`slot-${i}`) }}
-                />
-                <div className="h-3 w-3/4 rounded-full bg-white/15 motion-safe:animate-pulse" />
-              </div>
-            ))}
+            Array.from({ length: 6 }).map((_, i) => <AppIconSkeleton key={i} />)}
 
           {nsites?.map((event, i) => (
             <AppIcon

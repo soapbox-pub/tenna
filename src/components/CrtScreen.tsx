@@ -35,32 +35,24 @@ export function CrtScreen({ design, children, className }: CrtScreenProps) {
     >
       <div className="absolute inset-0 motion-safe:transition-[filter] motion-safe:duration-200 group-focus-visible:drop-shadow-[0_0_18px_rgba(254,249,96,0.8)]">
         <div className="crt-shape absolute inset-0 overflow-hidden bg-black">
-          {/*
-            The picture, which a `.group` ancestor knocks out of alignment for
-            a moment when the pointer arrives. Only the picture moves — the
-            mask is on the element above, so the tube holds still and the
-            disturbance is clipped at the glass, the way a real one would be.
-          */}
-          <div className="absolute inset-0 motion-safe:group-hover:animate-[crt-glitch_420ms_linear_1]">
-            {children}
-            <div className="crt-rgb pointer-events-none absolute inset-0" />
+          {children}
+          <div className="crt-rgb pointer-events-none absolute inset-0" />
+          <div
+            className="crt-scanlines pointer-events-none absolute inset-0 opacity-40"
+            style={{ '--scanline-gap': `${design.scanlineGap}px` } as CSSProperties}
+          />
+          {design.roll && (
             <div
-              className="crt-scanlines pointer-events-none absolute inset-0 opacity-40"
-              style={{ '--scanline-gap': `${design.scanlineGap}px` } as CSSProperties}
+              className="crt-rollbar pointer-events-none absolute inset-0"
+              style={{
+                '--roll-duration': `${design.rollDuration}s`,
+                '--roll-delay': `${design.rollDelay}s`,
+              } as CSSProperties}
             />
-            {design.roll && (
-              <div
-                className="crt-rollbar pointer-events-none absolute inset-0"
-                style={{
-                  '--roll-duration': `${design.rollDuration}s`,
-                  '--roll-delay': `${design.rollDelay}s`,
-                } as CSSProperties}
-              />
-            )}
-            <div className="crt-flicker-veil pointer-events-none absolute inset-0" />
-            <div className="crt-vignette pointer-events-none absolute inset-0" />
-            <div className="crt-glare pointer-events-none absolute inset-0" />
-          </div>
+          )}
+          <div className="crt-flicker-veil pointer-events-none absolute inset-0" />
+          <div className="crt-vignette pointer-events-none absolute inset-0" />
+          <div className="crt-glare pointer-events-none absolute inset-0" />
         </div>
       </div>
     </div>

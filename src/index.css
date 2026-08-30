@@ -317,6 +317,21 @@
   animation: crt-roll var(--roll-duration) linear var(--roll-delay) infinite;
 }
 
+/*
+ * Pointing at a set drives its hum bar into a fast sweep for as long as the
+ * pointer stays. Only sets that have a bar answer at all, so the wall responds
+ * unevenly — which is the point, and truer to a room of mistuned televisions
+ * than every screen doing the same thing.
+ *
+ * Retiming a running animation doesn't restart it; the elapsed time is
+ * remeasured against the new duration, so the band jumps to wherever it would
+ * have been by now and carries on. On a hum bar that misstep reads as part of
+ * the fault.
+ */
+.group:hover .crt-rollbar::before {
+  animation-duration: calc(var(--roll-duration) / 6);
+}
+
 /* Band is 34% tall, so ~300% translate carries it fully off the bottom. */
 @keyframes crt-roll {
   0% { transform: translateY(-100%) skewX(-4deg); }
@@ -387,29 +402,6 @@
     0 0 6px currentColor,
     1px 0 0 rgba(255, 0, 0, 0.35),
     -1px 0 0 rgba(0, 255, 255, 0.35);
-}
-
-/*
- * A single burst of tracking trouble, played once when a pointer lands on a
- * screen: the picture snaps sideways and flares, then settles.
- *
- * The movement is one quick sideways knock and back, over and done inside
- * 180ms; the flare outlasts it by a good margin, so the set reads as having
- * been startled rather than as shaking. Horizontal only — a tube that loses
- * its lock jumps across the line, not around the screen.
- *
- * Every displaced frame is scaled up by more than it is moved, so the shifted
- * picture still covers the glass and no black gap opens at the edge. The
- * animation runs on the picture inside the tube, never on the masked element
- * itself — transforming that would slide the whole tube around instead.
- */
-@keyframes crt-glitch {
-  0% { transform: none; filter: none; }
-  10% { transform: translateX(-1.2%) scale(1.03); filter: brightness(1.45) contrast(1.3) saturate(1.5); }
-  26% { transform: translateX(0.5%) scale(1.02); filter: brightness(1.2) contrast(1.22) saturate(1.35); }
-  42% { transform: none; filter: brightness(1.1) contrast(1.14) saturate(1.2); }
-  70% { transform: none; filter: brightness(1.04) contrast(1.06) saturate(1.08); }
-  100% { transform: none; filter: none; }
 }
 
 /* Tube power transitions */

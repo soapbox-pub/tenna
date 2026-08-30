@@ -2,7 +2,7 @@ import type { NostrEvent } from '@nostrify/nostrify';
 import type { ReactNode } from 'react';
 
 import { WhiteNoise } from '@/components/WhiteNoise';
-import { useNsiteIcon } from '@/hooks/useNsiteIcon';
+import { useNsiteApp } from '@/hooks/useNsiteApp';
 import { getTileGradient, getTileInitial } from '@/lib/iconTile';
 import { cn } from '@/lib/utils';
 
@@ -74,8 +74,10 @@ export function AppIconSkeleton() {
  * second squircle sitting a few pixels proud behind it.
  */
 export function AppIcon({ event, onSelect }: AppIconProps) {
-  const name = event.tags.find(([n]) => n === 'd')?.[1] ?? '???';
-  const { data: icon, isPending } = useNsiteIcon(event);
+  const { data: app, isPending } = useNsiteApp(event);
+
+  // The nsite's own name until the site says what it calls itself.
+  const name = app?.label ?? event.tags.find(([n]) => n === 'd')?.[1] ?? '???';
 
   return (
     <button
@@ -94,16 +96,16 @@ export function AppIcon({ event, onSelect }: AppIconProps) {
             <WhiteNoise className="absolute inset-0 opacity-90" />
           </TileFace>
         ) : (
-          <TileFace background={icon?.background ?? getTileGradient(name)}>
-            {icon ? (
+          <TileFace background={app?.background ?? getTileGradient(name)}>
+            {app?.iconUrl ? (
               <img
-                src={icon.url}
+                src={app.iconUrl}
                 alt=""
                 decoding="async"
                 loading="lazy"
                 className={cn(
                   'absolute',
-                  icon.fit === 'cover'
+                  app.fit === 'cover'
                     ? 'inset-0 h-full w-full object-cover'
                     : 'inset-[18%] h-[64%] w-[64%] object-contain drop-shadow-[0_1px_2px_rgba(0,0,0,0.35)]',
                 )}

@@ -7,13 +7,17 @@ import { getMimeType } from '@/lib/sandbox';
 /** How the artwork wants to sit in its tile. */
 export type IconFit = 'cover' | 'contain';
 
-export interface NsiteIcon {
-  /** Blob URL for a file shipped with the site, or an https URL it points at. */
-  url: string;
+export interface NsiteApp {
+  /** What the site calls itself on a home screen, if it says. */
+  label: string | null;
+  /** Blob URL for an icon shipped with the site, or an https URL it points at. */
+  iconUrl: string | null;
   fit: IconFit;
   /** Tile color the site declares for itself, if any. Hex only. */
   background: string | null;
 }
+
+const NOTHING: NsiteApp = { label: null, iconUrl: null, fit: 'cover', background: null };
 
 /**
  * Where an icon came from, ranked. A site can declare the same picture several
@@ -177,6 +181,44 @@ const CONVENTIONAL: Array<[path: string, score: number, fit: IconFit]> = [
   ['/favicon.ico', RANK.favicon + 0.5, 'contain'],
 ];
 
+/** Collapse whitespace and refuse anything too long to sit under an icon. */
+function tidyLabel(value: unknown, limit: number): string | null {
+  if (typeof value !== 'string') return null;
+  const text = value.replace(/\s+/g, ' ').trim();
+  return text && text.length <= limit ? text : null;
+}
+
+/**
+ * What the site calls itself on a home screen, asked for in the order a phone
+ * asks.
+ *
+ * `short_name` is the field that exists for precisely this: the name a PWA
+ * wants under its icon, where there is room for a word or two and no more.
+ * iOS lets `apple-mobile-web-app-title` override it, so that goes first.
+ *
+ * The document title is deliberately not a fallback. It is written for a tab
+ * strip and a search result — "Ditto — Your content. Your vibe. Your rules." —
+ * and cutting it at the first separator to recover a name goes wrong exactly
+ * where it matters: a docs site is titled after the thing it documents, so it
+ * would take that thing's name and sit on the grid as a second tile with the
+ * same label. A site that never declared itself an app keeps the nsite's own
+ * name, which is short by nature and already distinct.
+ */
+function pickLabel(doc: Document, webManifest: unknown): string | null {
+  const manifest = (
+    typeof webManifest === 'object' && webManifest !== null ? webManifest : {}
+  ) as Record<string, unknown>;
+
+  return (
+    tidyLabel(
+      doc.querySelector('meta[name="apple-mobile-web-app-title"]')?.getAttribute('content'),
+      48,
+    ) ??
+    tidyLabel(manifest.short_name, 48) ??
+    tidyLabel(manifest.name, 48)
+  );
+}
+
 /**
  * Whether the artwork is a glyph floating in empty space rather than a picture
  * that fills its frame.
@@ -227,17 +269,20 @@ async function looksLikeGlyph(url: string): Promise<boolean | null> {
 }
 
 /**
- * Resolve the icon to put on an nsite's tile: whatever the site itself
- * nominates as its app icon, preferring the declarations meant for a home
+ * How an nsite presents itself as an app: the icon to put on its tile, the
+ * color behind it, and what to call it.
+ *
+ * All three come out of the same pass over `/index.html` and the web app
+ * manifest it links, and all three prefer the declarations meant for a home
  * screen over the ones meant for a browser tab.
  */
-export function useNsiteIcon(event: NostrEvent) {
+export function useNsiteApp(event: NostrEvent) {
   return useQuery({
-    queryKey: ['nsite-icon', event.id],
-    queryFn: async (): Promise<NsiteIcon | null> => {
+    queryKey: ['nsite-app', event.id],
+    queryFn: async (): Promise<NsiteApp> => {
       const files = buildManifest(event);
       const indexSha = files.get('/index.html');
-      if (!indexSha) return null;
+      if (!indexSha) return NOTHING;
 
       const servers = resolveServers(event);
       const indexRes = await fetchFromBlossom(indexSha, servers);
@@ -246,6 +291,7 @@ export function useNsiteIcon(event: NostrEvent) {
       const candidates = collectFromDocument(doc);
       const themeColor = pickThemeColor(doc);
       let background = themeColor;
+      let webManifest: unknown = null;
 
       const manifestHref = doc
         .querySelector('link[rel~="manifest"][href]')
@@ -257,14 +303,14 @@ export function useNsiteIcon(event: NostrEvent) {
       if (manifestPath && manifestSha) {
         try {
           const res = await fetchFromBlossom(manifestSha, servers);
-          const json: unknown = await res.json();
+          webManifest = await res.json();
           const base = manifestPath.replace(/[^/]*$/, '');
-          candidates.push(...collectFromWebManifest(json, base));
+          candidates.push(...collectFromWebManifest(webManifest, base));
           // Only if the document named no color of its own: a manifest's
           // background_color is the color of a splash screen, which on plenty
           // of sites is plain white.
-          if (!themeColor && typeof json === 'object' && json !== null) {
-            const { background_color } = json as { background_color?: unknown };
+          if (!themeColor && typeof webManifest === 'object' && webManifest !== null) {
+            const { background_color } = webManifest as { background_color?: unknown };
             background = safeColor(
               typeof background_color === 'string' ? background_color : null,
             );
@@ -273,6 +319,8 @@ export function useNsiteIcon(event: NostrEvent) {
           // Unreadable manifest — the linked icons are the loss, not the tile.
         }
       }
+
+      const label = pickLabel(doc, webManifest);
 
       for (const [path, rank, fit] of CONVENTIONAL) {
         if (files.has(path)) candidates.push({ href: path, base: '/', score: rank, fit });
@@ -286,10 +334,10 @@ export function useNsiteIcon(event: NostrEvent) {
 
         const glyph = await looksLikeGlyph(url);
         const fit: IconFit = glyph === null ? candidate.fit : glyph ? 'contain' : 'cover';
-        return { url, fit, background };
+        return { label, iconUrl: url, fit, background };
       }
 
-      return null;
+      return { label, iconUrl: null, fit: 'cover', background };
     },
     staleTime: Infinity,
     retry: 1,

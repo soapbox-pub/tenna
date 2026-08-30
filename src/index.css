@@ -194,6 +194,21 @@
   }
 }
 
+/*
+ * Held on <html> while something fullscreen is open. Without it the page keeps
+ * its own scrollbar behind the overlay — two scrollbars, and a wheel anywhere
+ * off the overlay's content scrolls the page nobody can see.
+ *
+ * Nothing reserves the space the scrollbar leaves behind. Reserving it would
+ * hold the page steady underneath, but a gutter belongs to the scrollport, so
+ * a fullscreen fixed element stops short of it — an empty strip down the side
+ * of the viewer for the whole time it's open, to spare a reflow nobody sees
+ * behind a tube powering on.
+ */
+.scroll-locked {
+  overflow: hidden;
+}
+
 /* CRT design language: tube shape, scanlines, curvature, glare, OSD text */
 
 /*

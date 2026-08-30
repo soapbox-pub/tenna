@@ -100,6 +100,14 @@ export function NsiteViewer({ event, channel, onClose }: NsiteViewerProps) {
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
+  // The viewer covers the channel wall but doesn't stop it scrolling, so the
+  // page keeps a second scrollbar alongside the site's own. Locked for the
+  // whole mount, shutoff animation included — the wall is still hidden then.
+  useEffect(() => {
+    document.documentElement.classList.add('scroll-locked');
+    return () => document.documentElement.classList.remove('scroll-locked');
+  }, []);
+
   const ch = String(channel).padStart(2, '0');
 
   return (

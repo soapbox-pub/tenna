@@ -1,4 +1,5 @@
 import { BrowserRouter, Route, Routes } from "react-router-dom";
+import { DeepLinkHandler } from "./components/DeepLinkHandler";
 import { ScrollToTop } from "./components/ScrollToTop";
 
 import Index from "./pages/Index";
@@ -8,6 +9,7 @@ import NotFound from "./pages/NotFound";
 export function AppRouter() {
   return (
     <BrowserRouter>
+      <DeepLinkHandler />
       <ScrollToTop />
       <Routes>
         <Route path="/" element={<Index />} />

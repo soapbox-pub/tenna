@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Tenna</string>
+    <string name="title_activity_main">Tenna</string>
+    <string name="package_name">pub.soapbox.tenna</string>
+    <string name="custom_url_scheme">pub.soapbox.tenna</string>
+</resources>

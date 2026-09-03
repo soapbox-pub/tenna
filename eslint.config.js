@@ -9,7 +9,9 @@ import htmlEslint from "@html-eslint/eslint-plugin";
 import customRules from "./eslint-rules/index.js";
 
 export default defineConfig(
-  globalIgnores(["dist", ".agents"]),
+  // `android` and `ios` are Capacitor-generated native projects; they contain
+  // a copy of the built `dist` output and their own generated sources.
+  globalIgnores(["dist", ".agents", "android", "ios"]),
   {
     name: "app/ts",
     files: ["**/*.{ts,tsx}"],

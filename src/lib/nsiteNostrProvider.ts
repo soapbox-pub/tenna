@@ -1,15 +1,62 @@
 /**
- * Generates the injected NIP-07 provider script for nsite sandboxed iframes.
+ * Generates the injected NIP-07 provider script for sandboxed nsites.
  *
  * The script defines `window.nostr` conforming to the NIP-07 interface.
  * `getPublicKey()` returns the embedded pubkey instantly (always allowed).
  * All other methods (`signEvent`, `nip04.*`, `nip44.*`) send JSON-RPC 2.0
- * requests to the parent frame via `postMessage` and await responses.
+ * requests to the host and await responses.
  *
  * A serial queue ensures only one RPC is in flight at a time, preventing
- * the parent from being overwhelmed with concurrent permission prompts.
+ * the host from being overwhelmed with concurrent permission prompts.
  */
-export function getNsiteNostrProviderScript(pubkey: string): string {
+
+/**
+ * How the provider reaches the host.
+ *
+ * The NIP-07 surface and the JSON-RPC framing are identical either way; only
+ * the two lines that send and receive a message differ.
+ *
+ * - `postMessage` — the site is an iframe, so the host is the parent frame.
+ * - `webMessage` — the site is the top-level document of a native WebView,
+ *   and the host is an `addWebMessageListener` channel injected by Android.
+ */
+export type NsiteRpcTransport = 'postMessage' | 'webMessage';
+
+/** Name of the injected object for the `webMessage` transport. */
+export const NSITE_WEB_MESSAGE_OBJECT = 'tennaHost';
+
+function getTransportSource(transport: NsiteRpcTransport): {
+  receive: string;
+  send: string;
+} {
+  if (transport === 'webMessage') {
+    return {
+      // Android delivers replies as a MessageEvent whose data is a string.
+      receive: `
+  ${NSITE_WEB_MESSAGE_OBJECT}.onmessage = function(event) {
+    var msg;
+    try { msg = JSON.parse(event.data); } catch (e) { return; }
+    handleResponse(msg);
+  };`,
+      send: `${NSITE_WEB_MESSAGE_OBJECT}.postMessage(JSON.stringify(payload));`,
+    };
+  }
+
+  return {
+    receive: `
+  window.addEventListener('message', function(event) {
+    handleResponse(event.data);
+  });`,
+    send: `window.parent.postMessage(payload, '*');`,
+  };
+}
+
+export function getNsiteNostrProviderScript(
+  pubkey: string,
+  transport: NsiteRpcTransport = 'postMessage',
+): string {
+  const { receive, send } = getTransportSource(transport);
+
   return `(function() {
   'use strict';
 
@@ -37,13 +84,12 @@ export function getNsiteNostrProviderScript(pubkey: string): string {
   }
 
   // ------------------------------------------------------------------
-  // JSON-RPC transport over postMessage
+  // JSON-RPC transport
   // ------------------------------------------------------------------
   var _nextId = 1;
   var _pending = {};
 
-  window.addEventListener('message', function(event) {
-    var msg = event.data;
+  function handleResponse(msg) {
     if (!msg || typeof msg !== 'object' || msg.jsonrpc !== '2.0') return;
     if (msg.id === undefined || msg.id === null) return;
     var cb = _pending[msg.id];
@@ -54,19 +100,21 @@ export function getNsiteNostrProviderScript(pubkey: string): string {
     } else {
       cb.resolve(msg.result);
     }
-  });
+  }
+${receive}
 
   function rpc(method, params) {
     return enqueue(function() {
       return new Promise(function(resolve, reject) {
         var id = _nextId++;
         _pending[id] = { resolve: resolve, reject: reject };
-        window.parent.postMessage({
+        var payload = {
           jsonrpc: '2.0',
           id: id,
           method: method,
           params: params || {}
-        }, '*');
+        };
+        ${send}
       });
     });
   }

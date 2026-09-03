@@ -45,12 +45,8 @@ interface UseNsiteSignerRpcOptions {
 }
 
 interface UseNsiteSignerRpcResult {
-  /** The `onRpc` callback to pass to SandboxFrame. */
-  onRpc: (
-    method: string,
-    params: unknown,
-    post: (msg: Record<string, unknown>) => void,
-  ) => Promise<unknown>;
+  /** The `onRpc` callback to pass to `<Nsite>`. Transport-agnostic. */
+  onRpc: (method: string, params: unknown) => Promise<unknown>;
   /** Current pending prompt, or null if no prompt is active. */
   pendingPrompt: NsitePromptState | null;
   /** Call this to resolve the current prompt. */

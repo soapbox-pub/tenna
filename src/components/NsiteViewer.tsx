@@ -1,42 +1,15 @@
 import type { NostrEvent } from '@nostrify/nostrify';
 import { Power } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 
+import { Nsite } from '@/components/Nsite';
 import { NsitePermissionManager } from '@/components/NsitePermissionManager';
 import { NsitePermissionPrompt } from '@/components/NsitePermissionPrompt';
-import { SandboxFrame, type SandboxFrameHandle } from '@/components/SandboxFrame';
 import { WhiteNoise } from '@/components/WhiteNoise';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useNsiteSignerRpc } from '@/hooks/useNsiteSignerRpc';
-import { useSafeAreaInsets } from '@/hooks/useSafeAreaInsets';
-import { deriveIframeSubdomain } from '@/lib/iframeSubdomain';
-import { buildManifest, fetchFromBlossom, resolveServers } from '@/lib/nsiteFiles';
-import { getNsiteNostrProviderScript } from '@/lib/nsiteNostrProvider';
 import { getNsiteSubdomain } from '@/lib/nsiteSubdomain';
-import { getPreviewInjectedScript } from '@/lib/previewInjectedScript';
-import {
-  getSafeAreaInjectedScript,
-  mentionsSafeArea,
-  readSiteChrome,
-  rewriteSafeAreaEnvInCss,
-  rewriteSafeAreaEnvInHtml,
-  SAFE_AREA_RPC_METHOD,
-  type SafeAreaInsets,
-} from '@/lib/safeArea';
-import { getMimeType } from '@/lib/sandbox';
-import type { FileResponse, InjectedScript } from '@/lib/sandbox';
-import { APP_ID } from '@/lib/tenna';
 import { cn } from '@/lib/utils';
-
-/**
- * Content types carrying CSS that may reference `env(safe-area-inset-*)`.
- *
- * JS is deliberately excluded. A bundle contains the same call inside Tailwind
- * class names, and rewriting one there renames the class out of existence —
- * so a site's CSS-in-JS insets go unfixed, which costs it some padding, rather
- * than its utility classes going dead, which costs it the layout.
- */
-const CSS_BEARING_TYPES = new Set(['text/css', 'text/html']);
 
 interface NsiteViewerProps {
   /** The NIP-5A manifest event for the site being viewed. */
@@ -48,9 +21,11 @@ interface NsiteViewerProps {
 }
 
 /**
- * Fullscreen nsite viewer. Files are served straight from Blossom into a
- * sandboxed iframe; static plays while the channel tunes in, and closing
- * collapses the picture like a tube switching off.
+ * Fullscreen nsite viewer — the television around the picture.
+ *
+ * Owns the set-top controls, the permission prompts, and the CRT tune-in and
+ * shutoff animations. How the site's files actually get served, and where its
+ * origin lives, belongs to `<Nsite>`.
  */
 export function NsiteViewer({ event, channel, onClose }: NsiteViewerProps) {
   const { user } = useCurrentUser();
@@ -58,120 +33,18 @@ export function NsiteViewer({ event, channel, onClose }: NsiteViewerProps) {
   const [loaded, setLoaded] = useState(false);
   const [noiseGone, setNoiseGone] = useState(false);
 
-  const insets = useSafeAreaInsets();
-  const frameRef = useRef<SandboxFrameHandle>(null);
-  const [frameReady, setFrameReady] = useState(false);
-
-  // What the site's own HTML says about how it wants to be framed. Unknown
-  // until its index.html arrives; until then assume it doesn't handle insets,
-  // which is the option that can't hide content behind a system bar.
-  const [edgeToEdge, setEdgeToEdge] = useState(false);
-  const [themeColor, setThemeColor] = useState<string | null>(null);
-
-  // `resolveFile` serves every subsequent asset off the back of these, so they
-  // also live in refs it can read without being rebuilt on each change.
-  const edgeToEdgeRef = useRef(false);
-  const insetsRef = useRef<SafeAreaInsets>(insets);
-  useEffect(() => { insetsRef.current = insets; }, [insets]);
-
   const name = event.tags.find(([n]) => n === 'd')?.[1] ?? 'nsite';
   const siteId = useMemo(() => getNsiteSubdomain(event), [event]);
-  const frameId = useMemo(
-    () => deriveIframeSubdomain(APP_ID, 'nsite', siteId),
-    [siteId],
-  );
 
   const signerRpc = useNsiteSignerRpc({ siteId, siteName: name });
 
-  const manifest = useMemo(() => buildManifest(event), [event]);
-  const servers = useMemo(() => resolveServers(event), [event]);
-
-  const injectedScripts = useMemo<InjectedScript[]>(() => {
-    const scripts: InjectedScript[] = [{
-      path: '__injected__/preview.js',
-      content: getPreviewInjectedScript(),
-    }, {
-      path: '__injected__/safe-area.js',
-      // Injected unconditionally: the scripts are chosen before the site's
-      // HTML has been read, so we don't yet know whether it's edge to edge.
-      // For a site that isn't, nothing references these properties.
-      content: getSafeAreaInjectedScript(insets),
-    }];
-    if (user) {
-      scripts.push({
-        path: '__injected__/nostr-provider.js',
-        content: getNsiteNostrProviderScript(user.pubkey),
-      });
-    }
-    return scripts;
-  }, [user, insets]);
-
-  const resolveFile = useCallback(
-    async (pathname: string): Promise<FileResponse | null> => {
-      // Fall back to /index.html for SPA client-side routes.
-      let sha256 = manifest.get(pathname);
-      let servingPath = pathname;
-
-      if (!sha256) {
-        sha256 = manifest.get('/index.html');
-        servingPath = '/index.html';
-      }
-      if (!sha256) return null;
-
-      const res = await fetchFromBlossom(sha256, servers);
-      let body = new Uint8Array(await res.arrayBuffer());
-      const contentType = getMimeType(servingPath);
-
-      if (CSS_BEARING_TYPES.has(contentType)) {
-        const text = new TextDecoder().decode(body);
-
-        if (servingPath === '/index.html') {
-          // index.html is always the first thing served, so the rest of the
-          // site's assets are resolved knowing which way to frame it.
-          const chrome = readSiteChrome(text);
-          edgeToEdgeRef.current = chrome.edgeToEdge;
-          setEdgeToEdge(chrome.edgeToEdge);
-          setThemeColor(chrome.themeColor);
-        }
-
-        // Only a site that asked to draw under the system bars gets real
-        // insets. One that didn't is served inside a shrunken iframe, where
-        // an inset of zero is the truth.
-        if (edgeToEdgeRef.current && mentionsSafeArea(text)) {
-          const rewritten = contentType === 'text/html'
-            ? rewriteSafeAreaEnvInHtml(text, insetsRef.current)
-            : rewriteSafeAreaEnvInCss(text, insetsRef.current);
-          body = new TextEncoder().encode(rewritten);
-        }
-      }
-
-      if (servingPath === '/index.html') {
-        // The document is on its way; give the app a beat to paint before
-        // lifting the static.
-        setTimeout(() => setLoaded(true), 600);
-      }
-
-      return { status: 200, contentType, body };
-    },
-    [manifest, servers],
-  );
-
   const handleClose = useCallback(() => setClosing(true), []);
 
-  // Keep an edge-to-edge site's insets honest across rotation. Its stylesheets
-  // were rewritten with the values measured at load, but they read them
-  // through custom properties the injected script can re-set.
-  //
-  // Gated on the handshake: until the frame has navigated to its own origin,
-  // a targeted postMessage is refused as an origin mismatch.
-  useEffect(() => {
-    if (!frameReady) return;
-    frameRef.current?.postMessage({
-      jsonrpc: '2.0',
-      method: SAFE_AREA_RPC_METHOD,
-      params: insets,
-    });
-  }, [insets, frameReady]);
+  // The document is on its way; give the site a beat to paint before lifting
+  // the static.
+  const handleLoad = useCallback(() => {
+    setTimeout(() => setLoaded(true), 600);
+  }, []);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -199,31 +72,17 @@ export function NsiteViewer({ event, channel, onClose }: NsiteViewerProps) {
           if (closing && e.target === e.currentTarget) onClose();
         }}
       >
-        {/* A site that doesn't handle insets itself is shrunk to the safe
-            area, so its own viewport is the region it can safely paint. The
-            strips this leaves take the site's theme colour, so the reveal
-            reads as part of the site rather than a gap around it. */}
-        <div
+        <Nsite
+          event={event}
+          name={name}
+          pubkey={user?.pubkey}
+          onRpc={user ? signerRpc.onRpc : undefined}
+          onLoad={handleLoad}
+          concealed={!!signerRpc.pendingPrompt}
+          closing={closing}
+          onRequestClose={handleClose}
           className="absolute inset-0"
-          style={{
-            backgroundColor: themeColor ?? undefined,
-            paddingTop: edgeToEdge ? 0 : insets.top,
-            paddingRight: edgeToEdge ? 0 : insets.right,
-            paddingBottom: edgeToEdge ? 0 : insets.bottom,
-            paddingLeft: edgeToEdge ? 0 : insets.left,
-          }}
-        >
-          <SandboxFrame
-            ref={frameRef}
-            id={frameId}
-            resolveFile={resolveFile}
-            onRpc={user ? signerRpc.onRpc : undefined}
-            onReady={() => setFrameReady(true)}
-            injectedScripts={injectedScripts}
-            className="h-full w-full border-0"
-            title={name}
-          />
-        </div>
+        />
 
         {/* Tuning static, lifted once the channel comes in */}
         {!noiseGone && (

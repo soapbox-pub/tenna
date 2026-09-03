@@ -32,7 +32,9 @@ const queryClient = new QueryClient({
 });
 
 const defaultConfig: AppConfig = {
-  theme: "light",
+  // Tenna's chrome is dark at every screen, so the theme has to agree: it
+  // drives the shadcn surfaces and, on native, the system bar icon style.
+  theme: "dark",
   relayMetadata: APP_RELAYS,
   blossomServerMetadata: {
     servers: [

@@ -1,8 +1,17 @@
 import type { NostrEvent } from '@nostrify/nostrify';
-import type { ReactNode } from 'react';
+import { Check, SquarePlus } from 'lucide-react';
+import { useCallback, useRef, type ReactNode } from 'react';
 
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuTrigger,
+} from '@/components/ui/context-menu';
 import { WhiteNoise } from '@/components/WhiteNoise';
 import { useNsiteApp } from '@/hooks/useNsiteApp';
+import { useNsitePin } from '@/hooks/useNsitePin';
+import { impactMedium } from '@/lib/haptics';
 import { getTileGradient, getTileInitial } from '@/lib/iconTile';
 import { cn } from '@/lib/utils';
 
@@ -79,10 +88,32 @@ export function AppIcon({ event, onSelect }: AppIconProps) {
   // The nsite's own name until the site says what it calls itself.
   const name = app?.label ?? event.tags.find(([n]) => n === 'd')?.[1] ?? '???';
 
-  return (
+  const pinning = useNsitePin(event, name, app);
+
+  // A long press is a press. The menu opens on pointerdown and the pointerup
+  // that follows still lands on the tile, so without this the site would tune
+  // in behind the menu that was opened to avoid tuning it in. Held until just
+  // after the menu closes, so dismissing it doesn't arm a stray tap either.
+  const suppressTap = useRef(false);
+
+  const handleOpenChange = useCallback((open: boolean) => {
+    if (open) {
+      suppressTap.current = true;
+      impactMedium();
+    } else {
+      setTimeout(() => { suppressTap.current = false; }, 250);
+    }
+  }, []);
+
+  const handleSelect = useCallback(() => {
+    if (suppressTap.current) return;
+    onSelect();
+  }, [onSelect]);
+
+  const tile = (
     <button
       type="button"
-      onClick={onSelect}
+      onClick={handleSelect}
       title={name}
       className="group flex w-full flex-col items-center gap-2 outline-none"
     >
@@ -123,5 +154,21 @@ export function AppIcon({ event, onSelect }: AppIconProps) {
         {name}
       </span>
     </button>
+  );
+
+  // No menu where there is nothing to put in it. On the web and on iOS a long
+  // press on a tile should do what it has always done, which is nothing.
+  if (!pinning.available) return tile;
+
+  return (
+    <ContextMenu onOpenChange={handleOpenChange}>
+      <ContextMenuTrigger asChild>{tile}</ContextMenuTrigger>
+      <ContextMenuContent className="w-56">
+        <ContextMenuItem onSelect={pinning.pin} disabled={pinning.pinned}>
+          {pinning.pinned ? <Check /> : <SquarePlus />}
+          {pinning.pinned ? 'On your home screen' : 'Add to home screen'}
+        </ContextMenuItem>
+      </ContextMenuContent>
+    </ContextMenu>
   );
 }

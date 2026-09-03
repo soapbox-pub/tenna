@@ -22,6 +22,12 @@ export interface NsiteWebViewPlugin {
     servers: string[];
     /** The NIP-07 provider to install, or omitted to withhold `window.nostr`. */
     providerScript?: string;
+    /**
+     * Whether the native set-top controls include a power button. Defaults to
+     * true; false for a site opened from its own home screen shortcut, which
+     * has no Tenna behind it to be turned off to.
+     */
+    showPower?: boolean;
   }): Promise<void>;
 
   /** Play the shutoff animation and tear the WebView down. */

@@ -11,6 +11,7 @@ public class MainActivity extends BridgeActivity {
         // Must precede super.onCreate: BridgeActivity builds the bridge at the
         // end of it, and only plugins registered by then are reachable.
         registerPlugin(NsiteWebViewPlugin.class);
+        registerPlugin(NsiteShortcutsPlugin.class);
         super.onCreate(savedInstanceState);
     }
 }

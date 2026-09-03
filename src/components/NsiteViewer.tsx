@@ -14,9 +14,16 @@ import { cn } from '@/lib/utils';
 interface NsiteViewerProps {
   /** The NIP-5A manifest event for the site being viewed. */
   event: NostrEvent;
-  /** 1-based channel number, shown in the tuning OSD. */
-  channel: number;
-  /** Called after the shutoff animation completes. */
+  /** 1-based channel number, shown in the tuning OSD. Omitted off the wall. */
+  channel?: number;
+  /**
+   * The site is the whole app here, opened from its own home screen shortcut.
+   *
+   * There is no channel wall behind it, so it is given no power button and no
+   * shutoff — leaving is the back gesture, and it leaves for the launcher.
+   */
+  standalone?: boolean;
+  /** Called after the shutoff animation completes, or at once when standalone. */
   onClose: () => void;
 }
 
@@ -27,7 +34,7 @@ interface NsiteViewerProps {
  * shutoff animations. How the site's files actually get served, and where its
  * origin lives, belongs to `<Nsite>`.
  */
-export function NsiteViewer({ event, channel, onClose }: NsiteViewerProps) {
+export function NsiteViewer({ event, channel, standalone, onClose }: NsiteViewerProps) {
   const { user } = useCurrentUser();
   const [closing, setClosing] = useState(false);
   const [loaded, setLoaded] = useState(false);
@@ -45,7 +52,13 @@ export function NsiteViewer({ event, channel, onClose }: NsiteViewerProps) {
 
   const signerRpc = useNsiteSignerRpc({ siteId, siteName: name });
 
-  const handleClose = useCallback(() => setClosing(true), []);
+  // The shutoff is the picture collapsing back to the wall it came from. A
+  // pinned site has no wall behind it — the animation would play over the
+  // launcher's own — so leaving one is immediate.
+  const handleClose = useCallback(() => {
+    if (standalone) onClose();
+    else setClosing(true);
+  }, [standalone, onClose]);
 
   const handleRequestPermissions = useCallback(() => {
     setPermissionsOverFrame(true);
@@ -65,11 +78,11 @@ export function NsiteViewer({ event, channel, onClose }: NsiteViewerProps) {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setClosing(true);
+      if (e.key === 'Escape') handleClose();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, []);
+  }, [handleClose]);
 
   // The viewer covers the channel wall but doesn't stop it scrolling, so the
   // page keeps a second scrollbar alongside the site's own. Locked for the
@@ -79,7 +92,8 @@ export function NsiteViewer({ event, channel, onClose }: NsiteViewerProps) {
     return () => document.documentElement.classList.remove('scroll-locked');
   }, []);
 
-  const ch = String(channel).padStart(2, '0');
+  // A pinned site is not on the wall, so it has no number to tune to.
+  const ch = channel === undefined ? null : String(channel).padStart(2, '0');
 
   return (
     <div className="fixed inset-0 z-50 bg-black">
@@ -101,6 +115,7 @@ export function NsiteViewer({ event, channel, onClose }: NsiteViewerProps) {
           closing={closing}
           onRequestClose={handleClose}
           onRequestPermissions={handleRequestPermissions}
+          showPowerButton={!standalone}
           className="absolute inset-0"
         />
 
@@ -116,9 +131,11 @@ export function NsiteViewer({ event, channel, onClose }: NsiteViewerProps) {
             <WhiteNoise className="h-full w-full" />
             <div className="crt-scanlines absolute inset-0 opacity-40" />
             <div className="crt-rollbar absolute inset-0" />
-            <span className="crt-osd absolute left-safe-offset-6 top-safe-offset-5 font-crt text-4xl text-[#7CFC9B]">
-              CH {ch}
-            </span>
+            {ch && (
+              <span className="crt-osd absolute left-safe-offset-6 top-safe-offset-5 font-crt text-4xl text-[#7CFC9B]">
+                CH {ch}
+              </span>
+            )}
             <span className="crt-osd absolute bottom-safe-offset-8 left-1/2 -translate-x-1/2 font-crt text-3xl uppercase tracking-widest text-[#7CFC9B]">
               {name}
             </span>
@@ -135,8 +152,13 @@ export function NsiteViewer({ event, channel, onClose }: NsiteViewerProps) {
       </div>
 
       {/* Set-top controls. Clear of the status bar, which otherwise both hides
-          them and swallows taps meant for them. */}
-      {!closing && (
+          them and swallows taps meant for them.
+
+          A pinned site keeps the shield — a site with a signer needs somewhere
+          to show what it has been granted, wherever it was opened from — but
+          loses the power button, and with it the whole pill when nobody is
+          logged in. */}
+      {!closing && (user || !standalone) && (
         <div className="absolute right-safe-offset-3 top-safe-offset-3 z-10 flex items-center gap-1 rounded-full border border-white/10 bg-black/60 p-1 backdrop-blur-sm">
           {user && (
             <NsitePermissionManager
@@ -145,15 +167,17 @@ export function NsiteViewer({ event, channel, onClose }: NsiteViewerProps) {
               onOpenChange={handlePermissionsOpenChange}
             />
           )}
-          <button
-            type="button"
-            onClick={handleClose}
-            aria-label="Turn off"
-            title="Turn off"
-            className="flex size-7 items-center justify-center rounded-full text-[#DA1F52] outline-none transition-colors hover:bg-[#DA1F52] hover:text-white focus-visible:ring-2 focus-visible:ring-[#FEF960]"
-          >
-            <Power className="size-4" />
-          </button>
+          {!standalone && (
+            <button
+              type="button"
+              onClick={handleClose}
+              aria-label="Turn off"
+              title="Turn off"
+              className="flex size-7 items-center justify-center rounded-full text-[#DA1F52] outline-none transition-colors hover:bg-[#DA1F52] hover:text-white focus-visible:ring-2 focus-visible:ring-[#FEF960]"
+            >
+              <Power className="size-4" />
+            </button>
+          )}
         </div>
       )}
     </div>

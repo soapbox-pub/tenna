@@ -23,20 +23,33 @@ function hashString(input: string): number {
   return h >>> 0;
 }
 
+/** The angle the tile gradient runs at, in CSS degrees (clockwise from up). */
+export const TILE_GRADIENT_ANGLE = 150;
+
 /**
- * A CSS gradient for a name, in the app's palette.
+ * The two stops of a name's tile gradient.
  *
  * Hues are picked off a fixed wheel rather than anywhere in 360°, because a
  * free hue lands on olive and mustard often enough to spoil a grid. The second
  * stop is a short step around the wheel, which reads as a lit surface rather
  * than two colors meeting.
+ *
+ * Separate from the CSS below because the same tile has to be drawn again on a
+ * canvas, to be handed to the launcher as a home screen icon, and a canvas
+ * gradient is built from stops rather than parsed from a declaration.
  */
-export function getTileGradient(name: string): string {
+export function getTileColors(name: string): [string, string] {
   const hues = [352, 336, 16, 44, 152, 190, 214, 268, 292];
   const h = hues[hashString(`${name}#hue`) % hues.length];
   const step = 18 + (hashString(`${name}#step`) % 16);
 
-  return `linear-gradient(150deg, hsl(${h} 72% 58%), hsl(${(h + step) % 360} 64% 42%))`;
+  return [`hsl(${h} 72% 58%)`, `hsl(${(h + step) % 360} 64% 42%)`];
+}
+
+/** A CSS gradient for a name, in the app's palette. */
+export function getTileGradient(name: string): string {
+  const [from, to] = getTileColors(name);
+  return `linear-gradient(${TILE_GRADIENT_ANGLE}deg, ${from}, ${to})`;
 }
 
 /**

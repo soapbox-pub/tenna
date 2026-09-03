@@ -154,6 +154,9 @@ public class NsiteWebViewPlugin extends Plugin {
         String providerScript = call.getString("providerScript");
         JSObject manifest = call.getObject("files");
         JSArray serverList = call.getArray("servers");
+        // A site opened from its own home screen shortcut has nowhere to be
+        // turned off to — the task is the site — so it is offered no way to.
+        final boolean showPower = Boolean.TRUE.equals(call.getBoolean("showPower", true));
 
         if (siteId == null || manifest == null || serverList == null) {
             call.reject("siteId, files and servers are required");
@@ -213,12 +216,14 @@ public class NsiteWebViewPlugin extends Plugin {
                 FrameLayout.LayoutParams.MATCH_PARENT
             ));
 
-            View controls = buildChrome(providerScript != null);
-            frame.addView(controls, new FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.WRAP_CONTENT,
-                FrameLayout.LayoutParams.WRAP_CONTENT,
-                Gravity.TOP | Gravity.END
-            ));
+            View controls = buildChrome(providerScript != null, showPower);
+            if (controls != null) {
+                frame.addView(controls, new FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.WRAP_CONTENT,
+                    FrameLayout.LayoutParams.WRAP_CONTENT,
+                    Gravity.TOP | Gravity.END
+                ));
+            }
 
             ViewGroup content = getActivity().findViewById(android.R.id.content);
             content.addView(frame, new ViewGroup.LayoutParams(
@@ -414,8 +419,15 @@ public class NsiteWebViewPlugin extends Plugin {
      * Only the buttons are native. Pressing one is reported to React, which
      * still owns every panel: the permissions popover conceals the site and
      * appears over it, anchored to the React chrome in the same place.
+     *
+     * Returns null when neither button applies — a logged-out user opening a
+     * pinned site — because an empty pill is a smudge over the corner of a
+     * page that has done nothing to deserve one.
      */
-    private View buildChrome(boolean hasSigner) {
+    @Nullable
+    private View buildChrome(boolean hasSigner, boolean showPower) {
+        if (!hasSigner && !showPower) return null;
+
         LinearLayout bar = new LinearLayout(getContext());
         bar.setOrientation(LinearLayout.HORIZONTAL);
         bar.setGravity(Gravity.CENTER_VERTICAL);
@@ -442,12 +454,14 @@ public class NsiteWebViewPlugin extends Plugin {
             ));
         }
 
-        bar.addView(button(
-            R.drawable.ic_nsite_power,
-            0xFFDA1F52,
-            "Turn off",
-            () -> notifyListeners("nsitePower", new JSObject())
-        ));
+        if (showPower) {
+            bar.addView(button(
+                R.drawable.ic_nsite_power,
+                0xFFDA1F52,
+                "Turn off",
+                () -> notifyListeners("nsitePower", new JSObject())
+            ));
+        }
 
         return bar;
     }

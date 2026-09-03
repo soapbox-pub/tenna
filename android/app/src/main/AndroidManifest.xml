@@ -24,6 +24,28 @@
 
         </activity>
 
+        <!--
+            A pinned nsite, in a task of its own. See NsiteAppActivity.
+
+            documentLaunchMode keys a task on this component plus the intent's
+            data URI, so one URI per site is one task per site and two pinned
+            sites can be open at once. The empty taskAffinity keeps those tasks
+            out of Tenna's own, which is what stops a pinned site from surfacing
+            the channel wall when the user swipes back to it.
+
+            Exported because the launcher — a different app — is what starts it.
+        -->
+        <activity
+            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode|navigation|density"
+            android:name=".NsiteAppActivity"
+            android:label="@string/app_name"
+            android:theme="@style/AppTheme.NoActionBarLaunch"
+            android:documentLaunchMode="intoExisting"
+            android:autoRemoveFromRecents="false"
+            android:taskAffinity=""
+            android:excludeFromRecents="false"
+            android:exported="true" />
+
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.fileprovider"

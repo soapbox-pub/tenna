@@ -29,6 +29,7 @@ export function NsiteNative({
   closing,
   onRequestClose,
   onRequestPermissions,
+  showPowerButton = true,
 }: NsiteFrameProps) {
   // Kept in refs so the open/close effect depends on the site alone. A
   // re-render must never tear down a loaded site and start it over.
@@ -36,6 +37,9 @@ export function NsiteNative({
   const onLoadRef = useRef(onLoad);
   const onCloseRef = useRef(onRequestClose);
   const onPermissionsRef = useRef(onRequestPermissions);
+  // Read once, when the view is built. The controls are native and are not
+  // rebuilt for the life of the site, so a later change would be a lie.
+  const showPowerRef = useRef(showPowerButton);
   useEffect(() => { onRpcRef.current = onRpc; }, [onRpc]);
   useEffect(() => { onLoadRef.current = onLoad; }, [onLoad]);
   useEffect(() => { onCloseRef.current = onRequestClose; }, [onRequestClose]);
@@ -79,6 +83,7 @@ export function NsiteNative({
         providerScript: pubkey
           ? getNsiteNostrProviderScript(pubkey, 'webMessage')
           : undefined,
+        showPower: showPowerRef.current,
       });
     })().catch((err) => {
       console.error('[NsiteNative] failed to open:', err);

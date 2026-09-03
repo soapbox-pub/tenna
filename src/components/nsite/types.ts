@@ -57,6 +57,15 @@ export interface NsiteFrameProps {
    * controls, and so has to provide its own. The panel itself stays in React.
    */
   onRequestPermissions?: () => void;
+  /**
+   * Whether to offer a way to turn the site off. Defaults to true.
+   *
+   * Only means anything to an implementation that draws its own controls. A
+   * site opened from its own home screen shortcut is the whole app in that
+   * task, so there is nothing to turn it off *to* — leaving is the back
+   * gesture, the same as it is in any other app.
+   */
+  showPowerButton?: boolean;
   /** Applied to the frame's outermost element. */
   className?: string;
 }

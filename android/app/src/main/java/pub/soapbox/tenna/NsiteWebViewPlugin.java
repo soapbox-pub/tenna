@@ -4,7 +4,11 @@ import android.animation.Animator;
 import android.animation.AnimatorListenerAdapter;
 import android.annotation.SuppressLint;
 import android.content.pm.ApplicationInfo;
+import android.content.res.ColorStateList;
+import android.graphics.Color;
+import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
+import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
 import android.webkit.WebResourceRequest;
@@ -12,9 +16,16 @@ import android.webkit.WebResourceResponse;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
+import android.widget.FrameLayout;
+import android.widget.ImageButton;
+import android.widget.ImageView;
+import android.widget.LinearLayout;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
+import androidx.core.graphics.Insets;
+import androidx.core.view.ViewCompat;
+import androidx.core.view.WindowInsetsCompat;
 import androidx.webkit.JavaScriptReplyProxy;
 import androidx.webkit.WebMessageCompat;
 import androidx.webkit.WebViewCompat;
@@ -61,8 +72,15 @@ import java.util.Set;
  *       separates localStorage and IndexedDB per site and keeps the document
  *       in a secure context.
  *   <li>The view sits above the Capacitor WebView so that touch, focus and the
- *       soft keyboard all behave normally. Tenna's own chrome stays in React
- *       underneath, and the transitions are run here to match.
+ *       soft keyboard all behave normally. That buries React's copy of the
+ *       set-top controls, so the power and permissions buttons are drawn here
+ *       instead — but only the buttons. Every panel is still React's, shown by
+ *       concealing this view, and the transitions are run here to match.
+ *   <li>A site that doesn't declare {@code viewport-fit=cover} is inset by the
+ *       safe area rather than laid out under the system bars, so that the
+ *       viewport it is written against is the one it gets. That is what
+ *       {@code viewport-fit=auto} asks for and what Chrome only honours for
+ *       display cutouts.
  * </ul>
  */
 @CapacitorPlugin(name = "NsiteWebView")
@@ -85,10 +103,33 @@ public class NsiteWebViewPlugin extends Plugin {
     /** Injected object name the NIP-07 provider posts through. */
     private static final String HOST_OBJECT = "tennaHost";
 
+    /** Gap between the safe area and the set-top controls, matching the React chrome. */
+    private static final int CHROME_MARGIN_DP = 12;
+
+    @Nullable private ViewGroup container;
     @Nullable private WebView webView;
+    @Nullable private View chrome;
     @Nullable private NsiteFileServer fileServer;
     @Nullable private JavaScriptReplyProxy replyProxy;
     @Nullable private String host;
+
+    /**
+     * Where the system bars and the cutout are, in pixels.
+     *
+     * Kept because both things that depend on it — the letterbox and the
+     * position of the set-top controls — outlive any one inset dispatch, and
+     * because the site's document may arrive before or after the first one.
+     */
+    @NonNull private Insets safeArea = Insets.NONE;
+
+    /**
+     * Whether the site said it would draw under the system bars itself.
+     *
+     * Assumed true until its document has been read, because that is the case
+     * in which nothing has to happen: the WebView is already full-bleed, so a
+     * site that turns out to want it never moves.
+     */
+    private boolean edgeToEdge = true;
 
     // -----------------------------------------------------------------------
     // Lifecycle
@@ -131,32 +172,124 @@ public class NsiteWebViewPlugin extends Plugin {
             destroyWebView();
 
             host = siteHost;
-            fileServer = new NsiteFileServer(files, servers, new File(getContext().getCacheDir(), "nsite"));
+            edgeToEdge = true;
+            fileServer = new NsiteFileServer(
+                files,
+                servers,
+                new File(getContext().getCacheDir(), "nsite"),
+                // Raised on the WebView's background thread.
+                siteChrome -> getActivity().runOnUiThread(() -> applySiteChrome(siteChrome))
+            );
 
             WebView view = new WebView(getContext());
             configure(view);
             installBridge(view, origin, providerScript);
 
+            // The site's pixels and the controls over them travel together:
+            // they fade in as one, shut off as one, and hide as one behind a
+            // permission prompt. The frame also paints the letterbox for a
+            // site that isn't drawing under the system bars itself.
+            FrameLayout frame = new FrameLayout(getContext());
+            frame.setBackgroundColor(Color.BLACK);
+
             // Start invisible: React is painting tuning static underneath, and
             // the site fades up over it once it has something to show.
-            view.setAlpha(0f);
+            frame.setAlpha(0f);
+
+            frame.addView(view, new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT
+            ));
+
+            View controls = buildChrome(providerScript != null);
+            frame.addView(controls, new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.WRAP_CONTENT,
+                FrameLayout.LayoutParams.WRAP_CONTENT,
+                Gravity.TOP | Gravity.END
+            ));
 
             ViewGroup content = getActivity().findViewById(android.R.id.content);
-            content.addView(view, new ViewGroup.LayoutParams(
+            content.addView(frame, new ViewGroup.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.MATCH_PARENT
             ));
 
+            container = frame;
             webView = view;
+            chrome = controls;
+
+            observeInsets(frame);
+
             view.loadUrl(origin + "/");
             call.resolve();
         });
     }
 
+    /**
+     * Track the safe area for as long as the site is open.
+     *
+     * The insets are returned untouched so that the Capacitor WebView beside
+     * us still receives them — Tenna's own chrome is laid out from the same
+     * numbers. Listening rather than reading once is what makes a rotation
+     * move the letterbox and the controls with the cutout.
+     */
+    private void observeInsets(View view) {
+        ViewCompat.setOnApplyWindowInsetsListener(view, (v, insets) -> {
+            safeArea = insets.getInsets(
+                WindowInsetsCompat.Type.systemBars() | WindowInsetsCompat.Type.displayCutout()
+            );
+            layoutForSafeArea();
+            return insets;
+        });
+        ViewCompat.requestApplyInsets(view);
+    }
+
+    /** Lay the site and the controls out for the current insets. */
+    private void layoutForSafeArea() {
+        WebView view = webView;
+        if (view != null) {
+            FrameLayout.LayoutParams params = (FrameLayout.LayoutParams) view.getLayoutParams();
+            // A site that opted in fills the window and pads itself with
+            // `env()`. One that didn't is inset until its viewport really is
+            // the safe area, which is the assumption its CSS is written under.
+            params.setMargins(
+                edgeToEdge ? 0 : safeArea.left,
+                edgeToEdge ? 0 : safeArea.top,
+                edgeToEdge ? 0 : safeArea.right,
+                edgeToEdge ? 0 : safeArea.bottom
+            );
+            view.setLayoutParams(params);
+        }
+
+        View controls = chrome;
+        if (controls != null) {
+            int gap = dp(CHROME_MARGIN_DP);
+            FrameLayout.LayoutParams params = (FrameLayout.LayoutParams) controls.getLayoutParams();
+            // Always in the safe area, whatever the site chose. Under the
+            // status bar they'd be both invisible and untappable.
+            params.setMargins(0, safeArea.top + gap, safeArea.right + gap, 0);
+            controls.setLayoutParams(params);
+        }
+    }
+
+    /** Take what the site's document asked for, once it has been read. */
+    private void applySiteChrome(NsiteSiteChrome siteChrome) {
+        edgeToEdge = siteChrome.edgeToEdge;
+
+        ViewGroup frame = container;
+        if (frame != null && !siteChrome.edgeToEdge && siteChrome.themeColor != null) {
+            // The strips left by the letterbox read as part of the site rather
+            // than as a black border around it.
+            frame.setBackgroundColor(siteChrome.themeColor);
+        }
+
+        layoutForSafeArea();
+    }
+
     @PluginMethod
     public void close(PluginCall call) {
         getActivity().runOnUiThread(() -> {
-            WebView view = webView;
+            ViewGroup view = container;
             if (view == null) {
                 call.resolve();
                 return;
@@ -215,8 +348,10 @@ public class NsiteWebViewPlugin extends Plugin {
     public void setConcealed(PluginCall call) {
         boolean concealed = Boolean.TRUE.equals(call.getBoolean("concealed", false));
         getActivity().runOnUiThread(() -> {
-            if (webView != null) {
-                webView.setVisibility(concealed ? View.INVISIBLE : View.VISIBLE);
+            if (container != null) {
+                // The whole frame, controls included: React draws its own set
+                // of them underneath, and two would be one too many.
+                container.setVisibility(concealed ? View.INVISIBLE : View.VISIBLE);
             }
             call.resolve();
         });
@@ -229,15 +364,94 @@ public class NsiteWebViewPlugin extends Plugin {
 
     private void destroyWebView() {
         WebView view = webView;
+        ViewGroup frame = container;
         webView = null;
+        container = null;
+        chrome = null;
         fileServer = null;
         replyProxy = null;
         host = null;
-        if (view == null) return;
 
-        ViewGroup parent = (ViewGroup) view.getParent();
-        if (parent != null) parent.removeView(view);
-        view.destroy();
+        if (frame != null) {
+            ViewCompat.setOnApplyWindowInsetsListener(frame, null);
+            ViewGroup parent = (ViewGroup) frame.getParent();
+            if (parent != null) parent.removeView(frame);
+            frame.removeAllViews();
+        }
+        if (view != null) view.destroy();
+    }
+
+    // -----------------------------------------------------------------------
+    // Set-top controls
+    // -----------------------------------------------------------------------
+
+    /**
+     * Build the power and permissions buttons, in native views.
+     *
+     * They have to be native. The site's WebView is layered over the Capacitor
+     * one so that touch, focus and the soft keyboard need no forwarding, and
+     * that same decision buries React's copy of these controls — a button
+     * nobody can see or press is no way to leave a site.
+     *
+     * Only the buttons are native. Pressing one is reported to React, which
+     * still owns every panel: the permissions popover conceals the site and
+     * appears over it, anchored to the React chrome in the same place.
+     */
+    private View buildChrome(boolean hasSigner) {
+        LinearLayout bar = new LinearLayout(getContext());
+        bar.setOrientation(LinearLayout.HORIZONTAL);
+        bar.setGravity(Gravity.CENTER_VERTICAL);
+        bar.setPadding(dp(4), dp(4), dp(4), dp(4));
+
+        GradientDrawable pill = new GradientDrawable();
+        pill.setShape(GradientDrawable.RECTANGLE);
+        // Tall enough that a fixed radius would round the ends differently
+        // from the React pill; half the height is what `rounded-full` means.
+        pill.setCornerRadius(dp(18));
+        // Denser than the React pill's 60% black, which relies on a backdrop
+        // blur to separate itself from the page. There is no blur behind a
+        // native view, so the opacity has to do that work alone.
+        pill.setColor(0xF2000000);
+        pill.setStroke(dp(1), 0x1AFFFFFF);
+        bar.setBackground(pill);
+
+        if (hasSigner) {
+            bar.addView(button(
+                R.drawable.ic_nsite_shield,
+                0xFFFFFFFF,
+                "Site permissions",
+                () -> notifyListeners("nsitePermissions", new JSObject())
+            ));
+        }
+
+        bar.addView(button(
+            R.drawable.ic_nsite_power,
+            0xFFDA1F52,
+            "Turn off",
+            () -> notifyListeners("nsitePower", new JSObject())
+        ));
+
+        return bar;
+    }
+
+    private ImageButton button(int icon, int tint, String label, Runnable onClick) {
+        ImageButton view = new ImageButton(getContext());
+        view.setImageResource(icon);
+        view.setImageTintList(ColorStateList.valueOf(tint));
+        view.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        view.setBackground(null);
+        view.setContentDescription(label);
+        view.setPadding(dp(7), dp(7), dp(7), dp(7));
+        view.setOnClickListener(v -> onClick.run());
+
+        // A 16dp glyph in a 30dp box, so the pill comes out the size of the
+        // React one rather than merely in the same place.
+        view.setLayoutParams(new LinearLayout.LayoutParams(dp(30), dp(30)));
+        return view;
+    }
+
+    private int dp(int value) {
+        return Math.round(value * getContext().getResources().getDisplayMetrics().density);
     }
 
     // -----------------------------------------------------------------------
@@ -295,7 +509,10 @@ public class NsiteWebViewPlugin extends Plugin {
             @Override
             public void onPageFinished(WebView v, String url) {
                 notifyListeners("nsiteLoad", new JSObject());
-                v.animate().alpha(1f).setDuration(600).start();
+                // The frame, not the WebView: the letterbox and the set-top
+                // controls come up with the picture, not before it.
+                ViewGroup frame = container;
+                if (frame != null) frame.animate().alpha(1f).setDuration(600).start();
             }
         });
     }

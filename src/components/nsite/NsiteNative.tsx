@@ -28,13 +28,18 @@ export function NsiteNative({
   concealed,
   closing,
   onRequestClose,
+  onRequestPermissions,
 }: NsiteFrameProps) {
   // Kept in refs so the open/close effect depends on the site alone. A
   // re-render must never tear down a loaded site and start it over.
   const onRpcRef = useRef(onRpc);
   const onLoadRef = useRef(onLoad);
+  const onCloseRef = useRef(onRequestClose);
+  const onPermissionsRef = useRef(onRequestPermissions);
   useEffect(() => { onRpcRef.current = onRpc; }, [onRpc]);
   useEffect(() => { onLoadRef.current = onLoad; }, [onLoad]);
+  useEffect(() => { onCloseRef.current = onRequestClose; }, [onRequestClose]);
+  useEffect(() => { onPermissionsRef.current = onRequestPermissions; }, [onRequestPermissions]);
 
   useEffect(() => {
     let disposed = false;
@@ -55,9 +60,14 @@ export function NsiteNative({
     };
 
     (async () => {
-      const load = await NsiteWebView.addListener('nsiteLoad', () => onLoadRef.current?.());
-      const rpc = await NsiteWebView.addListener('nsiteRpc', (e) => { void handleRpc(e); });
-      listeners.push(load, rpc);
+      listeners.push(
+        await NsiteWebView.addListener('nsiteLoad', () => onLoadRef.current?.()),
+        await NsiteWebView.addListener('nsiteRpc', (e) => { void handleRpc(e); }),
+        // The site's WebView covers the viewer's own controls, so the plugin
+        // draws a native pair over it and reports presses back here.
+        await NsiteWebView.addListener('nsitePower', () => onCloseRef.current?.()),
+        await NsiteWebView.addListener('nsitePermissions', () => onPermissionsRef.current?.()),
+      );
 
       // A late unmount would otherwise leave a WebView with no owner.
       if (disposed) return;

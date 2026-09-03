@@ -46,9 +46,17 @@ export interface NsiteFrameProps {
    * Ask the viewer to close.
    *
    * Raised for a back gesture the frame decided not to handle. Only the frame
-   * knows whether the site had somewhere to go back to.
+   * knows whether the site had somewhere to go back to. An implementation that
+   * draws its own set-top controls raises it for the power button too.
    */
   onRequestClose?: () => void;
+  /**
+   * Ask the viewer to open the permissions panel.
+   *
+   * Only raised by an implementation whose pixels cover the viewer's own
+   * controls, and so has to provide its own. The panel itself stays in React.
+   */
+  onRequestPermissions?: () => void;
   /** Applied to the frame's outermost element. */
   className?: string;
 }

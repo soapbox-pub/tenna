@@ -51,6 +51,18 @@ export interface NsiteWebViewPlugin {
     event: 'nsiteRpc',
     handler: (event: NsiteRpcEvent) => void,
   ): Promise<PluginListenerHandle>;
+
+  /**
+   * The native set-top controls were pressed.
+   *
+   * They exist natively only because the site's WebView is layered over the
+   * Capacitor one, which buries React's copy. Pressing one changes nothing on
+   * its own — React still decides what a press means and draws every panel.
+   */
+  addListener(
+    event: 'nsitePower' | 'nsitePermissions',
+    handler: () => void,
+  ): Promise<PluginListenerHandle>;
 }
 
 export const NsiteWebView = registerPlugin<NsiteWebViewPlugin>('NsiteWebView');

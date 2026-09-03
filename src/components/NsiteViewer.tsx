@@ -33,12 +33,29 @@ export function NsiteViewer({ event, channel, onClose }: NsiteViewerProps) {
   const [loaded, setLoaded] = useState(false);
   const [noiseGone, setNoiseGone] = useState(false);
 
+  // The permissions panel, and whether it was opened from a frame's own
+  // controls rather than from the trigger here. Only in that case is the
+  // frame painting over the viewer, and only then does it have to be
+  // concealed for the panel to be visible at all.
+  const [permissionsOpen, setPermissionsOpen] = useState(false);
+  const [permissionsOverFrame, setPermissionsOverFrame] = useState(false);
+
   const name = event.tags.find(([n]) => n === 'd')?.[1] ?? 'nsite';
   const siteId = useMemo(() => getNsiteSubdomain(event), [event]);
 
   const signerRpc = useNsiteSignerRpc({ siteId, siteName: name });
 
   const handleClose = useCallback(() => setClosing(true), []);
+
+  const handleRequestPermissions = useCallback(() => {
+    setPermissionsOverFrame(true);
+    setPermissionsOpen(true);
+  }, []);
+
+  const handlePermissionsOpenChange = useCallback((open: boolean) => {
+    setPermissionsOpen(open);
+    if (!open) setPermissionsOverFrame(false);
+  }, []);
 
   // The document is on its way; give the site a beat to paint before lifting
   // the static.
@@ -78,9 +95,12 @@ export function NsiteViewer({ event, channel, onClose }: NsiteViewerProps) {
           pubkey={user?.pubkey}
           onRpc={user ? signerRpc.onRpc : undefined}
           onLoad={handleLoad}
-          concealed={!!signerRpc.pendingPrompt}
+          // A frame that owns its own pixels has to get out of the way of
+          // anything the viewer draws over it, panels included.
+          concealed={!!signerRpc.pendingPrompt || permissionsOverFrame}
           closing={closing}
           onRequestClose={handleClose}
+          onRequestPermissions={handleRequestPermissions}
           className="absolute inset-0"
         />
 
@@ -118,7 +138,13 @@ export function NsiteViewer({ event, channel, onClose }: NsiteViewerProps) {
           them and swallows taps meant for them. */}
       {!closing && (
         <div className="absolute right-safe-offset-3 top-safe-offset-3 z-10 flex items-center gap-1 rounded-full border border-white/10 bg-black/60 p-1 backdrop-blur-sm">
-          {user && <NsitePermissionManager siteId={siteId} />}
+          {user && (
+            <NsitePermissionManager
+              siteId={siteId}
+              open={permissionsOpen}
+              onOpenChange={handlePermissionsOpenChange}
+            />
+          )}
           <button
             type="button"
             onClick={handleClose}

@@ -4,6 +4,7 @@ import android.net.Uri;
 import android.webkit.WebResourceResponse;
 
 import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
@@ -34,10 +35,25 @@ import java.util.Map;
  */
 final class NsiteFileServer {
 
+    /**
+     * Told what the site's own document asks for, the first time it is served.
+     *
+     * Raised on the WebView's background thread, before the renderer has been
+     * given a byte of the document — early enough that the view can be laid
+     * out for the site before it paints.
+     */
+    interface ChromeListener {
+        void onSiteChrome(NsiteSiteChrome chrome);
+    }
+
     /** Manifest path (e.g. {@code /index.html}) to sha256. */
     private final Map<String, String> files;
     private final List<String> servers;
     private final File cacheDir;
+    private final ChromeListener chromeListener;
+
+    /** The document is served again on every SPA route; sniff it once. */
+    private volatile boolean chromeReported;
 
     /**
      * The last server that successfully served a blob, tried first next time.
@@ -47,10 +63,16 @@ final class NsiteFileServer {
      */
     private volatile String preferredServer;
 
-    NsiteFileServer(Map<String, String> files, List<String> servers, File cacheDir) {
+    NsiteFileServer(
+        Map<String, String> files,
+        List<String> servers,
+        File cacheDir,
+        ChromeListener chromeListener
+    ) {
         this.files = files;
         this.servers = servers;
         this.cacheDir = cacheDir;
+        this.chromeListener = chromeListener;
         //noinspection ResultOfMethodCallIgnored
         cacheDir.mkdirs();
     }
@@ -93,16 +115,53 @@ final class NsiteFileServer {
         headers.put("Cache-Control", "no-cache");
 
         try {
+            InputStream body = "/index.html".equals(servingPath)
+                ? documentStream(blob)
+                : new FileInputStream(blob);
+
             return new WebResourceResponse(
                 mimeType,
                 NsiteMimeTypes.encodingFor(mimeType),
                 200,
                 "OK",
                 headers,
-                new FileInputStream(blob)
+                body
             );
         } catch (IOException e) {
             return textResponse(500, "Internal Error", "Unreadable blob");
+        }
+    }
+
+    /**
+     * Read the site's document into memory so it can be sniffed on the way out.
+     *
+     * Its meta tags decide how the WebView is laid out, and that has to be
+     * settled before the renderer paints — so the document is read here rather
+     * than asked for afterwards with {@code evaluateJavascript}, which would
+     * arrive a frame late and show the site jumping into place.
+     */
+    private InputStream documentStream(File blob) throws IOException {
+        byte[] bytes = readFully(blob);
+
+        if (!chromeReported) {
+            chromeReported = true;
+            chromeListener.onSiteChrome(
+                NsiteSiteChrome.read(new String(bytes, StandardCharsets.UTF_8))
+            );
+        }
+
+        return new ByteArrayInputStream(bytes);
+    }
+
+    private static byte[] readFully(File file) throws IOException {
+        try (InputStream in = new FileInputStream(file);
+             ByteArrayOutputStream out = new ByteArrayOutputStream((int) file.length())) {
+            byte[] buffer = new byte[16 * 1024];
+            int read;
+            while ((read = in.read(buffer)) != -1) {
+                out.write(buffer, 0, read);
+            }
+            return out.toByteArray();
         }
     }
 

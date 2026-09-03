@@ -56,13 +56,26 @@ function getSnapshot(): string | null {
 interface NsitePermissionManagerProps {
   /** Canonical nsite subdomain identifier. */
   siteId: string;
+  /**
+   * Controlled open state.
+   *
+   * The viewer takes control because the panel can also be asked for from
+   * outside React entirely — the native Android chrome, which is drawn over
+   * the site's own WebView and can't reach the trigger below it.
+   */
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
 }
 
 /**
  * Popover triggered from the nsite preview nav bar that shows and manages
  * stored permissions for the current site.
  */
-export function NsitePermissionManager({ siteId }: NsitePermissionManagerProps) {
+export function NsitePermissionManager({
+  siteId,
+  open,
+  onOpenChange,
+}: NsitePermissionManagerProps) {
   const { user } = useCurrentUser();
 
   // Subscribe to permission changes so the list stays in sync.
@@ -88,7 +101,7 @@ export function NsitePermissionManager({ siteId }: NsitePermissionManagerProps) 
   const hasPermissions = permissions.length > 0;
 
   return (
-    <Popover>
+    <Popover open={open} onOpenChange={onOpenChange}>
       <PopoverTrigger asChild>
         <Button
           variant="ghost"

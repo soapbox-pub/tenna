@@ -131,6 +131,18 @@ public class NsiteWebViewPlugin extends Plugin {
      */
     private boolean edgeToEdge = true;
 
+    /**
+     * Whether the shutoff animation is already playing.
+     *
+     * The frame is asked to close twice — once when the viewer starts its own
+     * shutoff, and again when the component finally unmounts — and the second
+     * ask arrives while the first animation is still running. Without this it
+     * would start a second animation over the first and destroy the WebView
+     * from two end actions, tearing a live surface out from under the render
+     * thread.
+     */
+    private boolean shuttingDown;
+
     // -----------------------------------------------------------------------
     // Lifecycle
     // -----------------------------------------------------------------------
@@ -290,10 +302,11 @@ public class NsiteWebViewPlugin extends Plugin {
     public void close(PluginCall call) {
         getActivity().runOnUiThread(() -> {
             ViewGroup view = container;
-            if (view == null) {
+            if (view == null || shuttingDown) {
                 call.resolve();
                 return;
             }
+            shuttingDown = true;
 
             // Approximates the `crt-off` keyframes the React layer uses: the
             // picture collapses to a line, then to a point, then goes out.
@@ -371,8 +384,13 @@ public class NsiteWebViewPlugin extends Plugin {
         fileServer = null;
         replyProxy = null;
         host = null;
+        shuttingDown = false;
 
         if (frame != null) {
+            // Whoever got here first wins: opening another site, or the
+            // activity going away, can arrive mid-shutoff. Stop the animation
+            // before the view it is transforming is taken apart.
+            frame.animate().setListener(null).cancel();
             ViewCompat.setOnApplyWindowInsetsListener(frame, null);
             ViewGroup parent = (ViewGroup) frame.getParent();
             if (parent != null) parent.removeView(frame);

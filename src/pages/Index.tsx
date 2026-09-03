@@ -55,7 +55,7 @@ const Index = () => {
         certain size a grid of app icons stops reading as a home screen and
         starts reading as a poster.
       */}
-      <div className="relative mx-auto max-w-2xl px-5 pb-20 pt-10 sm:px-8 sm:pt-16">
+      <div className="relative mx-auto max-w-2xl px-5 pb-safe-offset-20 pt-safe-offset-10 sm:px-8 sm:pt-safe-offset-16">
         <div className="grid grid-cols-4 gap-x-4 gap-y-7 sm:grid-cols-5 sm:gap-x-6 sm:gap-y-9 lg:grid-cols-6">
           {isLoading &&
             Array.from({ length: 6 }).map((_, i) => <AppIconSkeleton key={i} />)}

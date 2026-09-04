@@ -33,33 +33,47 @@ const SAFE = 0.6;
  * Never fails: an icon that can't be fetched, decoded, or read back off the
  * canvas falls through to the lettered tile, which is what the channel wall
  * shows for a site with no artwork anyway.
+ *
+ * `size` is the edge of the square to draw, defaulting to the launcher's. The
+ * nsite bar asks for a much smaller one — it draws the same tile a few
+ * millimetres across, and the launcher's canvas would be a hundred times the
+ * bytes to carry across the bridge for it.
  */
-export async function renderAppIconPng(name: string, app?: NsiteApp): Promise<string | null> {
+export async function renderAppIconPng(
+  name: string,
+  app?: NsiteApp,
+  size: number = SIZE,
+): Promise<string | null> {
   const image = app?.iconUrl ? await loadImage(app.iconUrl) : null;
 
-  const drawn = draw(name, app, image);
+  const drawn = draw(name, app, image, size);
   if (drawn) return drawn;
 
   // Reading back a canvas that a hotlinked, CORS-less icon has been drawn to
   // throws — the image is still fine to *display*, which is why the tile shows
   // it, but it cannot be exported. The tile without it can.
-  return image ? draw(name, app, null) : null;
+  return image ? draw(name, app, null, size) : null;
 }
 
-function draw(name: string, app: NsiteApp | undefined, image: HTMLImageElement | null): string | null {
+function draw(
+  name: string,
+  app: NsiteApp | undefined,
+  image: HTMLImageElement | null,
+  size: number,
+): string | null {
   const canvas = document.createElement('canvas');
-  canvas.width = SIZE;
-  canvas.height = SIZE;
+  canvas.width = size;
+  canvas.height = size;
 
   const ctx = canvas.getContext('2d');
   if (!ctx) return null;
 
-  fillBackground(ctx, name, app?.background ?? null);
+  fillBackground(ctx, name, app?.background ?? null, size);
 
   if (image) {
-    drawIcon(ctx, image, app?.fit ?? 'cover');
+    drawIcon(ctx, image, app?.fit ?? 'cover', size);
   } else {
-    drawInitial(ctx, name);
+    drawInitial(ctx, name, size);
   }
 
   try {
@@ -70,18 +84,23 @@ function draw(name: string, app: NsiteApp | undefined, image: HTMLImageElement |
 }
 
 /** The site's declared colour, or its gradient, across the whole bleed. */
-function fillBackground(ctx: CanvasRenderingContext2D, name: string, background: string | null) {
+function fillBackground(
+  ctx: CanvasRenderingContext2D,
+  name: string,
+  background: string | null,
+  size: number,
+) {
   if (background) {
     ctx.fillStyle = background;
   } else {
     const [from, to] = getTileColors(name);
-    const gradient = ctx.createLinearGradient(...gradientLine(TILE_GRADIENT_ANGLE, SIZE));
+    const gradient = ctx.createLinearGradient(...gradientLine(TILE_GRADIENT_ANGLE, size));
     gradient.addColorStop(0, from);
     gradient.addColorStop(1, to);
     ctx.fillStyle = gradient;
   }
 
-  ctx.fillRect(0, 0, SIZE, SIZE);
+  ctx.fillRect(0, 0, size, size);
 }
 
 /**
@@ -108,12 +127,17 @@ function gradientLine(degrees: number, size: number): [number, number, number, n
  * A picture fills the bleed and lets the mask cut it; a glyph is kept inside
  * the safe zone where nothing can.
  */
-function drawIcon(ctx: CanvasRenderingContext2D, image: HTMLImageElement, fit: 'cover' | 'contain') {
+function drawIcon(
+  ctx: CanvasRenderingContext2D,
+  image: HTMLImageElement,
+  fit: 'cover' | 'contain',
+  size: number,
+) {
   const width = image.naturalWidth || image.width;
   const height = image.naturalHeight || image.height;
   if (!width || !height) return;
 
-  const box = fit === 'cover' ? SIZE : SIZE * SAFE;
+  const box = fit === 'cover' ? size : size * SAFE;
   const scale = fit === 'cover'
     ? Math.max(box / width, box / height)
     : Math.min(box / width, box / height);
@@ -121,16 +145,16 @@ function drawIcon(ctx: CanvasRenderingContext2D, image: HTMLImageElement, fit: '
   const drawWidth = width * scale;
   const drawHeight = height * scale;
 
-  ctx.drawImage(image, (SIZE - drawWidth) / 2, (SIZE - drawHeight) / 2, drawWidth, drawHeight);
+  ctx.drawImage(image, (size - drawWidth) / 2, (size - drawHeight) / 2, drawWidth, drawHeight);
 }
 
 /** The stand-in for a site that ships no artwork: its initial, centred. */
-function drawInitial(ctx: CanvasRenderingContext2D, name: string) {
+function drawInitial(ctx: CanvasRenderingContext2D, name: string, size: number) {
   ctx.fillStyle = 'rgba(255, 255, 255, 0.95)';
-  ctx.font = `600 ${Math.round(SIZE * 0.4)}px system-ui, sans-serif`;
+  ctx.font = `600 ${Math.round(size * 0.4)}px system-ui, sans-serif`;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.fillText(getTileInitial(name), SIZE / 2, SIZE / 2);
+  ctx.fillText(getTileInitial(name), size / 2, size / 2);
 }
 
 function loadImage(src: string): Promise<HTMLImageElement | null> {

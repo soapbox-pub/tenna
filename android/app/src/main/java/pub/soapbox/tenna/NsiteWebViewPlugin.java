@@ -5,9 +5,12 @@ import android.animation.AnimatorListenerAdapter;
 import android.annotation.SuppressLint;
 import android.content.pm.ApplicationInfo;
 import android.content.res.ColorStateList;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import android.graphics.Color;
 import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
+import android.util.Base64;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
@@ -73,14 +76,17 @@ import java.util.Set;
  *       in a secure context.
  *   <li>The view sits above the Capacitor WebView so that touch, focus and the
  *       soft keyboard all behave normally. That buries React's copy of the
- *       set-top controls, so the power and permissions buttons are drawn here
- *       instead — but only the buttons. Every panel is still React's, shown by
- *       concealing this view, and the transitions are run here to match.
+ *       chrome, so the bar over the site is drawn here instead — but only the
+ *       bar. Every panel is still React's, shown by concealing this view, and
+ *       the transitions are run here to match.
  *   <li>A site that doesn't declare {@code viewport-fit=cover} is inset by the
  *       safe area rather than laid out under the system bars, so that the
  *       viewport it is written against is the one it gets. That is what
  *       {@code viewport-fit=auto} asks for and what Chrome only honours for
  *       display cutouts.
+ *   <li>A site opened from Tenna is laid out below the bar, and told the
+ *       insets from where it actually starts rather than the window's — so
+ *       the strip the bar already covers is never offered to it twice.
  * </ul>
  */
 @CapacitorPlugin(name = "NsiteWebView")
@@ -103,12 +109,17 @@ public class NsiteWebViewPlugin extends Plugin {
     /** Injected object name the NIP-07 provider posts through. */
     private static final String HOST_OBJECT = "tennaHost";
 
-    /** Gap between the safe area and the set-top controls, matching the React chrome. */
+    /** Gap between the safe area and the floating shield, matching the React chrome. */
     private static final int CHROME_MARGIN_DP = 12;
 
     @Nullable private ViewGroup container;
+    /** The site's own pixels and the letterbox around them, inside {@link #container}. */
+    @Nullable private ViewGroup picture;
     @Nullable private WebView webView;
-    @Nullable private View chrome;
+    /** The bar over a site opened from Tenna. Null for a pinned one. */
+    @Nullable private NsiteTopBarView topBar;
+    /** The floating shield a pinned site gets instead of a bar, if it has a signer. */
+    @Nullable private View pill;
     @Nullable private NsiteFileServer fileServer;
     @Nullable private JavaScriptReplyProxy replyProxy;
     @Nullable private String host;
@@ -154,9 +165,14 @@ public class NsiteWebViewPlugin extends Plugin {
         String providerScript = call.getString("providerScript");
         JSObject manifest = call.getObject("files");
         JSArray serverList = call.getArray("servers");
-        // A site opened from its own home screen shortcut has nowhere to be
-        // turned off to — the task is the site — so it is offered no way to.
-        final boolean showPower = Boolean.TRUE.equals(call.getBoolean("showPower", true));
+
+        // A site opened from its own home screen shortcut has nothing above it
+        // to go back to — the task is the site — so it is given no bar, and
+        // the whole screen instead.
+        JSObject barSpec = call.getObject("topBar");
+        final boolean hasBar = barSpec != null;
+        final String barTitle = hasBar ? barSpec.getString("title") : null;
+        final String barIcon = hasBar ? barSpec.getString("icon") : null;
 
         if (siteId == null || manifest == null || serverList == null) {
             call.reject("siteId, files and servers are required");
@@ -200,29 +216,54 @@ public class NsiteWebViewPlugin extends Plugin {
             configure(view);
             installBridge(view, origin, providerScript);
 
-            // The site's pixels and the controls over them travel together:
-            // they fade in as one, shut off as one, and hide as one behind a
-            // permission prompt. The frame also paints the letterbox for a
-            // site that isn't drawing under the system bars itself.
+            // Everything the site brought with it, in one view: this is what
+            // the shutoff collapses and what a permission prompt hides.
             FrameLayout frame = new FrameLayout(getContext());
-            frame.setBackgroundColor(Color.BLACK);
 
-            // Start invisible: React is painting tuning static underneath, and
-            // the site fades up over it once it has something to show.
-            frame.setAlpha(0f);
-
-            frame.addView(view, new FrameLayout.LayoutParams(
+            // The picture, and the letterbox around it for a site that isn't
+            // drawing under the system bars itself. Starts invisible: React is
+            // painting tuning static underneath, and the site fades up over it
+            // once it has something to show. The bar does not — it is the way
+            // out, and a site that never loads is exactly when one is needed.
+            FrameLayout site = new FrameLayout(getContext());
+            site.setBackgroundColor(Color.BLACK);
+            site.setAlpha(0f);
+            site.addView(view, new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT,
                 FrameLayout.LayoutParams.MATCH_PARENT
             ));
 
-            View controls = buildChrome(providerScript != null, showPower);
-            if (controls != null) {
-                frame.addView(controls, new FrameLayout.LayoutParams(
+            frame.addView(site, new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT
+            ));
+
+            NsiteTopBarView bar = null;
+            View shield = null;
+
+            if (hasBar) {
+                bar = new NsiteTopBarView(
+                    getContext(),
+                    providerScript != null,
+                    () -> notifyListeners("nsiteBack", new JSObject()),
+                    () -> notifyListeners("nsitePermissions", new JSObject())
+                );
+                bar.setSiteTitle(barTitle);
+                bar.setSiteIcon(decode(barIcon));
+                frame.addView(bar, new FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.MATCH_PARENT,
                     FrameLayout.LayoutParams.WRAP_CONTENT,
-                    FrameLayout.LayoutParams.WRAP_CONTENT,
-                    Gravity.TOP | Gravity.END
+                    Gravity.TOP
                 ));
+            } else {
+                shield = buildPill(providerScript != null);
+                if (shield != null) {
+                    frame.addView(shield, new FrameLayout.LayoutParams(
+                        FrameLayout.LayoutParams.WRAP_CONTENT,
+                        FrameLayout.LayoutParams.WRAP_CONTENT,
+                        Gravity.TOP | Gravity.END
+                    ));
+                }
             }
 
             ViewGroup content = getActivity().findViewById(android.R.id.content);
@@ -232,14 +273,45 @@ public class NsiteWebViewPlugin extends Plugin {
             ));
 
             container = frame;
+            picture = site;
             webView = view;
-            chrome = controls;
+            topBar = bar;
+            pill = shield;
 
             observeInsets(frame);
+            if (bar != null) observeSiteInsets(view);
 
             view.loadUrl(origin + "/");
             call.resolve();
         });
+    }
+
+    /** Say what the bar says, once more of the site is known. */
+    @PluginMethod
+    public void setTopBar(PluginCall call) {
+        final String title = call.getString("title");
+        final String icon = call.getString("icon");
+
+        getActivity().runOnUiThread(() -> {
+            NsiteTopBarView bar = topBar;
+            if (bar != null) {
+                bar.setSiteTitle(title);
+                bar.setSiteIcon(decode(icon));
+            }
+            call.resolve();
+        });
+    }
+
+    @Nullable
+    private static Bitmap decode(@Nullable String base64) {
+        if (base64 == null || base64.isEmpty()) return null;
+        try {
+            byte[] bytes = Base64.decode(base64, Base64.DEFAULT);
+            return BitmapFactory.decodeByteArray(bytes, 0, bytes.length);
+        } catch (IllegalArgumentException e) {
+            // A tile that won't decode costs the bar its icon and nothing else.
+            return null;
+        }
     }
 
     /**
@@ -261,31 +333,56 @@ public class NsiteWebViewPlugin extends Plugin {
         ViewCompat.requestApplyInsets(view);
     }
 
-    /** Lay the site and the controls out for the current insets. */
+    /**
+     * Hand the site the insets from where the site actually starts.
+     *
+     * A view is dispatched the window's insets whatever it is laid out over, so
+     * a WebView sitting below the bar would still be told the status bar was
+     * above it and would pad for a strip it cannot reach — the bar is already
+     * there. Insetting by the bar's height moves the origin down to the top of
+     * the site, which is what makes {@code env(safe-area-inset-top)} nothing
+     * there, and leaves the cutout and the navigation bar saying what they say.
+     */
+    private void observeSiteInsets(WebView view) {
+        ViewCompat.setOnApplyWindowInsetsListener(view, (v, insets) -> {
+            NsiteTopBarView bar = topBar;
+            int top = bar == null ? 0 : bar.heightFor(safeArea);
+            ViewCompat.onApplyWindowInsets(v, insets.inset(0, top, 0, 0));
+            // What the rest of the hierarchy is told is the window's own; only
+            // the site sees them from where the site sits.
+            return insets;
+        });
+    }
+
+    /** Lay the site and the chrome over it out for the current insets. */
     private void layoutForSafeArea() {
+        NsiteTopBarView bar = topBar;
+        if (bar != null) bar.setSafeArea(safeArea);
+
         WebView view = webView;
         if (view != null) {
             FrameLayout.LayoutParams params = (FrameLayout.LayoutParams) view.getLayoutParams();
             // A site that opted in fills the window and pads itself with
             // `env()`. One that didn't is inset until its viewport really is
             // the safe area, which is the assumption its CSS is written under.
+            // The top belongs to the bar either way, where there is one.
             params.setMargins(
                 edgeToEdge ? 0 : safeArea.left,
-                edgeToEdge ? 0 : safeArea.top,
+                bar != null ? bar.heightFor(safeArea) : (edgeToEdge ? 0 : safeArea.top),
                 edgeToEdge ? 0 : safeArea.right,
                 edgeToEdge ? 0 : safeArea.bottom
             );
             view.setLayoutParams(params);
         }
 
-        View controls = chrome;
-        if (controls != null) {
+        View shield = pill;
+        if (shield != null) {
             int gap = dp(CHROME_MARGIN_DP);
-            FrameLayout.LayoutParams params = (FrameLayout.LayoutParams) controls.getLayoutParams();
+            FrameLayout.LayoutParams params = (FrameLayout.LayoutParams) shield.getLayoutParams();
             // Always in the safe area, whatever the site chose. Under the
-            // status bar they'd be both invisible and untappable.
+            // status bar it'd be both invisible and untappable.
             params.setMargins(0, safeArea.top + gap, safeArea.right + gap, 0);
-            controls.setLayoutParams(params);
+            shield.setLayoutParams(params);
         }
     }
 
@@ -293,7 +390,7 @@ public class NsiteWebViewPlugin extends Plugin {
     private void applySiteChrome(NsiteSiteChrome siteChrome) {
         edgeToEdge = siteChrome.edgeToEdge;
 
-        ViewGroup frame = container;
+        ViewGroup frame = picture;
         if (frame != null && !siteChrome.edgeToEdge && siteChrome.themeColor != null) {
             // The strips left by the letterbox read as part of the site rather
             // than as a black border around it.
@@ -383,13 +480,18 @@ public class NsiteWebViewPlugin extends Plugin {
     private void destroyWebView() {
         WebView view = webView;
         ViewGroup frame = container;
+        ViewGroup site = picture;
         webView = null;
         container = null;
-        chrome = null;
+        picture = null;
+        topBar = null;
+        pill = null;
         fileServer = null;
         replyProxy = null;
         host = null;
         shuttingDown = false;
+
+        if (site != null) site.animate().cancel();
 
         if (frame != null) {
             // Whoever got here first wins: opening another site, or the
@@ -405,28 +507,28 @@ public class NsiteWebViewPlugin extends Plugin {
     }
 
     // -----------------------------------------------------------------------
-    // Set-top controls
+    // The floating shield
     // -----------------------------------------------------------------------
 
     /**
-     * Build the power and permissions buttons, in native views.
+     * Build the permissions button, in native views.
      *
-     * They have to be native. The site's WebView is layered over the Capacitor
-     * one so that touch, focus and the soft keyboard need no forwarding, and
-     * that same decision buries React's copy of these controls — a button
-     * nobody can see or press is no way to leave a site.
+     * It has to be native. The site's WebView is layered over the Capacitor one
+     * so that touch, focus and the soft keyboard need no forwarding, and that
+     * same decision buries React's copy of it.
      *
-     * Only the buttons are native. Pressing one is reported to React, which
-     * still owns every panel: the permissions popover conceals the site and
-     * appears over it, anchored to the React chrome in the same place.
+     * Only the button is native. Pressing it is reported to React, which still
+     * owns every panel: the permissions popover conceals the site and appears
+     * over it, anchored to the React chrome in the same place.
      *
-     * Returns null when neither button applies — a logged-out user opening a
-     * pinned site — because an empty pill is a smudge over the corner of a
-     * page that has done nothing to deserve one.
+     * This is the pinned site's chrome — a site opened from Tenna hangs the
+     * same button off {@link NsiteTopBarView} instead. Returns null when there
+     * is no signer to have granted anything, because an empty pill is a smudge
+     * over the corner of a page that has done nothing to deserve one.
      */
     @Nullable
-    private View buildChrome(boolean hasSigner, boolean showPower) {
-        if (!hasSigner && !showPower) return null;
+    private View buildPill(boolean hasSigner) {
+        if (!hasSigner) return null;
 
         LinearLayout bar = new LinearLayout(getContext());
         bar.setOrientation(LinearLayout.HORIZONTAL);
@@ -445,23 +547,12 @@ public class NsiteWebViewPlugin extends Plugin {
         pill.setStroke(dp(1), 0x1AFFFFFF);
         bar.setBackground(pill);
 
-        if (hasSigner) {
-            bar.addView(button(
-                R.drawable.ic_nsite_shield,
-                0xFFFFFFFF,
-                "Site permissions",
-                () -> notifyListeners("nsitePermissions", new JSObject())
-            ));
-        }
-
-        if (showPower) {
-            bar.addView(button(
-                R.drawable.ic_nsite_power,
-                0xFFDA1F52,
-                "Turn off",
-                () -> notifyListeners("nsitePower", new JSObject())
-            ));
-        }
+        bar.addView(button(
+            R.drawable.ic_nsite_shield,
+            0xFFFFFFFF,
+            "Site permissions",
+            () -> notifyListeners("nsitePermissions", new JSObject())
+        ));
 
         return bar;
     }
@@ -541,9 +632,9 @@ public class NsiteWebViewPlugin extends Plugin {
             @Override
             public void onPageFinished(WebView v, String url) {
                 notifyListeners("nsiteLoad", new JSObject());
-                // The frame, not the WebView: the letterbox and the set-top
-                // controls come up with the picture, not before it.
-                ViewGroup frame = container;
+                // The picture, not the WebView: the letterbox comes up with
+                // the site rather than framing an empty screen before it.
+                ViewGroup frame = picture;
                 if (frame != null) frame.animate().alpha(1f).setDuration(600).start();
             }
         });

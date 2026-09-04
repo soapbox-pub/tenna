@@ -275,9 +275,14 @@ async function looksLikeGlyph(url: string): Promise<boolean | null> {
  * All three come out of the same pass over `/index.html` and the web app
  * manifest it links, and all three prefer the declarations meant for a home
  * screen over the ones meant for a browser tab.
+ *
+ * `enabled` is there for the callers with somewhere else to be: a pinned site
+ * shows no tile and no bar, and fetching a document to decorate neither of
+ * them would only be a Blossom round trip in the way of the site itself.
  */
-export function useNsiteApp(event: NostrEvent) {
+export function useNsiteApp(event: NostrEvent, options?: { enabled?: boolean }) {
   return useQuery({
+    enabled: options?.enabled ?? true,
     queryKey: ['nsite-app', event.id],
     queryFn: async (): Promise<NsiteApp> => {
       const files = buildManifest(event);

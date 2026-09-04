@@ -57,9 +57,19 @@ export function NsiteIframe({
   onLoad,
   concealed,
   onRequestClose,
+  topBar,
   className,
 }: NsiteFrameProps) {
-  const insets = useSafeAreaInsets();
+  const measured = useSafeAreaInsets();
+
+  // The bar runs under the status bar in the site's place, so the site's top
+  // inset is spent before it ever sees it. Handing it the device's would pad
+  // the same strip twice — once by the bar, once by the page under it.
+  const insets = useMemo<SafeAreaInsets>(
+    () => (topBar ? { ...measured, top: 0 } : measured),
+    [measured, topBar],
+  );
+
   const frameRef = useRef<SandboxFrameHandle>(null);
   const [frameReady, setFrameReady] = useState(false);
 

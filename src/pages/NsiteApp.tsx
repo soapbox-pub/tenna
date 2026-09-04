@@ -11,16 +11,20 @@ interface NsiteAppProps {
 }
 
 /**
- * A pinned nsite, standing in for the whole app.
+ * An nsite in a window of its own, standing in for the whole app.
  *
- * Tenna's home screen is not underneath this. The task belongs to the site —
- * it has its own card in the recents switcher, its own icon on the launcher,
- * and its own name — so there is no channel to have tuned away from and no
- * power button, which is the difference the user asked for by pinning it.
- * Leaving means leaving, and takes the task with it.
+ * The task belongs to the site — it has its own card in the recents switcher,
+ * its own name, and its own icon on the launcher if the user put one there —
+ * so there is no chrome of Tenna's over it and nothing to go back to inside
+ * it. Leaving means leaving, and takes the task with it.
  *
- * The manifest comes off disk, written when the shortcut was made, so a cold
- * press starts serving the site without dialling a relay first. Whether it is
+ * What is behind the window still matters for how it goes. Opened from the
+ * channel wall, leaving collapses back to the wall the way tuning off a
+ * channel always has; opened from the home screen, there is no wall to
+ * collapse to and it simply closes.
+ *
+ * The manifest comes off disk, written when the site was opened or pinned, so
+ * a cold start serves the site without dialling a relay first. Whether it is
  * still the current manifest is settled afterwards, in the background, for
  * next time.
  */
@@ -59,7 +63,15 @@ export function NsiteApp({ launch }: NsiteAppProps) {
     );
   }
 
-  return <NsiteViewer event={event} standalone onClose={handleClose} />;
+  return (
+    <NsiteViewer
+      event={event}
+      channel={launch.channel ?? undefined}
+      standalone
+      shutoff={launch.fromWall}
+      onClose={handleClose}
+    />
+  );
 }
 
 export default NsiteApp;

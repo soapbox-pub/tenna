@@ -4,14 +4,6 @@ import type { NostrEvent } from '@nostrify/nostrify';
 export interface NsiteTopBarContent {
   /** What to call the site: the name it gives itself, or the nsite's own. */
   title: string;
-  /**
-   * The site's tile, as a base64 PNG.
-   *
-   * Only of use to an implementation that draws the bar in native views, which
-   * can't be handed the blob URL an `<img>` takes. Resolved out of the site's
-   * own HTML, so it arrives a moment after the bar does, or not at all.
-   */
-  icon?: string;
 }
 
 /**
@@ -60,8 +52,7 @@ export interface NsiteFrameProps {
    * Ask the viewer to close.
    *
    * Raised for a back gesture the frame decided not to handle. Only the frame
-   * knows whether the site had somewhere to go back to. An implementation that
-   * draws its own chrome raises it for the bar's back button too.
+   * knows whether the site had somewhere to go back to.
    */
   onRequestClose?: () => void;
   /**
@@ -74,15 +65,13 @@ export interface NsiteFrameProps {
   /**
    * The navigation bar above the site, or omitted when there is none.
    *
-   * Two things follow from a bar being there. The bar covers the status bar,
-   * so the frame beneath it is already clear of it: its top inset is zero
-   * whatever the device's is, and applying the device's would push the site
-   * down by it twice. And an implementation whose pixels bury the viewer's
-   * own chrome has to draw the bar itself, which is what the content is for.
+   * What follows from a bar being there is the safe area: the bar covers the
+   * status bar, so the frame beneath it is already clear of it. Its top inset
+   * is zero whatever the device's is, and applying the device's would push the
+   * site down by that strip twice.
    *
-   * A site opened from its own home screen shortcut has no bar. It is the
-   * whole app in that task — there is nothing to go back to that isn't the
-   * launcher — so it gets the whole screen, insets and all.
+   * A site in a window of its own has no bar — there is nothing above it to go
+   * back to — so it gets the whole screen, insets and all.
    */
   topBar?: NsiteTopBarContent;
   /** Applied to the frame's outermost element. */

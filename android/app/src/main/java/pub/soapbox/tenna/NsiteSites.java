@@ -22,30 +22,36 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 
 /**
- * What a pinned nsite needs on disk to be launched without Tenna's home screen.
+ * What an nsite needs on disk to be launched in a window of its own.
  *
- * A shortcut on the launcher outlives the process that made it, and is pressed
- * cold — the lineup hasn't been fetched, no relay has been dialled, and the
- * site's manifest is nowhere in memory. So the manifest event is written here
- * when the shortcut is created and read back when it is pressed, which is what
- * lets a pinned site start straight into its own document. The web layer
- * refreshes the record from the relay once it is running, for next time.
+ * A site's window outlives the process that opened it — a shortcut on the
+ * launcher is pressed cold, and a task the system killed is resumed from its
+ * base intent alone. Either way the lineup hasn't been fetched, no relay has
+ * been dialled, and the site's manifest is nowhere in memory. So the manifest
+ * event is written here when the site is opened or pinned and read back when
+ * the window starts, which is what lets a site go straight into its own
+ * document. The web layer refreshes the record from the relay once it is
+ * running, for next time.
  *
  * Records are named by the sha256 of the site id rather than by the id itself.
  * A named site's id ends in its {@code d} tag, which is arbitrary event data —
  * it can contain a slash — and the same hash is the shortcut id and the key in
  * the launch intent, so nothing an event says ever reaches a path.
  */
-final class NsitePinnedSites {
+final class NsiteSites {
 
+    /**
+     * Named for what these records used to be — only pinned sites had them.
+     * Left alone so that sites pinned before that changed keep their manifests.
+     */
     private static final String DIRECTORY = "nsite-pinned";
 
     /** Squares of this size in the recents switcher; the icon is drawn at 4x that. */
     private static final int TASK_ICON_SIZE = 192;
 
-    private NsitePinnedSites() {}
+    private NsiteSites() {}
 
-    /** A record of a site that has been put on the home screen. */
+    /** A record of a site that has a window of its own. */
     static final class Record {
         final String siteId;
         final String label;
@@ -84,9 +90,9 @@ final class NsitePinnedSites {
     /**
      * Write a site's manifest and icon, replacing anything already there.
      *
-     * Called both when a shortcut is created and when the site is refreshed
-     * from the relay, so a pinned site follows its publisher rather than
-     * serving whatever it happened to be on the day it was pinned.
+     * Called when a site is opened, when it is pinned, and when it is
+     * refreshed from the relay — so a site follows its publisher rather than
+     * serving whatever it happened to be on the day its window was made.
      */
     static void save(
         Context context,
@@ -119,11 +125,11 @@ final class NsitePinnedSites {
     }
 
     /**
-     * Update a site's manifest, but only if it is pinned.
+     * Update a site's manifest, but only if it already has a record.
      *
      * The refresh runs unconditionally on the web side, which doesn't know
-     * whether a record exists; a site that was never pinned, or has since been
-     * removed, must not gain one by being looked at.
+     * whether one exists; a site whose record has since been forgotten must
+     * not gain another by being looked at.
      */
     static boolean refresh(
         Context context,
@@ -154,6 +160,24 @@ final class NsitePinnedSites {
             // A truncated or hand-edited record is no record.
             return null;
         }
+    }
+
+    /**
+     * Forget a site, manifest and icon both.
+     *
+     * A site opened from the channel wall keeps its record only as long as its
+     * window does: the record is what the window is resumed from, and once the
+     * window is gone the wall is how the site gets opened again. A pinned site
+     * keeps its record whatever happens to the window — the shortcut is still
+     * on the home screen, and pressing it must not need a relay.
+     */
+    static void forget(Context context, @NonNull String siteId) {
+        File dir = directory(context);
+        String key = key(siteId);
+        //noinspection ResultOfMethodCallIgnored
+        new File(dir, key + ".json").delete();
+        //noinspection ResultOfMethodCallIgnored
+        new File(dir, key + ".png").delete();
     }
 
     /**

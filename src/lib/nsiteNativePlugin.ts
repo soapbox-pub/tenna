@@ -1,7 +1,5 @@
 import { Capacitor, registerPlugin, type PluginListenerHandle } from '@capacitor/core';
 
-import type { NsiteTopBarContent } from '@/components/nsite/types';
-
 /** A JSON-RPC call raised by the site's `window.nostr`. */
 export interface NsiteRpcEvent {
   id: number;
@@ -24,19 +22,7 @@ export interface NsiteWebViewPlugin {
     servers: string[];
     /** The NIP-07 provider to install, or omitted to withhold `window.nostr`. */
     providerScript?: string;
-    /**
-     * The bar to draw above the site, and the site to lay out below it.
-     *
-     * Omitted for a site opened from its own home screen shortcut, which has
-     * no Tenna behind it to go back to and so takes the whole screen. Whether
-     * it is here or not is fixed for the life of the view; what it says is
-     * not, and is changed with {@link setTopBar}.
-     */
-    topBar?: NsiteTopBarContent;
   }): Promise<void>;
-
-  /** Say what the bar says, once more of the site is known. */
-  setTopBar(options: NsiteTopBarContent): Promise<void>;
 
   /** Play the shutoff animation and tear the WebView down. */
   close(): Promise<void>;
@@ -67,15 +53,14 @@ export interface NsiteWebViewPlugin {
   ): Promise<PluginListenerHandle>;
 
   /**
-   * The native chrome over the site was pressed.
+   * The native shield over the site was pressed.
    *
    * It exists natively only because the site's WebView is layered over the
-   * Capacitor one, which buries React's copy. Pressing something changes
-   * nothing on its own — React still decides what a press means and draws
-   * every panel.
+   * Capacitor one, which buries React's copy. Pressing it changes nothing on
+   * its own — React still decides what the press means and draws the panel.
    */
   addListener(
-    event: 'nsiteBack' | 'nsitePermissions',
+    event: 'nsitePermissions',
     handler: () => void,
   ): Promise<PluginListenerHandle>;
 }

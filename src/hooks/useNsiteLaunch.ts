@@ -3,7 +3,7 @@ import { useNostr } from '@nostrify/react';
 import { useQuery } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
 
-import { NsiteShortcuts, supportsNsiteShortcuts } from '@/lib/nsiteShortcutsPlugin';
+import { NsiteShortcuts, supportsNsiteWindows } from '@/lib/nsiteShortcutsPlugin';
 import {
   isNsiteKind,
   NSITE_NAMED_KIND,
@@ -13,39 +13,52 @@ import {
 } from '@/lib/nsiteSubdomain';
 import { NSITE_RELAY } from '@/lib/tenna';
 
-/** The site a pinned shortcut asked for. */
+/** The site this window was opened for. */
 export interface NsiteLaunch {
   /** Canonical nsite subdomain. */
   siteId: string;
-  /** The name the shortcut was pinned under. */
+  /** The name the site was opened under. */
   label: string;
   /**
-   * The manifest as it stood when the site was pinned, or null if the record
+   * The manifest as it stood when the window was made, or null if the record
    * has been lost — cleared app data, or a shortcut older than the store.
    */
   event: NostrEvent | null;
+  /** The channel the site sits on, or null when it came off the home screen. */
+  channel: number | null;
+  /**
+   * Whether Tenna's channel wall is behind this window.
+   *
+   * It decides what leaving looks like. A site opened from the wall collapses
+   * back to it; one opened from the launcher closes outright, because the
+   * shutoff would be playing over the launcher's own animation.
+   */
+  fromWall: boolean;
 }
 
 /**
- * Asked once per process, and shared.
+ * Asked once per window, and shared.
  *
- * The answer decides whether the app is a home screen or a single site, which
- * is the first thing it has to know and never changes afterwards. Holding the
- * promise at module scope means the question survives a remount and is never
- * asked twice.
+ * The answer decides whether this is Tenna or a single site, which is the
+ * first thing it has to know and never changes afterwards. Holding the promise
+ * at module scope means the question survives a remount and is never asked
+ * twice — and module scope is per window, since every task boots the web layer
+ * into a WebView of its own.
  */
 let launchQuery: Promise<NsiteLaunch | null> | null = null;
 
 function askLauncher(): Promise<NsiteLaunch | null> {
-  if (!supportsNsiteShortcuts()) return Promise.resolve(null);
+  if (!supportsNsiteWindows()) return Promise.resolve(null);
 
   return NsiteShortcuts.getLaunchSite()
-    .then(({ siteId, event, label }) => {
+    .then(({ siteId, event, label, channel, fromWall }) => {
       if (!siteId) return null;
       return {
         siteId,
         label: label ?? siteId,
         event: parseEvent(event),
+        channel: channel ?? null,
+        fromWall: !!fromWall,
       };
     })
     .catch(() => null);
@@ -80,7 +93,7 @@ function parseEvent(json: string | undefined): NostrEvent | null {
 export function useNsiteLaunch(): { pending: boolean; launch: NsiteLaunch | null } {
   const [state, setState] = useState<{ pending: boolean; launch: NsiteLaunch | null }>(
     // Nothing to ask on the web, so nothing to wait for either.
-    () => (supportsNsiteShortcuts() ? { pending: true, launch: null } : { pending: false, launch: null }),
+    () => (supportsNsiteWindows() ? { pending: true, launch: null } : { pending: false, launch: null }),
   );
 
   useEffect(() => {

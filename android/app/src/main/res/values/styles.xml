@@ -19,4 +19,15 @@
     <style name="AppTheme.NoActionBarLaunch" parent="Theme.SplashScreen">
         <item name="android:background">@drawable/splash</item>
     </style>
+
+    <!--
+        A site's own window, which is not Tenna and should not announce itself
+        as Tenna. Flat, in the colour the tuning static comes up on, so the
+        wait before the web layer boots is the same darkness the CRT tune-in
+        starts from rather than a splash screen for another app.
+    -->
+    <style name="AppTheme.NsiteLaunch" parent="Theme.SplashScreen">
+        <item name="android:background">@color/nsiteWindow</item>
+        <item name="android:windowBackground">@color/nsiteWindow</item>
+    </style>
 </resources>

@@ -5,7 +5,7 @@ import { useToast } from '@/hooks/useToast';
 import type { NsiteApp } from '@/hooks/useNsiteApp';
 import { renderAppIconPng } from '@/lib/appIconBitmap';
 import { impactLight, notificationError } from '@/lib/haptics';
-import { NsiteShortcuts, supportsNsiteShortcuts } from '@/lib/nsiteShortcutsPlugin';
+import { NsiteShortcuts, supportsNsiteWindows } from '@/lib/nsiteShortcutsPlugin';
 import { getNsiteSubdomain } from '@/lib/nsiteSubdomain';
 
 interface UseNsitePinResult {
@@ -47,7 +47,7 @@ export function useNsitePin(
   }, [siteId]);
 
   useEffect(() => {
-    if (!supportsNsiteShortcuts()) return;
+    if (!supportsNsiteWindows()) return;
 
     let disposed = false;
 

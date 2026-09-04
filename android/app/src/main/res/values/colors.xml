@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+
+    <!--
+        The app's own background, and the colour a site's window is before
+        anything has been drawn in it. Matches `bg-[#150609]` in the web layer
+        and the recents card tint in NsiteAppActivity.
+    -->
+    <color name="nsiteWindow">#FF150609</color>
+</resources>

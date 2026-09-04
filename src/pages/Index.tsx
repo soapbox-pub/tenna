@@ -25,6 +25,10 @@ const Index = () => {
   });
 
   const { data: nsites, isLoading } = useNsites();
+
+  // The site tuned in over the wall, where a site can't be given a window of
+  // its own. On Android pressing a tile launches one instead and nothing here
+  // ever fills — see `useNsiteWindow`.
   const [active, setActive] = useState<{ event: NostrEvent; channel: number } | null>(null);
 
   const empty = !isLoading && (!nsites || nsites.length === 0);
@@ -64,6 +68,7 @@ const Index = () => {
             <AppIcon
               key={event.id}
               event={event}
+              channel={i + 1}
               onSelect={() => setActive({ event, channel: i + 1 })}
             />
           ))}

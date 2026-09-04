@@ -8,7 +8,6 @@ import { NsiteTopBar } from '@/components/NsiteTopBar';
 import { WhiteNoise } from '@/components/WhiteNoise';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useNsiteApp } from '@/hooks/useNsiteApp';
-import { useNsiteIconPng } from '@/hooks/useNsiteIconPng';
 import { useNsiteSignerRpc } from '@/hooks/useNsiteSignerRpc';
 import { getNsiteSubdomain } from '@/lib/nsiteSubdomain';
 import { cn } from '@/lib/utils';
@@ -19,14 +18,24 @@ interface NsiteViewerProps {
   /** 1-based channel number, shown in the tuning OSD. Omitted off the wall. */
   channel?: number;
   /**
-   * The site is the whole app here, opened from its own home screen shortcut.
+   * The site is the whole app here, in a window of its own.
    *
-   * There is no channel wall behind it, so it is given no bar and no shutoff —
-   * leaving is the back gesture, and it leaves for the launcher. The screen is
-   * the site's, safe area included, the same as any other app's.
+   * Nothing of Tenna's is behind it to be given a bar back to, so the screen
+   * is the site's, safe area included, the same as any other app's. Leaving is
+   * the back gesture, and it takes the window with it.
    */
   standalone?: boolean;
-  /** Called after the shutoff animation completes, or at once when standalone. */
+  /**
+   * Whether leaving plays the shutoff first.
+   *
+   * True by default, and for a window opened from the channel wall: the
+   * collapse is how a channel has always been tuned off, and it plays against
+   * the viewer's own backdrop, so it reads the same whether the wall is a
+   * component underneath or a task behind. False for a site opened from the
+   * home screen, where the animation would be playing over the launcher's own.
+   */
+  shutoff?: boolean;
+  /** Called after the shutoff animation completes, or at once without one. */
   onClose: () => void;
 }
 
@@ -37,7 +46,13 @@ interface NsiteViewerProps {
  * shutoff animations. How the site's files actually get served, and where its
  * origin lives, belongs to `<Nsite>`.
  */
-export function NsiteViewer({ event, channel, standalone, onClose }: NsiteViewerProps) {
+export function NsiteViewer({
+  event,
+  channel,
+  standalone,
+  shutoff = true,
+  onClose,
+}: NsiteViewerProps) {
   const { user } = useCurrentUser();
   const [closing, setClosing] = useState(false);
   const [loaded, setLoaded] = useState(false);
@@ -57,24 +72,20 @@ export function NsiteViewer({ event, channel, standalone, onClose }: NsiteViewer
 
   // What goes in the bar, for as long as there is one. The site's own name for
   // itself where it has one, since that is what it is called on the wall the
-  // user pressed. The tile is drawn twice over: as pixels here, and as bytes
-  // for a frame that has to draw the bar in native views.
+  // user pressed.
   const { data: app } = useNsiteApp(event, { enabled: !standalone });
   const title = app?.label ?? name;
-  const icon = useNsiteIconPng(title, app, !standalone);
 
   const topBar = useMemo(
-    () => (standalone ? undefined : { title, icon }),
-    [standalone, title, icon],
+    () => (standalone ? undefined : { title }),
+    [standalone, title],
   );
 
-  // The shutoff is the picture collapsing back to the wall it came from. A
-  // pinned site has no wall behind it — the animation would play over the
-  // launcher's own — so leaving one is immediate.
+  // The shutoff is the picture collapsing back to the wall it came from.
   const handleClose = useCallback(() => {
-    if (standalone) onClose();
-    else setClosing(true);
-  }, [standalone, onClose]);
+    if (shutoff) setClosing(true);
+    else onClose();
+  }, [shutoff, onClose]);
 
   const handleRequestPermissions = useCallback(() => {
     setPermissionsOverFrame(true);

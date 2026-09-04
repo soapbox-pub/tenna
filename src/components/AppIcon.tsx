@@ -11,12 +11,16 @@ import {
 import { WhiteNoise } from '@/components/WhiteNoise';
 import { useNsiteApp } from '@/hooks/useNsiteApp';
 import { useNsitePin } from '@/hooks/useNsitePin';
+import { useNsiteWindow } from '@/hooks/useNsiteWindow';
 import { impactMedium } from '@/lib/haptics';
 import { getTileGradient, getTileInitial } from '@/lib/iconTile';
 import { cn } from '@/lib/utils';
 
 interface AppIconProps {
   event: NostrEvent;
+  /** 1-based position on the wall, which is the site's channel number. */
+  channel: number;
+  /** Tune the site in here, for platforms that can't give it a window. */
   onSelect: () => void;
 }
 
@@ -82,13 +86,14 @@ export function AppIconSkeleton() {
  * the alpha of what it wraps and so follows the squircle, and the halo is a
  * second squircle sitting a few pixels proud behind it.
  */
-export function AppIcon({ event, onSelect }: AppIconProps) {
+export function AppIcon({ event, channel, onSelect }: AppIconProps) {
   const { data: app, isPending } = useNsiteApp(event);
 
   // The nsite's own name until the site says what it calls itself.
   const name = app?.label ?? event.tags.find(([n]) => n === 'd')?.[1] ?? '???';
 
   const pinning = useNsitePin(event, name, app);
+  const ownWindow = useNsiteWindow(event, name, app);
 
   // A long press is a press. The menu opens on pointerdown and the pointerup
   // that follows still lands on the tile, so without this the site would tune
@@ -105,10 +110,14 @@ export function AppIcon({ event, onSelect }: AppIconProps) {
     }
   }, []);
 
+  // Where a site can have a window of its own, it gets one — pressing the tile
+  // launches the site rather than tuning it in over the wall. Everywhere else
+  // the wall is the only screen there is, so the viewer opens on top of it.
   const handleSelect = useCallback(() => {
     if (suppressTap.current) return;
-    onSelect();
-  }, [onSelect]);
+    if (ownWindow.available) ownWindow.open(channel);
+    else onSelect();
+  }, [ownWindow, channel, onSelect]);
 
   const tile = (
     <button

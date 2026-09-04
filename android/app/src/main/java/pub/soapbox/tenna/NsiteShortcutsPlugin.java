@@ -1,10 +1,15 @@
 package pub.soapbox.tenna;
 
+import android.app.ActivityManager;
+import android.app.ActivityOptions;
 import android.content.Context;
+import android.content.Intent;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
+import android.os.Build;
 import android.util.Base64;
 
+import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.core.content.pm.ShortcutInfoCompat;
 import androidx.core.content.pm.ShortcutManagerCompat;
@@ -20,13 +25,14 @@ import java.io.IOException;
 import java.util.List;
 
 /**
- * Puts an nsite on the launcher, and tells the web layer when it was launched
- * from there.
+ * Gives an nsite a window of its own, puts one on the launcher, and tells the
+ * web layer which site a window was opened for.
  *
  * Kept apart from {@link NsiteWebViewPlugin}, which hosts a site's WebView;
- * this one talks to the launcher and the filesystem and never touches a view.
- * Both are registered in both activities — Tenna's home screen is where a site
- * gets pinned, and a pinned site needs to ask what it was opened for.
+ * this one talks to the launcher, the task list and the filesystem, and never
+ * touches a view. Both are registered in both activities — Tenna's home screen
+ * is where a site gets opened and pinned, and the window it opens needs to ask
+ * what it was opened for.
  *
  * The icon is drawn in React rather than here. The tile on the channel wall is
  * already the site's artwork on the site's own colour, worked out from its
@@ -48,6 +54,79 @@ public class NsiteShortcutsPlugin extends Plugin {
         JSObject result = new JSObject();
         result.put("supported", ShortcutManagerCompat.isRequestPinShortcutSupported(getContext()));
         call.resolve(result);
+    }
+
+    /**
+     * Open a site in a window of its own, or bring the one it has forward.
+     *
+     * A site is not a page of Tenna's: it gets its own task, its own card in
+     * the recents switcher under its own name and icon, and the whole screen.
+     * That is the same window a pinned shortcut opens, keyed on the same site
+     * id, so a site opened from the wall and then pressed on the home screen
+     * lands back in the window it already had rather than a second one.
+     *
+     * The record is written first because it is what the window reads: the
+     * manifest to serve from, and the label and icon for its recents card.
+     */
+    @PluginMethod
+    public void open(PluginCall call) {
+        String siteId = call.getString("siteId");
+        String label = call.getString("label");
+        String event = call.getString("event");
+        String icon = call.getString("icon");
+        final int channel = call.getInt("channel", 0);
+
+        if (siteId == null || label == null || label.isEmpty() || event == null) {
+            call.reject("siteId, label and event are required");
+            return;
+        }
+
+        Context context = getContext();
+
+        try {
+            NsiteSites.save(context, siteId, label, event, decode(icon));
+        } catch (IOException e) {
+            call.reject("Could not save the site for launch", e);
+            return;
+        }
+
+        final String site = siteId;
+        getActivity().runOnUiThread(() -> {
+            // Resuming the task keeps the site exactly as it was left, which
+            // routing another intent into it would not: `intoExisting` clears
+            // the task it matches, and a cleared task is a site reloaded.
+            if (!resumeWindow(site)) {
+                getActivity().startActivity(
+                    NsiteAppActivity.intentFor(context, site, channel, true),
+                    // The tune-in is the animation. See `silenceTransitions`.
+                    ActivityOptions.makeCustomAnimation(context, 0, 0).toBundle()
+                );
+            }
+            call.resolve();
+        });
+    }
+
+    /** Bring a site's existing window forward, if it has one. */
+    private boolean resumeWindow(@NonNull String siteId) {
+        ActivityManager manager =
+            (ActivityManager) getContext().getSystemService(Context.ACTIVITY_SERVICE);
+        if (manager == null) return false;
+
+        try {
+            for (ActivityManager.AppTask task : manager.getAppTasks()) {
+                Intent base = task.getTaskInfo().baseIntent;
+                if (base == null) continue;
+                if (!siteId.equals(base.getStringExtra(NsiteAppActivity.EXTRA_SITE_ID))) continue;
+                task.moveToFront();
+                return true;
+            }
+        } catch (RuntimeException e) {
+            // No task list, or one we're not allowed to move. Opening a second
+            // window is a worse outcome than most, but not a failure.
+            return false;
+        }
+
+        return false;
     }
 
     /**
@@ -82,7 +161,7 @@ public class NsiteShortcutsPlugin extends Plugin {
             // Written before the request, not after it: the launcher may pin
             // silently and the user may press the shortcut before any callback
             // would have run, and a site with no record cannot be served.
-            NsitePinnedSites.save(context, siteId, label, event, bitmap);
+            NsiteSites.save(context, siteId, label, event, bitmap);
         } catch (IOException e) {
             call.reject("Could not save the site for offline launch", e);
             return;
@@ -90,7 +169,7 @@ public class NsiteShortcutsPlugin extends Plugin {
 
         ShortcutInfoCompat shortcut = new ShortcutInfoCompat.Builder(
             context,
-            NsitePinnedSites.key(siteId)
+            NsiteSites.key(siteId)
         )
             .setShortLabel(label)
             .setLongLabel(label)
@@ -117,8 +196,24 @@ public class NsiteShortcutsPlugin extends Plugin {
             return;
         }
 
-        String key = NsitePinnedSites.key(siteId);
-        boolean pinned = false;
+        JSObject result = new JSObject();
+        // Some launchers refuse to enumerate. Not knowing costs nothing worse
+        // than offering to pin something that is already pinned.
+        result.put("pinned", Boolean.TRUE.equals(isPinned(siteId)));
+        call.resolve(result);
+    }
+
+    /**
+     * Whether a shortcut for this site is on the home screen — or null when the
+     * launcher won't say.
+     *
+     * The difference matters to whoever is about to act on the answer: offering
+     * to pin a site twice is a small thing, and throwing away the manifest of a
+     * site that is still on the home screen is not.
+     */
+    @Nullable
+    private Boolean isPinned(@NonNull String siteId) {
+        String key = NsiteSites.key(siteId);
 
         try {
             List<ShortcutInfoCompat> shortcuts = ShortcutManagerCompat.getShortcuts(
@@ -126,36 +221,33 @@ public class NsiteShortcutsPlugin extends Plugin {
                 ShortcutManagerCompat.FLAG_MATCH_PINNED
             );
             for (ShortcutInfoCompat shortcut : shortcuts) {
-                if (key.equals(shortcut.getId())) {
-                    pinned = true;
-                    break;
-                }
+                if (key.equals(shortcut.getId())) return true;
             }
         } catch (RuntimeException e) {
-            // Some launchers refuse to enumerate. Not knowing costs nothing
-            // worse than offering to pin something that is already pinned.
-            pinned = false;
+            return null;
         }
 
-        JSObject result = new JSObject();
-        result.put("pinned", pinned);
-        call.resolve(result);
+        return false;
     }
 
     /**
-     * The site this activity was launched for, if it was launched from a
-     * shortcut rather than from the launcher icon.
+     * The site this activity was opened for, if it is a site's window rather
+     * than Tenna itself.
      *
-     * The manifest comes back with it so the site can start from disk on a
-     * cold press, with no relay dialled and nothing fetched.
+     * The manifest comes back with it so the site can start from disk on a cold
+     * press, with no relay dialled and nothing fetched. The channel number and
+     * where it was opened from come back too: the first is what the tune-in
+     * announces, and the second is what decides whether leaving plays the
+     * shutoff or simply closes.
      */
     @PluginMethod
     public void getLaunchSite(PluginCall call) {
         JSObject result = new JSObject();
 
-        String siteId = getActivity().getIntent() == null
+        Intent intent = getActivity().getIntent();
+        String siteId = intent == null
             ? null
-            : getActivity().getIntent().getStringExtra(NsiteAppActivity.EXTRA_SITE_ID);
+            : intent.getStringExtra(NsiteAppActivity.EXTRA_SITE_ID);
 
         if (siteId == null) {
             call.resolve(result);
@@ -163,8 +255,12 @@ public class NsiteShortcutsPlugin extends Plugin {
         }
 
         result.put("siteId", siteId);
+        result.put("fromWall", intent.getBooleanExtra(NsiteAppActivity.EXTRA_FROM_WALL, false));
 
-        NsitePinnedSites.Record record = NsitePinnedSites.load(getContext(), siteId);
+        int channel = intent.getIntExtra(NsiteAppActivity.EXTRA_CHANNEL, 0);
+        if (channel > 0) result.put("channel", channel);
+
+        NsiteSites.Record record = NsiteSites.load(getContext(), siteId);
         if (record != null) {
             // JSON text, for the same reason the signer's params are: a
             // manifest's `path` tags are an arbitrarily shaped array, and
@@ -177,13 +273,13 @@ public class NsiteShortcutsPlugin extends Plugin {
     }
 
     /**
-     * Store a newer manifest for a site, if it is pinned.
+     * Store a newer manifest for a site, if it still has a record.
      *
-     * A shortcut outlives the manifest it was made from — the site publishes
+     * A record outlives the manifest it was made from — the site publishes
      * again and the record on disk still names the old blobs. The web layer
      * re-queries the relay while the site is open and hands the result back
-     * here, so the next cold press starts from what the site is now rather
-     * than from what it was the day it was pinned.
+     * here, so the next cold start serves what the site is now rather than
+     * what it was the day its window was made.
      */
     @PluginMethod
     public void refresh(PluginCall call) {
@@ -198,7 +294,7 @@ public class NsiteShortcutsPlugin extends Plugin {
 
         JSObject result = new JSObject();
         try {
-            result.put("updated", NsitePinnedSites.refresh(getContext(), siteId, label, event));
+            result.put("updated", NsiteSites.refresh(getContext(), siteId, label, event));
         } catch (IOException e) {
             call.reject("Could not update the pinned site", e);
             return;
@@ -207,15 +303,40 @@ public class NsiteShortcutsPlugin extends Plugin {
     }
 
     /**
-     * Leave a pinned site.
+     * Leave a site's window.
      *
      * {@code finishAndRemoveTask} rather than {@code finish}: the task is the
      * site, so a back gesture off its first page should take the recents card
      * with it the way closing an app does, not leave an empty one behind.
+     *
+     * The record goes with it, unless the site is on the home screen. A window
+     * opened from the wall is resumed from its record for as long as it exists,
+     * and once it doesn't the wall is how the site gets opened again — but a
+     * pinned shortcut has no wall behind it and must keep its manifest, so a
+     * launcher that won't say whether a site is pinned is taken at its worst.
      */
     @PluginMethod
     public void finish(PluginCall call) {
-        getActivity().runOnUiThread(() -> getActivity().finishAndRemoveTask());
+        Intent intent = getActivity().getIntent();
+        String siteId = intent == null
+            ? null
+            : intent.getStringExtra(NsiteAppActivity.EXTRA_SITE_ID);
+        final boolean fromWall =
+            intent != null && intent.getBooleanExtra(NsiteAppActivity.EXTRA_FROM_WALL, false);
+
+        if (siteId != null && Boolean.FALSE.equals(isPinned(siteId))) {
+            NsiteSites.forget(getContext(), siteId);
+        }
+
+        getActivity().runOnUiThread(() -> {
+            getActivity().finishAndRemoveTask();
+            // The shutoff has already played. On 34 and up the same thing is
+            // said once, in `silenceTransitions`.
+            if (fromWall && Build.VERSION.SDK_INT < Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                //noinspection deprecation
+                getActivity().overridePendingTransition(0, 0);
+            }
+        });
         call.resolve();
     }
 

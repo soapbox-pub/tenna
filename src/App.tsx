@@ -13,6 +13,7 @@ import { NostrLoginProvider } from '@nostrify/react/login';
 import { AppProvider } from '@/components/AppProvider';
 import { AppConfig } from '@/contexts/AppContext';
 import { APP_RELAYS } from '@/lib/appRelays';
+import { secureStorage } from '@/lib/secureStorage';
 import AppRouter from './AppRouter';
 
 const head = createHead({
@@ -52,7 +53,27 @@ export function App() {
     <UnheadProvider head={head}>
       <AppProvider storageKey="nostr:app-config" defaultConfig={defaultConfig}>
         <QueryClientProvider client={queryClient}>
-          <NostrLoginProvider storageKey='nostr:login'>
+          {/*
+            Logins go to the Keychain on iOS and the KeyStore on Android, not
+            to localStorage. An nsec login is the whole account — there is no
+            reset for one that leaks — and Tenna is a browser for other
+            people's sites, so its own origin holds the key that every site it
+            opens will ask to sign with. `secureStorage` falls back to
+            localStorage on the web, where there is nowhere better to put it,
+            and migrates a key it finds there on the first native read.
+
+            That read is a trip to the keychain, so it is asynchronous, and
+            the provider shows the fallback until it lands. The fallback is
+            the same empty dark screen `AppRouter` paints while it works out
+            whether this launch is a site — anything else, including the
+            default of nothing at all, flashes an unpainted screen on the way
+            in.
+          */}
+          <NostrLoginProvider
+            storageKey='nostr:login'
+            storage={secureStorage}
+            fallback={<div className="min-h-screen bg-[#150609]" />}
+          >
             <NostrProvider>
               <NostrSync />
               <TooltipProvider>

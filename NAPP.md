@@ -1,4 +1,12 @@
-# `window.napp` — notifications for nsites
+# What Tenna gives an nsite
+
+Two things a site cannot get from a plain browser tab: notifications while it
+is closed, and a place in the operating system's share menu. Both are the
+Android app only, and both are declared the way the web already declares them
+where the web has a way — a site written for Tenna is a site that still works
+anywhere else.
+
+## `window.napp` — notifications
 
 Tenna injects `window.napp` into an nsite when it can deliver notifications
 for it. Today that is the Android app only. On the web and on iOS the object
@@ -13,7 +21,7 @@ if (window.napp?.push) {
 There is nothing new on the Nostr wire. A subscription is an ordinary `REQ`
 that Tenna keeps open on the site's behalf while the site is closed.
 
-## `window.napp.push`
+### `window.napp.push`
 
 ```ts
 import type { NostrFilter } from '@nostrify/nostrify';
@@ -43,7 +51,7 @@ interface NappSubscription {
 while a user is logged in to Tenna. Both methods are asynchronous and reject
 with an `Error` whose message says why.
 
-### Consent
+#### Consent
 
 The first non-empty `set()` shows the user a prompt, "Send notifications",
 alongside the prompts for signing. If they decline, `set()` rejects with
@@ -54,7 +62,7 @@ no permission.
 The user can revoke the permission from the shield menu over the site. Doing
 so clears the site's subscriptions; the next `set()` prompts again.
 
-### What a subscription may contain
+#### What a subscription may contain
 
 Limits, all enforced on both sides of the bridge:
 
@@ -74,7 +82,7 @@ every event is refused.
 Relays must be `wss://` or `ws://` URLs. Trailing slashes are stripped and
 duplicates removed.
 
-### What Tenna does with them
+#### What Tenna does with them
 
 - Every relay named by any site gets one connection, held open by a
   foreground service with a standing "Background listener" notification.
@@ -90,7 +98,7 @@ duplicates removed.
 Tenna does not verify event signatures before delivery. Verify in the worker
 if it matters to what you show.
 
-## Delivery: the service worker
+### Delivery: the service worker
 
 Events are delivered to the site's **service worker**, as a `push` event. A
 site with no registered worker, or whose worker has no `push` listener, gets
@@ -113,7 +121,7 @@ self.addEventListener('push', (event) => {
 });
 ```
 
-### The payload
+#### The payload
 
 `event.data.json()` returns:
 
@@ -132,7 +140,7 @@ interface NappPushPayload {
 `event.waitUntil()` works; Tenna waits for the promises before moving on to
 the next event for the site, with a timeout of twenty seconds.
 
-### `showNotification(title, options)`
+#### `showNotification(title, options)`
 
 Supported `options`:
 
@@ -151,7 +159,7 @@ The site's icon, as shown on Tenna's home screen, is the large icon.
 `registration.getNotifications()` resolves to an empty array.
 `Notification.permission` in the worker reads `granted`.
 
-### What is not there yet
+#### What is not there yet
 
 - **Tapping** a notification opens or resumes the site's window. It does not
   fire `notificationclick` in the worker, and `options.data` is not delivered
@@ -163,6 +171,113 @@ The site's icon, as shown on Tenna's home screen, is the large icon.
   do for gift wraps addressed to a user, will not deliver it.
 - **Web push on the web.** The iframe path used on the web and on iOS does
   not define `window.napp`.
+
+## `share_target` — a place in the OS share menu
+
+An nsite the user has put on their home screen can appear in Android's share
+sheet, under its own name and icon, alongside the installed apps. There is
+nothing to call and nothing new to declare: it is the standard web app
+manifest `share_target` member, exactly as an installed PWA declares it.
+
+```json
+{
+  "name": "Scrapbook",
+  "share_target": {
+    "action": "/share",
+    "method": "POST",
+    "enctype": "multipart/form-data",
+    "params": {
+      "title": "title",
+      "text": "text",
+      "url": "url",
+      "files": [{ "name": "media", "accept": ["image/*", "video/*"] }]
+    }
+  }
+}
+```
+
+Tenna reads the member when it draws the site's tile, and acts on it once the
+site is **pinned to the home screen**. A site that is merely open, or merely
+on the channel wall, is not offered to the share sheet — the sheet is the
+user's, and putting a site in it is the user's decision, made by pinning.
+
+### `method: "GET"`
+
+The site is navigated to its `action` with the params in the query string,
+which is all a GET target ever is. Nothing else is involved.
+
+```
+/share?title=Hello&url=https%3A%2F%2Fexample.com
+```
+
+### `method: "POST"` — needs a service worker
+
+**A POST share is delivered to the site's service worker, and to nothing
+else.** A site without one, or whose worker does not answer the navigation,
+gets a page saying so, and the share is dropped.
+
+This is not really Tenna's rule. A POST target is delivered as a form
+navigation to the action, and answering one takes a server; an nsite is static
+content-addressed blobs with no server behind it, so its worker is the only
+thing that can. The same is true of any PWA hosted on static files, which is
+why the pattern below is the one the spec's own examples use.
+
+```js
+self.addEventListener('fetch', (event) => {
+  const url = new URL(event.request.url);
+  if (event.request.method !== 'POST' || url.pathname !== '/share') return;
+
+  event.respondWith((async () => {
+    const form = await event.request.formData();
+    await stash({
+      title: form.get('title'),
+      text: form.get('text'),
+      files: form.getAll('media'),
+    });
+    // Redirect so the share URL isn't left in history, as on the web.
+    return Response.redirect('/?shared', 303);
+  })());
+});
+```
+
+Register the worker at a scope that covers the action. A worker that is not
+yet installed the first time a share arrives will not see it.
+
+### What arrives
+
+Android has one text extra where the manifest has three fields, so the split
+is a judgement, made the way Chrome makes it:
+
+| Field   | Filled from                                                        |
+| ------- | ------------------------------------------------------------------ |
+| `title` | `Intent.EXTRA_SUBJECT` — often absent.                             |
+| `url`   | The shared text, when it is nothing but a link and `url` is declared. |
+| `text`  | The shared text otherwise. Stands in for `url` if only `url` exists. |
+| files   | Each shared stream, routed to the first field whose `accept` matches its MIME type. |
+
+Files arrive as ordinary `File` objects with the name and type the sender gave
+them. Ten files per share, 256 MB each, are the ceilings.
+
+### What the share sheet actually shows
+
+Two ways in, because only one of them is reliable:
+
+- **The site itself**, as a sharing shortcut with its own icon. Whether these
+  surface is Android's ranking to decide, not Tenna's — on a share the system
+  chooses to render as a flat list of apps, they are simply absent.
+- **Tenna**, always. Picking it asks which app to share to, listing every
+  pinned site that can take what was shared.
+
+`accept` is honoured exactly when the share is routed, but only approximately
+when the sheet is built: the sheet matches on `text/*`, `image/*`, `video/*`,
+`audio/*` and `*/*`, with no finer grain available per shortcut. A site that
+takes only PNGs will be offered any image and can refuse the rest. This is the
+same bargain a PWA makes.
+
+### Elsewhere
+
+Not on the web and not on iOS. Neither offers a third-party app any way to
+put an arbitrary site in the OS share menu, so the member is read and ignored.
 
 ## How a site is served on Android
 

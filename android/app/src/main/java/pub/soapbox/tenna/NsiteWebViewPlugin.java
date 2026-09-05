@@ -3,6 +3,7 @@ package pub.soapbox.tenna;
 import android.animation.Animator;
 import android.animation.AnimatorListenerAdapter;
 import android.annotation.SuppressLint;
+import android.content.Context;
 import android.content.pm.ApplicationInfo;
 import android.content.res.ColorStateList;
 import android.graphics.Color;
@@ -145,6 +146,7 @@ public class NsiteWebViewPlugin extends Plugin {
         String providerScript = call.getString("providerScript");
         JSObject manifest = call.getObject("files");
         JSArray serverList = call.getArray("servers");
+        JSObject share = call.getObject("share");
 
         if (siteId == null || manifest == null || serverList == null) {
             call.reject("siteId, files and servers are required");
@@ -170,6 +172,7 @@ public class NsiteWebViewPlugin extends Plugin {
 
         final String siteHost = NsiteOrigins.hostFor(siteId);
         final String origin = NsiteOrigins.originFor(siteId);
+        final String landing = landingPath(getContext(), siteId, share);
 
         getActivity().runOnUiThread(() -> {
             destroyWebView();
@@ -229,9 +232,83 @@ public class NsiteWebViewPlugin extends Plugin {
 
             observeInsets(frame);
 
-            view.loadUrl(origin + "/");
+            view.loadUrl(origin + landing);
             call.resolve();
         });
+    }
+
+    /**
+     * Point an open site at a share, leaving its WebView where it is.
+     *
+     * Reopening would work and is what a cleared task ends up doing anyway, but
+     * a share into an app that is already up should read as that app receiving
+     * something — not as it restarting.
+     */
+    @PluginMethod
+    public void navigate(PluginCall call) {
+        String siteId = call.getString("siteId");
+        JSObject share = call.getObject("share");
+
+        if (siteId == null || share == null) {
+            call.reject("siteId and share are required");
+            return;
+        }
+
+        final String expected = NsiteOrigins.hostFor(siteId);
+        final String url = NsiteOrigins.originFor(siteId)
+            + landingPath(getContext(), siteId, share);
+
+        getActivity().runOnUiThread(() -> {
+            if (webView == null || host == null || !host.equalsIgnoreCase(expected)) {
+                call.reject("That site has no window here");
+                return;
+            }
+            webView.loadUrl(url);
+            call.resolve();
+        });
+    }
+
+    /**
+     * The path a site opens on: its front page, or the share it was opened for.
+     *
+     * A {@code GET} target is navigated to directly — the site's own action
+     * with the params in its query, exactly the request a browser would make,
+     * with no page of Tenna's in between. A {@code POST} one cannot be: only a
+     * document at the site's origin can submit a multipart form, so the share
+     * is claimed for this site and the bootstrap page is loaded to make the
+     * navigation. See {@link NsiteRequests}.
+     *
+     * The plan itself is never read here. It was built and checked in the web
+     * layer, out of the site's own manifest, and travels as opaque JSON.
+     */
+    private static String landingPath(
+        @NonNull Context context,
+        @NonNull String siteId,
+        @Nullable JSObject share
+    ) {
+        if (share == null) return "/";
+
+        String kind = share.getString("kind");
+
+        if ("get".equals(kind)) {
+            String path = share.getString("path");
+            // Site-absolute or nothing: a path is built from the site's own
+            // action, but it arrives over a bridge and a leading `//` would be
+            // a protocol-relative URL onto somebody else's host.
+            if (path != null && path.startsWith("/") && !path.startsWith("//")) return path;
+            return "/";
+        }
+
+        if ("post".equals(kind)) {
+            String token = share.getString("token");
+            String plan = share.getString("plan");
+            if (token == null || plan == null) return "/";
+
+            NsiteShares.claim(context, token, siteId, plan);
+            return NsiteRequests.SHARE_PATH + "?" + NsiteRequests.TOKEN_PARAM + "=" + token;
+        }
+
+        return "/";
     }
 
     /**

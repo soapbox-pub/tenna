@@ -54,6 +54,9 @@ public class NsiteAppActivity extends BridgeActivity {
     /** Whether the channel wall is what's behind this window. */
     static final String EXTRA_FROM_WALL = "pub.soapbox.tenna.FROM_WALL";
 
+    /** A share staged for this site, if the window was opened to receive one. */
+    static final String EXTRA_SHARE_TOKEN = NsiteShareActivity.EXTRA_SHARE_TOKEN;
+
     /** Scheme for the per-site data URI that separates one task from another. */
     private static final String TASK_SCHEME = "tenna-nsite";
 
@@ -63,6 +66,22 @@ public class NsiteAppActivity extends BridgeActivity {
     /** The intent a pinned shortcut fires. */
     static Intent intentFor(@NonNull Context context, @NonNull String siteId) {
         return intentFor(context, siteId, 0, false);
+    }
+
+    /**
+     * The intent that opens a site on a share.
+     *
+     * The same data URI as any other way in, so a site already open is the
+     * window the share lands in rather than a second one beside it.
+     */
+    static Intent shareIntentFor(
+        @NonNull Context context,
+        @NonNull String siteId,
+        @NonNull String token
+    ) {
+        Intent intent = intentFor(context, siteId, 0, false);
+        intent.putExtra(EXTRA_SHARE_TOKEN, token);
+        return intent;
     }
 
     /** The intent for a site, opened from wherever it was opened from. */
@@ -132,16 +151,25 @@ public class NsiteAppActivity extends BridgeActivity {
      * {@code intoExisting} routes a shortcut here rather than starting a second
      * task, and the URI it matched on is the one this task was created for — so
      * it is always the same site, already loaded. Replacing the intent keeps
-     * {@code getIntent()} honest; nothing else needs to happen.
+     * {@code getIntent()} honest.
      *
      * The channel wall doesn't come through here at all: it looks for the
      * task itself and brings it forward, which resumes the window rather than
      * routing an intent into it. See {@code NsiteShortcutsPlugin.open}.
+     *
+     * A share does, though, and is the one thing that has to be acted on
+     * rather than merely recorded — the site is already up and would otherwise
+     * never learn there was anything to open. Whether it arrives here at all is
+     * the system's to decide: {@code intoExisting} is documented to match a
+     * task by its data URI, and observed to clear it and start over as often as
+     * it delivers here. Both are covered, since a cleared task reads the token
+     * off its fresh intent on the way up.
      */
     @Override
     protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
         setIntent(intent);
+        NsiteShortcutsPlugin.deliver(getBridge(), intent);
     }
 
     /**

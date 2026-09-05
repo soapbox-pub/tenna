@@ -44,6 +44,10 @@ export function useNsiteWindow(
           event: JSON.stringify(event),
           icon: icon ?? undefined,
           channel,
+          // The wall is the only place a site's manifest is read, so it is the
+          // only place its share_target can be kept current. A window opened
+          // from here refreshes what a pinned shortcut will offer next time.
+          shareTarget: app?.shareTarget ? JSON.stringify(app.shareTarget) : undefined,
         });
       } catch (err) {
         toast({

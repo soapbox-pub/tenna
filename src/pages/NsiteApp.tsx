@@ -4,6 +4,7 @@ import { useCallback, useState } from 'react';
 import { NsiteViewer } from '@/components/NsiteViewer';
 import { WhiteNoise } from '@/components/WhiteNoise';
 import { useNsiteRefresh, type NsiteLaunch } from '@/hooks/useNsiteLaunch';
+import { useNsiteShareDelivery, useShareToken } from '@/hooks/useNsiteShare';
 import { NsiteShortcuts } from '@/lib/nsiteShortcutsPlugin';
 
 interface NsiteAppProps {
@@ -40,6 +41,17 @@ export function NsiteApp({ launch }: NsiteAppProps) {
   // the relay answers.
   const event = cached ?? fresh;
 
+  // A window opened from the share sheet opens *on* the share. Which URL that
+  // is has to be settled before the site loads, so the wait counts as part of
+  // the tune-in rather than being something to load a front page over.
+  const shareToken = useShareToken(launch.shareToken);
+  const share = useNsiteShareDelivery({ ...launch, shareToken });
+
+  // Only the share the window opened with can hold up the tune-in. A later one
+  // arrives at a site already on screen, and taking that back down to work out
+  // where it goes would be worse than the wait it saves.
+  const tuning = share.status === 'pending' && shareToken === launch.shareToken;
+
   const name = event?.tags.find(([n]) => n === 'd')?.[1] ?? launch.label;
 
   useSeoMeta({ title: name });
@@ -48,7 +60,7 @@ export function NsiteApp({ launch }: NsiteAppProps) {
     void NsiteShortcuts.finish();
   }, []);
 
-  if (!event) {
+  if (!event || tuning) {
     // Same static the viewer tunes in behind, for the same reason: the wait is
     // a channel that hasn't come in yet, not a spinner.
     return (
@@ -69,6 +81,7 @@ export function NsiteApp({ launch }: NsiteAppProps) {
       channel={launch.channel ?? undefined}
       standalone
       shutoff={launch.fromWall}
+      share={share.status === 'ready' ? share.delivery ?? undefined : undefined}
       onClose={handleClose}
     />
   );

@@ -5,9 +5,11 @@ import { useState } from 'react';
 import { AddNsiteDialog } from '@/components/AddNsiteDialog';
 import { AddAppTile, AppIcon, AppIconSkeleton } from '@/components/AppIcon';
 import { LoginArea } from '@/components/auth/LoginArea';
+import { NsiteSharePicker } from '@/components/NsiteSharePicker';
 import { NsiteViewer } from '@/components/NsiteViewer';
 import { useAddedNsites } from '@/hooks/useAddedNsites';
 import { useNsites } from '@/hooks/useNsites';
+import { usePendingShare } from '@/hooks/useNsiteShare';
 import { getNsiteSubdomain } from '@/lib/nsiteSubdomain';
 
 /** Decorative star field scattered behind the apps. */
@@ -36,6 +38,9 @@ const Index = () => {
   // ever fills — see `useNsiteWindow`.
   const [active, setActive] = useState<{ event: NostrEvent; channel: number } | null>(null);
   const [adding, setAdding] = useState(false);
+
+  // Something the OS handed to Tenna rather than to one of the apps on it.
+  const { share, dismiss } = usePendingShare();
 
   // The curator's lineup first, then whatever the user added, so a site keeps
   // the channel it was on when the next one is added after it. A site already
@@ -120,6 +125,8 @@ const Index = () => {
         addedIds={[...curatedIds, ...added.stored.map((site) => site.id)]}
         onAdd={added.add}
       />
+
+      <NsiteSharePicker share={share} onDismiss={dismiss} />
 
       {active && (
         <NsiteViewer

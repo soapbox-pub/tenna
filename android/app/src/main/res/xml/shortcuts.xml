@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    What a pinned nsite may be offered from the OS share sheet.
+
+    Android matches a share against these entries and nothing else: a shortcut
+    is offered for a MIME type only when it carries the category of an entry
+    whose <data> matches. There is no per-shortcut MIME list, which is why the
+    buckets here are coarse — a site that takes only PNGs is offered every
+    image and turns down what it doesn't want. That is the same bargain a PWA
+    makes with `share_target.params.files[].accept`.
+
+    The category names are repeated in NsiteShortcutsPlugin.SHARE_CATEGORIES
+    and in src/lib/nsiteShareTarget.ts. All three have to agree: a category
+    declared nowhere here is one the sheet will never act on.
+-->
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <share-target android:targetClass="pub.soapbox.tenna.NsiteShareActivity">
+        <data android:mimeType="text/*" />
+        <category android:name="pub.soapbox.tenna.category.SHARE_TEXT" />
+    </share-target>
+
+    <share-target android:targetClass="pub.soapbox.tenna.NsiteShareActivity">
+        <data android:mimeType="image/*" />
+        <category android:name="pub.soapbox.tenna.category.SHARE_IMAGE" />
+    </share-target>
+
+    <share-target android:targetClass="pub.soapbox.tenna.NsiteShareActivity">
+        <data android:mimeType="video/*" />
+        <category android:name="pub.soapbox.tenna.category.SHARE_VIDEO" />
+    </share-target>
+
+    <share-target android:targetClass="pub.soapbox.tenna.NsiteShareActivity">
+        <data android:mimeType="audio/*" />
+        <category android:name="pub.soapbox.tenna.category.SHARE_AUDIO" />
+    </share-target>
+
+    <share-target android:targetClass="pub.soapbox.tenna.NsiteShareActivity">
+        <data android:mimeType="*/*" />
+        <category android:name="pub.soapbox.tenna.category.SHARE_FILE" />
+    </share-target>
+
+</shortcuts>

@@ -1,4 +1,6 @@
-import { Capacitor, registerPlugin } from '@capacitor/core';
+import { Capacitor, registerPlugin, type PluginListenerHandle } from '@capacitor/core';
+
+import type { NsiteSharePayload } from '@/lib/nsiteShareTarget';
 
 /** What this window was opened for, if it is a site's rather than Tenna's. */
 export interface NsiteLaunchSite {
@@ -12,6 +14,35 @@ export interface NsiteLaunchSite {
   channel?: number;
   /** Whether the channel wall is what's behind this window. */
   fromWall?: boolean;
+  /**
+   * A share waiting to be handed to the site, staged under this token.
+   *
+   * Set when the window was opened from the OS share sheet. The payload's
+   * bytes stay on disk; only the token crosses, because an intent is a binder
+   * transaction and a shared video is not going to fit in one.
+   */
+  shareToken?: string;
+  /** The site's `share_target`, as JSON text, as it stood when it was pinned. */
+  shareTarget?: string;
+}
+
+/** A pinned site that will take something from the share sheet. */
+export interface NsiteShareSite {
+  siteId: string;
+  label: string;
+  /** The manifest event as JSON text. */
+  event: string;
+  /** The site's `share_target`, as JSON text. */
+  shareTarget: string;
+  /** Base64 PNG of the tile, without a data URL prefix. */
+  icon?: string;
+}
+
+/** A share that arrived without a site attached, for the user to place. */
+export interface NsitePendingShare {
+  token?: string;
+  /** Metadata only — the files' bytes are served to the site, not to Tenna. */
+  payload?: NsiteSharePayload;
 }
 
 export interface NsiteShortcutsPlugin {
@@ -34,6 +65,10 @@ export interface NsiteShortcutsPlugin {
     icon?: string;
     /** Channel number the site sits on, for the tune-in. */
     channel?: number;
+    /** The site's `share_target` as JSON text, or omitted to leave it as-is. */
+    shareTarget?: string;
+    /** A staged share to hand the site once its window is up. */
+    shareToken?: string;
   }): Promise<void>;
 
   /**
@@ -50,6 +85,13 @@ export interface NsiteShortcutsPlugin {
     event: string;
     /** Base64 PNG for the adaptive icon, without a data URL prefix. */
     icon?: string;
+    /** The site's `share_target` as JSON text, if it declared one. */
+    shareTarget?: string;
+    /**
+     * The share sheet buckets the site belongs in. Empty means it is a
+     * launcher shortcut and nothing more.
+     */
+    shareCategories?: string[];
   }): Promise<{ requested: boolean }>;
 
   isPinned(options: { siteId: string }): Promise<{ pinned: boolean }>;
@@ -66,6 +108,47 @@ export interface NsiteShortcutsPlugin {
 
   /** Leave a site's window, taking its task with it. */
   finish(): Promise<void>;
+
+  // -- The OS share sheet ---------------------------------------------------
+
+  /**
+   * Offer this site to the share sheet, or withdraw it.
+   *
+   * Separate from {@link NsiteShortcutsPlugin.pin} because pinning is a
+   * request the system answers out of our sight: the shortcut only becomes a
+   * share target once it is known to be on the home screen.
+   */
+  setShareTarget(options: {
+    siteId: string;
+    /** False takes the site back out of the sheet, leaving any pinned icon. */
+    enabled: boolean;
+    label?: string;
+    icon?: string;
+    shareCategories?: string[];
+  }): Promise<void>;
+
+  /** Every pinned site that declared a `share_target`. */
+  listShareTargets(): Promise<{ sites: NsiteShareSite[] }>;
+
+  /** A share the user sent to Tenna itself, with no site chosen yet. */
+  getPendingShare(): Promise<NsitePendingShare>;
+
+  /** What was staged under a token: text fields, and each file's metadata. */
+  getSharePayload(options: { token: string }): Promise<NsiteSharePayload>;
+
+  /** Throw away a staged share once it has been handed over or refused. */
+  releaseShare(options: { token: string }): Promise<void>;
+
+  /**
+   * A share arrived while Tenna was already up.
+   *
+   * The cold-start case is {@link NsiteShortcutsPlugin.getPendingShare}; this
+   * is the same thing landing in an activity that never restarted.
+   */
+  addListener(
+    event: 'nsiteShare',
+    handler: (share: NsitePendingShare) => void,
+  ): Promise<PluginListenerHandle>;
 }
 
 export const NsiteShortcuts = registerPlugin<NsiteShortcutsPlugin>('NsiteShortcuts');

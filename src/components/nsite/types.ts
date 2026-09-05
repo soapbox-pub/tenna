@@ -1,5 +1,7 @@
 import type { NostrEvent } from '@nostrify/nostrify';
 
+import type { NsiteShareDelivery } from '@/lib/nsiteShareTarget';
+
 /** Whose site the bar over it says this is. */
 export interface NsiteTopBarContent {
   /** What to call the site: the name it gives itself, or the nsite's own. */
@@ -74,6 +76,14 @@ export interface NsiteFrameProps {
    * back to — so it gets the whole screen, insets and all.
    */
   topBar?: NsiteTopBarContent;
+  /**
+   * Open the site on a share from the OS rather than on its front page.
+   *
+   * Only ever set on Android, and only for a window the share sheet opened.
+   * An implementation that cannot deliver a share ignores this — the site
+   * comes up as normal, which is what happens on every other platform anyway.
+   */
+  share?: NsiteShareDelivery;
   /** Applied to the frame's outermost element. */
   className?: string;
 }

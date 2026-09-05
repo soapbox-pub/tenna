@@ -1,5 +1,7 @@
 import { Capacitor, registerPlugin, type PluginListenerHandle } from '@capacitor/core';
 
+import type { NsiteShareDelivery } from '@/lib/nsiteShareTarget';
+
 /** A JSON-RPC call raised by the site's `window.nostr`. */
 export interface NsiteRpcEvent {
   id: number;
@@ -22,7 +24,25 @@ export interface NsiteWebViewPlugin {
     servers: string[];
     /** The NIP-07 provider to install, or omitted to withhold `window.nostr`. */
     providerScript?: string;
+    /**
+     * A share to open the site on, instead of its front page.
+     *
+     * A `get` delivery is loaded as-is: the site's own action with the params
+     * in the query, no page of Tenna's in between. A `post` one loads the
+     * bootstrap page, which is the only way to make a real multipart form
+     * navigation from the site's origin.
+     */
+    share?: NsiteShareDelivery;
   }): Promise<void>;
+
+  /**
+   * Point an open site at a share, without taking it down and starting over.
+   *
+   * For a share that arrives at a window that never closed — sharing into an
+   * app you already have open is the ordinary case, and reopening it would
+   * throw away everything it had loaded to end up in the same place.
+   */
+  navigate(options: { siteId: string; share: NsiteShareDelivery }): Promise<void>;
 
   /** Play the shutoff animation and tear the WebView down. */
   close(): Promise<void>;

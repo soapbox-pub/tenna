@@ -9,6 +9,7 @@ import { WhiteNoise } from '@/components/WhiteNoise';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useNsiteApp } from '@/hooks/useNsiteApp';
 import { useNsiteSignerRpc } from '@/hooks/useNsiteSignerRpc';
+import type { NsiteShareDelivery } from '@/lib/nsiteShareTarget';
 import { getNsiteSubdomain } from '@/lib/nsiteSubdomain';
 import { cn } from '@/lib/utils';
 
@@ -35,6 +36,14 @@ interface NsiteViewerProps {
    * home screen, where the animation would be playing over the launcher's own.
    */
   shutoff?: boolean;
+  /**
+   * A share from the OS for the site to open on, instead of its front page.
+   *
+   * Passed straight through to the frame. The viewer has nothing to do with
+   * it — the tune-in plays the same either way, and a share is just a
+   * different first URL.
+   */
+  share?: NsiteShareDelivery;
   /** Called after the shutoff animation completes, or at once without one. */
   onClose: () => void;
 }
@@ -51,6 +60,7 @@ export function NsiteViewer({
   channel,
   standalone,
   shutoff = true,
+  share,
   onClose,
 }: NsiteViewerProps) {
   const { user } = useCurrentUser();
@@ -163,6 +173,7 @@ export function NsiteViewer({
             onRequestClose={handleClose}
             onRequestPermissions={handleRequestPermissions}
             topBar={topBar}
+            share={share}
             className="absolute inset-0"
           />
 

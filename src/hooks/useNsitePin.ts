@@ -1,11 +1,12 @@
 import type { NostrEvent } from '@nostrify/nostrify';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { useToast } from '@/hooks/useToast';
 import type { NsiteApp } from '@/hooks/useNsiteApp';
 import { renderAppIconPng } from '@/lib/appIconBitmap';
 import { impactLight, notificationError } from '@/lib/haptics';
 import { NsiteShortcuts, supportsNsiteWindows } from '@/lib/nsiteShortcutsPlugin';
+import { shareCategories } from '@/lib/nsiteShareTarget';
 import { getNsiteSubdomain } from '@/lib/nsiteSubdomain';
 
 interface UseNsitePinResult {
@@ -40,11 +41,43 @@ export function useNsitePin(
   const [pinned, setPinned] = useState(false);
 
   const siteId = getNsiteSubdomain(event);
+  const shareTarget = app?.shareTarget ?? null;
+
+  // Held in a ref so that re-checking the launcher does not depend on the
+  // tile's artwork, which resolves separately and later.
+  const tile = useRef({ name, app });
+  useEffect(() => { tile.current = { name, app }; }, [name, app]);
+
+  /**
+   * Reconcile the share sheet with the home screen.
+   *
+   * A shortcut is only offered to the sheet once it is known to be pinned,
+   * because pinning is a request the system answers where we cannot hear it —
+   * and a site the user declined has no business in the share menu. Taking one
+   * back out leaves its launcher icon alone; a dynamic shortcut and a pinned
+   * one are the same object, and removing the first keeps the second.
+   */
+  const syncShare = useCallback(async (isPinned: boolean) => {
+    if (!shareTarget) return;
+    const { name, app } = tile.current;
+    const icon = isPinned ? await renderAppIconPng(name, app) : null;
+
+    await NsiteShortcuts.setShareTarget({
+      siteId,
+      enabled: isPinned,
+      label: name,
+      icon: icon ?? undefined,
+      shareCategories: shareCategories(shareTarget),
+    });
+  }, [siteId, shareTarget]);
 
   const check = useCallback(async () => {
     const { pinned } = await NsiteShortcuts.isPinned({ siteId });
     setPinned(pinned);
-  }, [siteId]);
+    await syncShare(pinned).catch(() => {
+      // The share sheet is a bonus; failing to update it is not worth a toast.
+    });
+  }, [siteId, syncShare]);
 
   useEffect(() => {
     if (!supportsNsiteWindows()) return;
@@ -87,6 +120,11 @@ export function useNsitePin(
           // press without a relay.
           event: JSON.stringify(event),
           icon: icon ?? undefined,
+          // Stored now, acted on when the pin is confirmed. The share sheet is
+          // the one thing about a site that cannot be worked out from its
+          // manifest event, and the wall is the only place it is read.
+          shareTarget: shareTarget ? JSON.stringify(shareTarget) : undefined,
+          shareCategories: shareTarget ? shareCategories(shareTarget) : undefined,
         });
 
         // Resolving means the ask was made, not that a shortcut exists — the
@@ -104,7 +142,7 @@ export function useNsitePin(
         });
       }
     })();
-  }, [event, name, app, siteId, check, toast]);
+  }, [event, name, app, siteId, shareTarget, check, toast]);
 
   return { available, pinned, pin };
 }

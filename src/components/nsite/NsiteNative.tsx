@@ -31,6 +31,7 @@ export function NsiteNative({
   closing,
   onRequestClose,
   onRequestPermissions,
+  share,
 }: NsiteFrameProps) {
   // Kept in refs so the open/close effect depends on the site alone. A
   // re-render must never tear down a loaded site and start it over.
@@ -38,10 +39,15 @@ export function NsiteNative({
   const onLoadRef = useRef(onLoad);
   const onCloseRef = useRef(onRequestClose);
   const onPermissionsRef = useRef(onRequestPermissions);
+  const shareRef = useRef(share);
+  // The share the WebView was opened on, so that a later one is told apart
+  // from the one already delivered.
+  const openedShare = useRef(share);
   useEffect(() => { onRpcRef.current = onRpc; }, [onRpc]);
   useEffect(() => { onLoadRef.current = onLoad; }, [onLoad]);
   useEffect(() => { onCloseRef.current = onRequestClose; }, [onRequestClose]);
   useEffect(() => { onPermissionsRef.current = onRequestPermissions; }, [onRequestPermissions]);
+  useEffect(() => { shareRef.current = share; }, [share]);
 
   useEffect(() => {
     let disposed = false;
@@ -73,6 +79,8 @@ export function NsiteNative({
       // A late unmount would otherwise leave a WebView with no owner.
       if (disposed) return;
 
+      openedShare.current = shareRef.current;
+
       await NsiteWebView.open({
         siteId: getNsiteSubdomain(event),
         files: Object.fromEntries(buildManifest(event)),
@@ -83,6 +91,10 @@ export function NsiteNative({
         providerScript: pubkey
           ? getNsiteNostrProviderScript(pubkey, 'webMessage', { napp: supportsNappPush() })
           : undefined,
+        // The first URL, when the window was opened out of the share sheet.
+        // Held in a ref like the callbacks: a share belongs to the open, and
+        // re-reading it later would only reload the site over the user.
+        share: shareRef.current,
       });
     })().catch((err) => {
       console.error('[NsiteNative] failed to open:', err);
@@ -94,6 +106,18 @@ export function NsiteNative({
       for (const listener of listeners) void listener.remove();
     };
   }, [event, pubkey]);
+
+  // A share that turns up after the site is loaded. The window never closed,
+  // so there is nothing to reopen — the site is simply pointed at it, the way
+  // any other navigation would be.
+  useEffect(() => {
+    if (!share || share === openedShare.current) return;
+    openedShare.current = share;
+
+    void NsiteWebView.navigate({ siteId: getNsiteSubdomain(event), share }).catch((err) => {
+      console.error('[NsiteNative] failed to deliver a share:', err);
+    });
+  }, [share, event]);
 
   useEffect(() => {
     void NsiteWebView.setConcealed({ concealed: !!concealed });

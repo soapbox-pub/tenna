@@ -1,0 +1,124 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Sharing</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #150609; color: #7CFC9B; }
+  body {
+    display: flex; align-items: center; justify-content: center;
+    padding: 2rem; box-sizing: border-box;
+    font: 1rem/1.6 system-ui, sans-serif; text-align: center;
+  }
+  p { margin: 0; max-width: 32rem; }
+  #note { display: none; }
+</style>
+</head>
+<body>
+<p id="note">This site can’t receive shares.</p>
+<script type="application/json" id="plan">%%TENNA_SHARE_PLAN%%</script>
+<script>
+/*
+ * Tenna's share bootstrap, loaded at a site's origin.
+ *
+ * A `share_target` with `method: "POST"` is delivered as a form navigation to
+ * the site's action, and on a site made of static content-addressed blobs
+ * there is no server to answer one — Tenna serves files by intercepting
+ * requests, and an intercepted request never carries its body. So the site's
+ * own service worker has to answer, out of `request.formData()`, which is how
+ * PWA share targets have always worked in practice.
+ *
+ * What this page does is make that navigation. Only a document at the site's
+ * origin can: a POST built natively would arrive with no body to read, and a
+ * `fetch()` would not be a navigation at all, so a worker written to the spec
+ * would never see it. The staged files are pulled back over the site's own
+ * origin, one URL each, and put into the form with a DataTransfer — the only
+ * way to fill a file input from bytes that came from somewhere other than a
+ * file picker.
+ *
+ * Every value here comes from the site's own manifest and from what the user
+ * shared, so nothing is ever written as markup: the plan arrives as JSON in a
+ * script block and every field is built with DOM properties.
+ */
+(function () {
+  'use strict';
+
+  var plan;
+  try {
+    plan = JSON.parse(document.getElementById('plan').textContent);
+  } catch (err) {
+    return;
+  }
+  if (!plan || !plan.action) return;
+
+  /* The site has one chance to claim this navigation. If its worker doesn't,
+   * the POST reaches Tenna's interceptor, which has no body to give it — so
+   * that is where the "can't receive shares" page comes from, not from here. */
+  function submit(files) {
+    var form = document.createElement('form');
+    form.method = 'POST';
+    form.action = plan.action;
+    form.enctype = plan.enctype || 'multipart/form-data';
+    form.acceptCharset = 'utf-8';
+    form.style.display = 'none';
+
+    (plan.fields || []).forEach(function (field) {
+      var input = document.createElement('input');
+      input.type = 'hidden';
+      input.name = field[0];
+      input.value = field[1];
+      form.appendChild(input);
+    });
+
+    Object.keys(files).forEach(function (name) {
+      var input = document.createElement('input');
+      input.type = 'file';
+      input.name = name;
+      input.multiple = true;
+
+      var transfer = new DataTransfer();
+      files[name].forEach(function (file) { transfer.items.add(file); });
+      input.files = transfer.files;
+
+      form.appendChild(input);
+    });
+
+    document.body.appendChild(form);
+    form.submit();
+  }
+
+  /* Fetched rather than inlined: a shared video is not going in a script tag,
+   * and these URLs are answered by Tenna from the same staging directory the
+   * OS handed over, for this site alone. */
+  function collect() {
+    var wanted = plan.files || [];
+
+    return Promise.all(wanted.map(function (file) {
+      return fetch(file.url, { cache: 'no-store' })
+        .then(function (res) { return res.ok ? res.blob() : null; })
+        .then(function (blob) {
+          if (!blob) return null;
+          return {
+            field: file.field,
+            file: new File([blob], file.name, { type: file.type || blob.type })
+          };
+        })
+        .catch(function () { return null; });
+    })).then(function (results) {
+      var byField = {};
+      results.forEach(function (result) {
+        if (!result) return;
+        (byField[result.field] = byField[result.field] || []).push(result.file);
+      });
+      return byField;
+    });
+  }
+
+  collect().then(submit).catch(function () {
+    document.getElementById('note').style.display = 'block';
+  });
+})();
+</script>
+</body>
+</html>

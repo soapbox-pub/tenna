@@ -34,6 +34,15 @@ export interface NsiteLaunch {
    * shutoff would be playing over the launcher's own animation.
    */
   fromWall: boolean;
+  /**
+   * A share staged for this site, waiting to be handed to it.
+   *
+   * Set when the window was opened out of the OS share sheet. The site opens
+   * on the share rather than on its front page — see `useNsiteShareDelivery`.
+   */
+  shareToken?: string;
+  /** The site's `share_target` as JSON text, as of when it was last read. */
+  shareTarget?: string;
 }
 
 /**
@@ -51,7 +60,7 @@ function askLauncher(): Promise<NsiteLaunch | null> {
   if (!supportsNsiteWindows()) return Promise.resolve(null);
 
   return NsiteShortcuts.getLaunchSite()
-    .then(({ siteId, event, label, channel, fromWall }) => {
+    .then(({ siteId, event, label, channel, fromWall, shareToken, shareTarget }) => {
       if (!siteId) return null;
       return {
         siteId,
@@ -59,6 +68,8 @@ function askLauncher(): Promise<NsiteLaunch | null> {
         event: parseEvent(event),
         channel: channel ?? null,
         fromWall: !!fromWall,
+        shareToken,
+        shareTarget,
       };
     })
     .catch(() => null);

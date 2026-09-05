@@ -2,6 +2,7 @@ import type { NostrEvent } from '@nostrify/nostrify';
 import { useQuery } from '@tanstack/react-query';
 
 import { buildManifest, fetchFromBlossom, resolveServers } from '@/lib/nsiteFiles';
+import { parseShareTarget, type NsiteShareTarget } from '@/lib/nsiteShareTarget';
 import { getMimeType } from '@/lib/sandbox';
 
 /** How the artwork wants to sit in its tile. */
@@ -15,9 +16,17 @@ export interface NsiteApp {
   fit: IconFit;
   /** Tile color the site declares for itself, if any. Hex only. */
   background: string | null;
+  /** What the site will take from the OS share sheet, if it says. */
+  shareTarget: NsiteShareTarget | null;
 }
 
-const NOTHING: NsiteApp = { label: null, iconUrl: null, fit: 'cover', background: null };
+const NOTHING: NsiteApp = {
+  label: null,
+  iconUrl: null,
+  fit: 'cover',
+  background: null,
+  shareTarget: null,
+};
 
 /**
  * Where an icon came from, ranked. A site can declare the same picture several
@@ -297,6 +306,7 @@ export function useNsiteApp(event: NostrEvent, options?: { enabled?: boolean }) 
       const themeColor = pickThemeColor(doc);
       let background = themeColor;
       let webManifest: unknown = null;
+      let shareTarget: NsiteShareTarget | null = null;
 
       const manifestHref = doc
         .querySelector('link[rel~="manifest"][href]')
@@ -311,6 +321,9 @@ export function useNsiteApp(event: NostrEvent, options?: { enabled?: boolean }) 
           webManifest = await res.json();
           const base = manifestPath.replace(/[^/]*$/, '');
           candidates.push(...collectFromWebManifest(webManifest, base));
+          // Resolved against the manifest rather than the document, which is
+          // what the spec says of every URL a manifest contains.
+          shareTarget = parseShareTarget(webManifest, base);
           // Only if the document named no color of its own: a manifest's
           // background_color is the color of a splash screen, which on plenty
           // of sites is plain white.
@@ -339,10 +352,10 @@ export function useNsiteApp(event: NostrEvent, options?: { enabled?: boolean }) 
 
         const glyph = await looksLikeGlyph(url);
         const fit: IconFit = glyph === null ? candidate.fit : glyph ? 'contain' : 'cover';
-        return { label, iconUrl: url, fit, background };
+        return { label, iconUrl: url, fit, background, shareTarget };
       }
 
-      return { label, iconUrl: null, fit: 'cover', background };
+      return { label, iconUrl: null, fit: 'cover', background, shareTarget };
     },
     staleTime: Infinity,
     retry: 1,

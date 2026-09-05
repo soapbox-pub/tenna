@@ -1,5 +1,6 @@
 package pub.soapbox.tenna;
 
+import android.content.Intent;
 import android.os.Bundle;
 
 import com.getcapacitor.BridgeActivity;
@@ -18,5 +19,25 @@ public class MainActivity extends BridgeActivity {
         // The push service is sticky, but an update or a force-stop takes it
         // down until something asks again; the app coming up is that something.
         NappPushService.sync(this);
+
+        // A share nobody came back for leaves its bytes on disk. The app coming
+        // up is a good enough clock for something that expires in a day.
+        NsiteShares.sweep(this);
+    }
+
+    /**
+     * A share sent to Tenna itself rather than to a site.
+     *
+     * This activity is {@code singleTask}, so a share that arrives while the
+     * wall is already up lands here rather than in a new {@code onCreate}. The
+     * intent is kept either way — the cold-start path reads it back off the
+     * activity — and the web layer is told, so the picker can come up without
+     * waiting for the window to be looked at again.
+     */
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        NsiteShortcutsPlugin.deliver(getBridge(), intent);
     }
 }

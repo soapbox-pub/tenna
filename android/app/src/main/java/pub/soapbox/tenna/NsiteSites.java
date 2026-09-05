@@ -20,6 +20,9 @@ import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
 
 /**
  * What an nsite needs on disk to be launched in a window of its own.
@@ -57,11 +60,21 @@ final class NsiteSites {
         final String label;
         /** The NIP-5A manifest event, as JSON text. */
         final String event;
+        /**
+         * The site's web app manifest {@code share_target}, as JSON text, or
+         * null if it declared none.
+         *
+         * Kept opaque on purpose. It is read and checked once, in the web
+         * layer, and nothing here has any business interpreting it — a second
+         * parser would be a second set of rules about what a site may ask for.
+         */
+        @Nullable final String shareTarget;
 
-        Record(String siteId, String label, String event) {
+        Record(String siteId, String label, String event, @Nullable String shareTarget) {
             this.siteId = siteId;
             this.label = label;
             this.event = event;
+            this.shareTarget = shareTarget;
         }
     }
 
@@ -99,16 +112,26 @@ final class NsiteSites {
         @NonNull String siteId,
         @NonNull String label,
         @NonNull String event,
-        @Nullable Bitmap icon
+        @Nullable Bitmap icon,
+        @Nullable String shareTarget
     ) throws IOException {
         File dir = directory(context);
         String key = key(siteId);
+
+        // Null is "don't know", not "hasn't got one": only the channel wall
+        // ever reads a site's web app manifest, so a caller that hasn't been
+        // there must leave what is already stored alone. The wall says a site
+        // has no share target by sending an empty string.
+        String share = shareTarget == null
+            ? shareTarget(context, siteId)
+            : (shareTarget.isEmpty() ? null : shareTarget);
 
         JSONObject json = new JSONObject();
         try {
             json.put("siteId", siteId);
             json.put("label", label);
             json.put("event", event);
+            if (share != null) json.put("shareTarget", share);
         } catch (JSONException e) {
             throw new IOException("Could not serialize pinned site", e);
         }
@@ -139,23 +162,50 @@ final class NsiteSites {
         @NonNull String event
     ) throws IOException {
         if (load(context, siteId) == null) return false;
-        save(context, siteId, label, event, null);
+        save(context, siteId, label, event, null, null);
         return true;
     }
 
     @Nullable
     static Record load(Context context, @NonNull String siteId) {
-        File file = new File(directory(context), key(siteId) + ".json");
+        return read(new File(directory(context), key(siteId) + ".json"), siteId);
+    }
+
+    /** Every site with a record, in no particular order. */
+    @NonNull
+    static List<Record> list(Context context) {
+        File[] files = directory(context).listFiles((dir, name) -> name.endsWith(".json"));
+        if (files == null) return Collections.emptyList();
+
+        List<Record> records = new ArrayList<>(files.length);
+        for (File file : files) {
+            Record record = read(file, null);
+            if (record != null) records.add(record);
+        }
+        return records;
+    }
+
+    /** What a site said it would take from the share sheet, if anything. */
+    @Nullable
+    static String shareTarget(Context context, @NonNull String siteId) {
+        Record record = load(context, siteId);
+        return record == null ? null : record.shareTarget;
+    }
+
+    @Nullable
+    private static Record read(File file, @Nullable String siteId) {
         if (!file.exists()) return null;
 
         try {
             JSONObject json = new JSONObject(new String(readFully(file), StandardCharsets.UTF_8));
             String event = json.optString("event", null);
-            if (event == null) return null;
+            String id = json.optString("siteId", siteId);
+            if (event == null || id == null) return null;
             return new Record(
-                json.optString("siteId", siteId),
-                json.optString("label", siteId),
-                event
+                id,
+                json.optString("label", id),
+                event,
+                json.optString("shareTarget", null)
             );
         } catch (IOException | JSONException e) {
             // A truncated or hand-edited record is no record.

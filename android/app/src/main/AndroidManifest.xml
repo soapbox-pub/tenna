@@ -49,6 +49,45 @@
             android:exported="true" />
 
         <!--
+            Where the OS share sheet hands Tenna something. See
+            NsiteShareActivity: it draws nothing and finishes at once, having
+            copied the payload out of the grants it was started with.
+
+            A pinned nsite that declared a `share_target` appears in the sheet
+            as itself, through the sharing shortcuts in @xml/shortcuts; picking
+            one sends the share here with its id attached. Whether the sheet
+            surfaces those entries is Android's ranking to decide, so the plain
+            ACTION_SEND filter is here too — picking Tenna itself puts the
+            choice of site to the user instead, and always works.
+
+            Translucent rather than themed, because there is nothing to see: a
+            visible frame would flash between the sheet closing and the site's
+            window opening. Deliberately not `noHistory`, which would finish it
+            the moment it stopped being visible — it has to outlive the copy it
+            is doing, since the URI grants die with it.
+        -->
+        <activity
+            android:name=".NsiteShareActivity"
+            android:label="@string/app_name"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar"
+            android:excludeFromRecents="true"
+            android:taskAffinity=""
+            android:exported="true">
+
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <action android:name="android.intent.action.SEND_MULTIPLE" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="*/*" />
+            </intent-filter>
+
+            <meta-data
+                android:name="android.app.shortcuts"
+                android:resource="@xml/shortcuts" />
+
+        </activity>
+
+        <!--
             Keeps relays open for every nsite that subscribed to something,
             and hands what arrives to the site's service worker. See
             NappPushService. A special-use type because nothing narrower

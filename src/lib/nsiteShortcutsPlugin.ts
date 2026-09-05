@@ -106,6 +106,23 @@ export interface NsiteShortcutsPlugin {
     event: string;
   }): Promise<{ updated: boolean }>;
 
+  /**
+   * Redraw a pinned site's icon in place.
+   *
+   * Pinning is how a shortcut's artwork is normally set, and a site already on
+   * the home screen cannot be pinned again from the wall — the menu offers it
+   * only once. So when the drawing changes, or when a site turns out to ship
+   * better artwork than was known at the time, this is the way the icon
+   * already on the home screen catches up.
+   */
+  refreshIcon(options: {
+    siteId: string;
+    /** Base64 PNG for the adaptive icon, without a data URL prefix. */
+    icon: string;
+    /** Kept on the shortcut, so refreshing does not take it out of the sheet. */
+    shareCategories?: string[];
+  }): Promise<{ updated: boolean }>;
+
   /** Leave a site's window, taking its task with it. */
   finish(): Promise<void>;
 

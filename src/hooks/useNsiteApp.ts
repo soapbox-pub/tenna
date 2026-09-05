@@ -18,6 +18,23 @@ export interface NsiteApp {
   background: string | null;
   /** What the site will take from the OS share sheet, if it says. */
   shareTarget: NsiteShareTarget | null;
+  /**
+   * Every icon the site declares, best first, still unresolved.
+   *
+   * The tile above is the one the wall wants; a launcher wants a different one
+   * and is welcome to walk this list itself. Left unfetched because most sites
+   * are never pinned, and a blob nobody asks for is a Blossom round trip spent
+   * on nothing.
+   */
+  icons: IconCandidate[];
+  /** What {@link resolveIcon} needs to fetch one of them. */
+  source: IconSource;
+}
+
+/** Where the blobs behind a site's {@link NsiteApp.icons} are to be found. */
+export interface IconSource {
+  files: Map<string, string>;
+  servers: string[];
 }
 
 const NOTHING: NsiteApp = {
@@ -26,6 +43,8 @@ const NOTHING: NsiteApp = {
   fit: 'cover',
   background: null,
   shareTarget: null,
+  icons: [],
+  source: { files: new Map(), servers: [] },
 };
 
 /**
@@ -37,13 +56,27 @@ const NOTHING: NsiteApp = {
  */
 const RANK = { appleTouch: 300, manifest: 200, favicon: 100 } as const;
 
-interface Candidate {
+export interface IconCandidate {
   /** URL as the site wrote it — absolute, root-relative or relative. */
   href: string;
   /** Path the href is relative to. */
   base: string;
+  /**
+   * Fitness for a tile, which is the wall's question. Higher wins.
+   *
+   * A launcher asks a different one — see `launcherScore` in `appIconBitmap` —
+   * because a tile is 72px of squircle showing nearly the whole square, and an
+   * adaptive icon is 432px with a third of it masked away.
+   */
   score: number;
   fit: IconFit;
+  /** Largest edge the site declares, 1024 for vector art, 0 if it doesn't say. */
+  size: number;
+  /**
+   * Declared `purpose: "maskable"`: artwork drawn to be an adaptive icon's
+   * foreground, with the margin the mask eats already built into it.
+   */
+  maskable: boolean;
 }
 
 /** Largest edge named in a `sizes` attribute; vector art sorts above any raster. */
@@ -105,10 +138,9 @@ function toPathname(href: string, base: string): string | null {
  * is ignored. Otherwise it's hotlinked as-is, https-only, since it comes from
  * untrusted event data.
  */
-async function resolveAsset(
-  candidate: Candidate,
-  files: Map<string, string>,
-  servers: string[],
+export async function resolveIcon(
+  candidate: IconCandidate,
+  { files, servers }: IconSource,
 ): Promise<string | null> {
   const pathname = toPathname(candidate.href, candidate.base);
   const sha256 = pathname ? files.get(pathname) : undefined;
@@ -129,20 +161,21 @@ async function resolveAsset(
 }
 
 /** Every icon the document declares, best first. */
-function collectFromDocument(doc: Document): Candidate[] {
-  const candidates: Candidate[] = [];
+function collectFromDocument(doc: Document): IconCandidate[] {
+  const candidates: IconCandidate[] = [];
 
   for (const link of doc.querySelectorAll('link[rel][href]')) {
     const href = link.getAttribute('href')?.trim();
     if (!href) continue;
 
     const rels = (link.getAttribute('rel') ?? '').toLowerCase().split(/\s+/);
-    const sizes = parseSizes(link.getAttribute('sizes'), href);
+    const size = parseSizes(link.getAttribute('sizes'), href);
+    const common = { href, base: '/', size, maskable: false };
 
     if (rels.some((rel) => rel.startsWith('apple-touch-icon'))) {
-      candidates.push({ href, base: '/', score: score(RANK.appleTouch, sizes), fit: 'cover' });
+      candidates.push({ ...common, score: score(RANK.appleTouch, size), fit: 'cover' });
     } else if (rels.includes('icon')) {
-      candidates.push({ href, base: '/', score: score(RANK.favicon, sizes), fit: 'contain' });
+      candidates.push({ ...common, score: score(RANK.favicon, size), fit: 'contain' });
     }
   }
 
@@ -150,12 +183,12 @@ function collectFromDocument(doc: Document): Candidate[] {
 }
 
 /** Icons named by a web app manifest, resolved relative to the manifest itself. */
-function collectFromWebManifest(json: unknown, base: string): Candidate[] {
+function collectFromWebManifest(json: unknown, base: string): IconCandidate[] {
   if (typeof json !== 'object' || json === null) return [];
   const { icons } = json as { icons?: unknown };
   if (!Array.isArray(icons)) return [];
 
-  const candidates: Candidate[] = [];
+  const candidates: IconCandidate[] = [];
 
   for (const icon of icons) {
     if (typeof icon !== 'object' || icon === null) continue;
@@ -166,11 +199,17 @@ function collectFromWebManifest(json: unknown, base: string): Candidate[] {
     const purposes = typeof purpose === 'string' ? purpose.toLowerCase().split(/\s+/) : [];
     if (purposes.length > 0 && purposes.every((p) => p === 'monochrome')) continue;
 
+    const size = parseSizes(typeof sizes === 'string' ? sizes : null, src);
+
     candidates.push({
       href: src.trim(),
       base,
-      score: score(RANK.manifest, parseSizes(typeof sizes === 'string' ? sizes : null, src)),
+      score: score(RANK.manifest, size),
       fit: 'cover',
+      size,
+      // A site may declare one asset for several purposes; what matters is
+      // whether it was drawn to survive a mask, and saying so once is enough.
+      maskable: purposes.includes('maskable'),
     });
   }
 
@@ -341,21 +380,40 @@ export function useNsiteApp(event: NostrEvent, options?: { enabled?: boolean }) 
       const label = pickLabel(doc, webManifest);
 
       for (const [path, rank, fit] of CONVENTIONAL) {
-        if (files.has(path)) candidates.push({ href: path, base: '/', score: rank, fit });
+        if (files.has(path)) {
+          candidates.push({
+            href: path,
+            base: '/',
+            score: rank,
+            fit,
+            size: parseSizes(null, path),
+            maskable: false,
+          });
+        }
       }
 
       candidates.sort((a, b) => b.score - a.score);
 
+      const source: IconSource = { files, servers };
+
       for (const candidate of candidates) {
-        const url = await resolveAsset(candidate, files, servers).catch(() => null);
+        const url = await resolveIcon(candidate, source).catch(() => null);
         if (!url) continue;
 
         const glyph = await looksLikeGlyph(url);
         const fit: IconFit = glyph === null ? candidate.fit : glyph ? 'contain' : 'cover';
-        return { label, iconUrl: url, fit, background, shareTarget };
+        return { label, iconUrl: url, fit, background, shareTarget, icons: candidates, source };
       }
 
-      return { label, iconUrl: null, fit: 'cover', background, shareTarget };
+      return {
+        label,
+        iconUrl: null,
+        fit: 'cover',
+        background,
+        shareTarget,
+        icons: candidates,
+        source,
+      };
     },
     staleTime: Infinity,
     retry: 1,

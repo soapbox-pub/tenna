@@ -53,6 +53,12 @@ export function useNsitePin(
   const tile = useRef({ name, app });
   useEffect(() => { tile.current = { name, app }; }, [name, app]);
 
+  // Redrawing costs a Blossom round trip for the launcher's own artwork, and
+  // the check below runs every time the wall comes back into view. Once for as
+  // long as the tile is on screen is enough: what it draws only changes when
+  // Tenna does.
+  const redrawn = useRef(false);
+
   /**
    * Reconcile the share sheet with the home screen.
    *
@@ -73,7 +79,23 @@ export function useNsitePin(
 
     const offered = isPinned && !!shareTarget;
     const { name, app } = tile.current;
-    const icon = offered ? await renderAppIconPng(name, app) : null;
+    const icon = isPinned ? await renderAppIconPng(name, app) : null;
+
+    // A site is only ever pinned once, so the artwork it was pinned with is
+    // whatever Tenna could draw that day. This is where a shortcut already on
+    // the home screen catches up with a better drawing — including one made
+    // from artwork the site was shipping all along and Tenna passed over.
+    if (icon && !redrawn.current) {
+      redrawn.current = true;
+      await NsiteShortcuts.refreshIcon({
+        siteId,
+        icon,
+        shareCategories: offered && shareTarget ? shareCategories(shareTarget) : undefined,
+      }).catch(() => {
+        // An older shortcut than this build knows how to update. It keeps the
+        // icon it has, which is the one it has always had.
+      });
+    }
 
     await NsiteShortcuts.setShareTarget({
       siteId,

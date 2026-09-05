@@ -405,6 +405,65 @@ public class NsiteShortcutsPlugin extends Plugin {
     }
 
     /**
+     * Redraw a pinned site's icon in place.
+     *
+     * A shortcut's artwork is normally set by pinning, and a site already on
+     * the home screen is never pinned twice — the wall offers the action once
+     * and then shows it as done. So when the drawing changes underneath it,
+     * this is the only way the icon on the home screen catches up.
+     *
+     * {@code updateShortcuts} reaches a pinned shortcut without asking the user
+     * anything, which is the point: nothing about the site has changed, only
+     * how well Tenna draws it. It is a no-op for a site that isn't pinned, and
+     * a site with no record is left alone rather than given one.
+     */
+    @PluginMethod
+    public void refreshIcon(PluginCall call) {
+        String siteId = call.getString("siteId");
+        String icon = call.getString("icon");
+
+        if (siteId == null || icon == null) {
+            call.reject("siteId and icon are required");
+            return;
+        }
+
+        Context context = getContext();
+        NsiteSites.Record record = NsiteSites.load(context, siteId);
+        Bitmap bitmap = decode(icon);
+
+        JSObject result = new JSObject();
+
+        if (record == null || bitmap == null) {
+            result.put("updated", false);
+            call.resolve(result);
+            return;
+        }
+
+        try {
+            // Same call the pin makes, so the recents card and the share picker
+            // are redrawn along with the launcher.
+            NsiteSites.save(context, siteId, record.label, record.event, bitmap, null);
+        } catch (IOException e) {
+            call.reject("Could not store the site's icon", e);
+            return;
+        }
+
+        // Carried through, because updating a shortcut replaces it: a site that
+        // is in the share sheet would otherwise quietly drop out of it.
+        Set<String> categories = categories(call.getArray("shareCategories", null));
+
+        ShortcutManagerCompat.updateShortcuts(
+            context,
+            Collections.singletonList(
+                shortcutFor(context, siteId, record.label, bitmap, categories)
+            )
+        );
+
+        result.put("updated", true);
+        call.resolve(result);
+    }
+
+    /**
      * Leave a site's window.
      *
      * {@code finishAndRemoveTask} rather than {@code finish}: the task is the

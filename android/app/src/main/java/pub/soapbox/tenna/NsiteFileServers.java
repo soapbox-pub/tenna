@@ -12,10 +12,11 @@ import java.util.concurrent.ConcurrentHashMap;
  * Every file server there is, by the host it answers for.
  *
  * A site's page is served by the {@link NsiteFileServer} its own WebView
- * plugin made. Its service worker is not: worker fetches go to one
- * process-wide {@link NsiteServiceWorkers} client, which has to find a server
- * for whichever host asked — including a host with no window open at all,
- * when the push service wakes a worker to hand it an event.
+ * plugin made, which sniffed the site's document to lay the view out. Its
+ * service worker is not: worker fetches go to the one process-wide
+ * {@link NsiteServiceWorkers} client, which has to find a server for whichever
+ * host asked — including a host with no window open at all, when the push
+ * service wakes a worker to hand it an event.
  *
  * So the live servers register here while their window is up, and any other
  * host is answered from its record on disk, built once and kept until the

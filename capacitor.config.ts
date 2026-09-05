@@ -18,6 +18,13 @@ const config: CapacitorConfig = {
     // Background color shown behind the web view before first paint.
     // Usually your app's dark-theme background so the splash feels seamless.
     backgroundColor: '#150609',
+    // Leave the service worker client alone. There is exactly one per
+    // process, and Capacitor's — which answers only for `localhost` and
+    // returns nothing for anything else — would replace Tenna's the moment
+    // a bridge was built, which is what serves every nsite's worker. See
+    // `NsiteServiceWorkers`. Tenna itself registers no service worker, so
+    // nothing is given up by turning this off.
+    resolveServiceWorkerRequests: false,
   },
   ios: {
     backgroundColor: '#150609',

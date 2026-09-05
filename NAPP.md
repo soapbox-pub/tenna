@@ -166,9 +166,25 @@ The site's icon, as shown on Tenna's home screen, is the large icon.
 
 ## How a site is served on Android
 
-For the above to work at all, nsites on Android are served from a loopback
-HTTP server at `http://<subdomain>.nsite.localhost:35128`. Chromium treats
-`*.localhost` as a secure context and resolves it without DNS, so the site
-has `crypto.subtle`, service workers, and everything else it would have on
-`https://`. Worker scripts are fetched from the same server, which is where
-the shim is appended.
+A site is the top-level document of a WebView of its own, at
+`https://<subdomain>.nsite.localhost`. Nothing resolves that name; Chromium
+treats any `*.localhost` origin as potentially trustworthy, so the site is a
+secure context — `crypto.subtle`, service workers, the lot — and every request
+it makes to its own origin is answered from the manifest inside the app.
+
+Answering them takes two clients, because a service worker's fetches do not
+belong to any one WebView:
+
+- The site's own WebView client serves the document and everything the
+  document asks for.
+- A single, process-wide `ServiceWorkerClient` serves everything a worker asks
+  for, including the fetch of the worker's own script. That is where the shim
+  is appended, and it works with no window open at all — which is what lets a
+  notification arrive for a site the user closed.
+
+**If you are working on this app:** that process-wide client is a single slot,
+and Capacitor claims it from `Bridge` unless
+`android.resolveServiceWorkerRequests` is `false` in `capacitor.config.ts`.
+Capacitor's client answers only for `localhost` and returns nothing for
+anything else, so with it in place no nsite can register a worker and every
+notification silently goes nowhere. Leave that flag off.

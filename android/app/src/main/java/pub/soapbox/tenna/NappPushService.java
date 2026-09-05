@@ -123,8 +123,6 @@ public class NappPushService extends Service {
         super.onCreate();
         running = true;
 
-        NsiteHttpServer.start(this);
-
         client = new OkHttpClient.Builder()
             .pingInterval(30, TimeUnit.SECONDS)
             .connectTimeout(15, TimeUnit.SECONDS)

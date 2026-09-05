@@ -133,7 +133,8 @@ public class NappPushPlugin extends Plugin {
         JSObject result = new JSObject();
         result.put("granted", NappNotifications.isEnabled(getContext()));
         result.put("running", NappPushService.isRunning());
-        result.put("supported", NsiteHttpServer.port() > 0);
+        // Without a service worker client there are no workers to deliver to.
+        result.put("supported", NsiteServiceWorkers.isSupported());
         call.resolve(result);
     }
 }

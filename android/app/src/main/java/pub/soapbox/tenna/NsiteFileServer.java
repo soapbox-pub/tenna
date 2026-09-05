@@ -2,6 +2,7 @@ package pub.soapbox.tenna;
 
 import android.content.Context;
 import android.net.Uri;
+import android.webkit.WebResourceResponse;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
@@ -28,8 +29,8 @@ import java.util.Map;
  * This is the whole reason the Android path exists as native code. The site is
  * the WebView's top-level document, so it gets real safe-area insets — but
  * only if nothing has to round-trip its bytes through the Capacitor bridge to
- * get there. Every request is resolved here, on whichever thread
- * {@link NsiteHttpServer} took it on, and answered from a content-addressed
+ * get there. Every request is resolved here, on whichever background thread
+ * {@link NsiteRequests} was called on, and answered from a content-addressed
  * disk cache or a direct HTTPS fetch.
  *
  * Blobs are named by sha256, so the cache never needs invalidating: a given
@@ -90,6 +91,21 @@ final class NsiteFileServer {
             Map<String, String> headers = new HashMap<>();
             headers.put("Cache-Control", "no-store");
             return new Response(status, reason, "text/plain", "UTF-8", headers, new ByteArrayInputStream(new byte[0]), 0);
+        }
+
+        /**
+         * The same response, in the shape a WebView client returns.
+         *
+         * The length is stated as a header rather than dropped: without it a
+         * service worker reading the response has no {@code Content-Length} to
+         * go on, and Chromium refuses a response whose status has no reason
+         * phrase, which is why every one made here carries one.
+         */
+        @NonNull
+        WebResourceResponse toWebResource() {
+            Map<String, String> all = new HashMap<>(headers);
+            all.put("Content-Length", Long.toString(length));
+            return new WebResourceResponse(mimeType, charset, status, reason, all, body);
         }
     }
 

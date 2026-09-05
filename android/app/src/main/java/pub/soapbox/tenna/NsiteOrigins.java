@@ -8,15 +8,15 @@ import java.util.Locale;
 /**
  * Where an nsite lives, as far as the WebView is concerned.
  *
- * Chromium resolves any {@code *.localhost} name to loopback without asking
- * DNS, and treats the origin as potentially trustworthy, so a site at
- * {@code http://<site>.nsite.localhost:<port>} is a secure context — it can
- * use crypto.subtle, register a service worker, and the rest — while every
- * request it makes to its own origin lands on {@link NsiteHttpServer}.
+ * A {@code .localhost} name is treated as potentially trustworthy, so the
+ * document is a secure context and can use crypto.subtle, service workers and
+ * the rest. Nothing resolves it: every request to a site's own origin is
+ * answered by {@link NsiteRequests}, from the page's own WebView client or
+ * from the process-wide {@link NsiteServiceWorkers} one.
  *
  * Unlike the shared, public {@code iframe.diy} domain the iframe path uses,
- * this one is reachable only from this device, so the site label can be the
- * plain NIP-5A subdomain rather than an HMAC of it.
+ * this one is reachable only from inside this app's WebViews, so the site
+ * label can be the plain NIP-5A subdomain rather than an HMAC of it.
  */
 final class NsiteOrigins {
 
@@ -25,20 +25,16 @@ final class NsiteOrigins {
 
     private NsiteOrigins() {}
 
-    /** The host a site is served on, without the port. */
+    /** The host a site is served on. */
     @NonNull
     static String hostFor(@NonNull String siteId) {
         return siteId.toLowerCase(Locale.ROOT) + "." + SITE_DOMAIN;
     }
 
-    /**
-     * The origin a site is served on.
-     *
-     * Only meaningful once {@link NsiteHttpServer} is up; the port is its.
-     */
+    /** The origin a site is served on. */
     @NonNull
     static String originFor(@NonNull String siteId) {
-        return "http://" + hostFor(siteId) + ":" + NsiteHttpServer.port();
+        return "https://" + hostFor(siteId);
     }
 
     /**

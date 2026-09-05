@@ -6,6 +6,7 @@ import android.os.Handler;
 import android.os.Looper;
 import android.util.Log;
 import android.webkit.WebResourceRequest;
+import android.webkit.WebResourceResponse;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
@@ -214,7 +215,16 @@ final class NappWakeWebView {
         settings.setAllowContentAccess(false);
         settings.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
 
+        final Context app = context;
         view.setWebViewClient(new WebViewClient() {
+            @Override
+            public WebResourceResponse shouldInterceptRequest(WebView v, WebResourceRequest request) {
+                // Serves the wake page for a site whose worker doesn't claim
+                // navigations. One that does answers this itself, from the
+                // shim, and this is never reached.
+                return NsiteRequests.serve(app, request);
+            }
+
             @Override
             public boolean shouldOverrideUrlLoading(WebView v, WebResourceRequest request) {
                 // The page has nowhere to go.
@@ -229,7 +239,7 @@ final class NappWakeWebView {
             if (data != null) onMessage(data);
         });
 
-        view.loadUrl(origin + NsiteHttpServer.WAKE_PATH);
+        view.loadUrl(origin + NsiteRequests.WAKE_PATH);
         main.postDelayed(timeout, READY_TIMEOUT_MS);
         return view;
     }

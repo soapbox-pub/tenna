@@ -14,6 +14,7 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.webkit.WebResourceError;
 import android.webkit.WebResourceRequest;
+import android.webkit.WebResourceResponse;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
@@ -65,12 +66,13 @@ import java.util.Set;
  * Everything else here follows from that one decision:
  *
  * <ul>
- *   <li>Files are served by {@link NsiteFileServer} over {@link NsiteHttpServer}
- *       on loopback, so no file bytes cross the Capacitor bridge. The bridge
- *       carries the manifest once and the signer calls, nothing more.
+ *   <li>Files are served by {@link NsiteFileServer} on the WebView's own
+ *       background thread, so no file bytes cross the Capacitor bridge. The
+ *       bridge carries the manifest once and the signer calls, nothing more.
  *   <li>Each site gets its own origin under {@code *.nsite.localhost}, which
  *       separates localStorage and IndexedDB per site and keeps the document
- *       in a secure context.
+ *       in a secure context. The site's service worker is served from the same
+ *       manifest, but by {@link NsiteServiceWorkers} rather than from here.
  *   <li>The view sits above the Capacitor WebView so that touch, focus and the
  *       soft keyboard all behave normally. That buries React's copy of the
  *       chrome, so the shield over the site is drawn here instead — but only
@@ -166,11 +168,6 @@ public class NsiteWebViewPlugin extends Plugin {
             return;
         }
 
-        if (NsiteHttpServer.port() == 0) {
-            call.reject("The local server for sites is not running");
-            return;
-        }
-
         final String siteHost = NsiteOrigins.hostFor(siteId);
         final String origin = NsiteOrigins.originFor(siteId);
 
@@ -186,9 +183,9 @@ public class NsiteWebViewPlugin extends Plugin {
                 // Raised on the WebView's background thread.
                 siteChrome -> getActivity().runOnUiThread(() -> applySiteChrome(siteChrome))
             );
-            // The HTTP server looks the host up here for every request the
-            // site and its worker make, rather than parsing the manifest
-            // again from disk.
+            // Registered so that the site's service worker — whose fetches
+            // reach the process-wide client rather than this view's — is
+            // served from this manifest rather than from the one on disk.
             NsiteFileServers.register(siteHost, fileServer);
 
             WebView view = new WebView(getContext());
@@ -508,6 +505,14 @@ public class NsiteWebViewPlugin extends Plugin {
         }
 
         view.setWebViewClient(new WebViewClient() {
+            @Override
+            public WebResourceResponse shouldInterceptRequest(WebView v, WebResourceRequest request) {
+                // Everything the document itself asks for. Its worker's
+                // requests do not come through here — see NsiteServiceWorkers
+                // — but both end up in the same router.
+                return NsiteRequests.serve(getContext(), request);
+            }
+
             @Override
             public boolean shouldOverrideUrlLoading(WebView v, WebResourceRequest request) {
                 Uri url = request.getUrl();

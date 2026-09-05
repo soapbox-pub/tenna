@@ -5,16 +5,15 @@ import android.app.Application;
 /**
  * Process-wide setup that no one activity can own.
  *
- * Every nsite is served from one loopback HTTP server, and a site's service
- * worker may need serving when the only thing running is the push service.
- * So the server is started here, before any activity or service has asked
- * for a site.
+ * A service worker's fetches, its own script included, go to a single client
+ * shared by the whole process, and it has to be set before any worker starts.
+ * That is earlier than any activity or service can manage, so it happens here.
  */
 public class TennaApplication extends Application {
 
     @Override
     public void onCreate() {
         super.onCreate();
-        NsiteHttpServer.start(this);
+        NsiteServiceWorkers.install(this);
     }
 }

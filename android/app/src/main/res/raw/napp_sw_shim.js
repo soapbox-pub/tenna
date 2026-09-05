@@ -6,20 +6,21 @@
  * stood in for here. A push is delivered as a `message` from a document Tenna
  * opens at the site's origin, and re-raised as a `push` event that looks the
  * way one does anywhere else: `event.data.json()` and `event.waitUntil()`
- * both work. `showNotification` is posted to the host over a same-origin
- * fetch, which the host turns into an OS notification.
+ * both work. `showNotification` is sent to the host as a same-origin request,
+ * which the host answers by posting an OS notification.
  *
  * Appended rather than prepended so that a `'use strict'` prologue at the top
  * of the site's own script keeps meaning what it says.
  */
 ;(function () {
   'use strict';
+
+  // The site's script is served with this appended wherever it is fetched
+  // from, and a site may well load it somewhere other than as a worker.
+  if (typeof ServiceWorkerGlobalScope === 'undefined') return;
+  if (!(self instanceof ServiceWorkerGlobalScope)) return;
   if (self.__napp) return;
   self.__napp = true;
-
-  // Anything on the device can reach the loopback server; only a worker the
-  // server itself appended this to knows the token.
-  var TOKEN = '%%NAPP_TOKEN%%';
 
   // The page the host loads to reach this worker. It has to come from here
   // when the site's own fetch handler would otherwise answer the navigation
@@ -28,6 +29,12 @@
   // added after the site's answers it instead.
   var WAKE_PATH = '/.napp/wake';
   var WAKE_PAGE = %%NAPP_WAKE_PAGE%%;
+
+  /** Where a notification is sent. See NsiteRequests. */
+  var NOTIFICATION_PATH = '/.napp/notification';
+
+  /** A URL is not a request body; anything longer than this is the site's bug. */
+  var MAX_NOTIFICATION_BYTES = 64 * 1024;
 
   function isWake(url) {
     try { return new URL(url).pathname === WAKE_PATH; } catch (e) { return false; }
@@ -79,21 +86,30 @@
     });
   });
 
+  /** base64url, over UTF-8 rather than over whatever btoa makes of it. */
+  function encode(text) {
+    var bytes = new TextEncoder().encode(text);
+    if (bytes.length > MAX_NOTIFICATION_BYTES) return null;
+    var binary = '';
+    for (var i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+    return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  }
+
   var proto = self.ServiceWorkerRegistration && self.ServiceWorkerRegistration.prototype;
   if (proto) {
     proto.showNotification = function (title, options) {
       var payload;
       try {
-        payload = JSON.stringify({ title: String(title), options: options || {} });
+        payload = encode(JSON.stringify({ title: String(title), options: options || {} }));
       } catch (err) {
         return Promise.reject(new TypeError('Notification options must be serializable'));
       }
-      return fetch('/.napp/notification', {
-        method: 'POST',
-        cache: 'no-store',
-        headers: { 'Content-Type': 'application/json', 'X-Napp-Token': TOKEN },
-        body: payload,
-      }).then(function (res) {
+      if (payload === null) {
+        return Promise.reject(new TypeError('Notification is too large'));
+      }
+      // A GET, and not a POST: the host answers this from
+      // `shouldInterceptRequest`, which is never given a request body.
+      return fetch(NOTIFICATION_PATH + '?p=' + payload, { cache: 'no-store' }).then(function (res) {
         if (!res.ok) throw new Error('Notification refused');
       });
     };

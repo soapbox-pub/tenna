@@ -118,6 +118,7 @@ public class NsiteAppActivity extends BridgeActivity {
 
         silenceTransitions();
         describeTask();
+        reportUsed();
         // See MainActivity: whichever window comes up first brings it back.
         NappPushService.sync(this);
     }
@@ -169,7 +170,21 @@ public class NsiteAppActivity extends BridgeActivity {
     protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
         setIntent(intent);
+        reportUsed();
         NsiteShortcutsPlugin.deliver(getBridge(), intent);
+    }
+
+    /**
+     * Record that this site was opened, whichever way it was.
+     *
+     * Every cold way into a site comes through here — a tile on the wall, an
+     * icon on the home screen, a share — so it is the one place that sees them
+     * all. What it is for is the share sheet's ranking; see
+     * {@code NsiteShortcutsPlugin.reportUsed}.
+     */
+    private void reportUsed() {
+        String siteId = getIntent() == null ? null : getIntent().getStringExtra(EXTRA_SITE_ID);
+        if (siteId != null) NsiteShortcutsPlugin.reportUsed(this, siteId);
     }
 
     /**

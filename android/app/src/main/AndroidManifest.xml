@@ -23,6 +23,23 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
 
+            <!--
+                What a pinned nsite may be offered from the share sheet. See
+                @xml/shortcuts, whose <share-target> entries send the share on
+                to NsiteShareActivity.
+
+                It has to be declared here, on the launcher activity, and
+                nowhere else. The system reads android.app.shortcuts only off
+                the activities that answer MAIN/LAUNCHER, so the same element
+                on the activity the shares actually arrive at is never parsed
+                at all — leaving shortcuts that carry a category nothing on the
+                device defines, and a share sheet with nothing to match them
+                against.
+            -->
+            <meta-data
+                android:name="android.app.shortcuts"
+                android:resource="@xml/shortcuts" />
+
         </activity>
 
         <!--
@@ -55,10 +72,12 @@
 
             A pinned nsite that declared a `share_target` appears in the sheet
             as itself, through the sharing shortcuts in @xml/shortcuts; picking
-            one sends the share here with its id attached. Whether the sheet
-            surfaces those entries is Android's ranking to decide, so the plain
-            ACTION_SEND filter is here too — picking Tenna itself puts the
-            choice of site to the user instead, and always works.
+            one sends the share here with its id attached. Those entries are
+            declared on MainActivity rather than here, for the reason given
+            there. Whether the sheet surfaces them at all is Android's ranking
+            to decide, so the plain ACTION_SEND filter is here too — picking
+            Tenna itself puts the choice of site to the user instead, and
+            always works.
 
             Translucent rather than themed, because there is nothing to see: a
             visible frame would flash between the sheet closing and the site's
@@ -80,10 +99,6 @@
                 <category android:name="android.intent.category.DEFAULT" />
                 <data android:mimeType="*/*" />
             </intent-filter>
-
-            <meta-data
-                android:name="android.app.shortcuts"
-                android:resource="@xml/shortcuts" />
 
         </activity>
 

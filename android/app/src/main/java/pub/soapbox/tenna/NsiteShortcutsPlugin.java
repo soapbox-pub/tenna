@@ -151,6 +151,23 @@ public class NsiteShortcutsPlugin extends Plugin {
         });
     }
 
+    /**
+     * Tell the system a site was opened.
+     *
+     * The share sheet shows only a few of an app's targets at once, and picks
+     * which few by rank. Left alone that rank is the order the wall happened
+     * to publish sites in — alphabetical, near enough — so without this the
+     * sheet offers whichever sites sort first rather than the ones the user
+     * actually opens. Harmless for a site with no shortcut to rank.
+     */
+    static void reportUsed(@NonNull Context context, @NonNull String siteId) {
+        try {
+            ShortcutManagerCompat.reportShortcutUsed(context, NsiteSites.key(siteId));
+        } catch (RuntimeException e) {
+            Log.w(TAG, "Could not report a site as used", e);
+        }
+    }
+
     /** Bring a site's existing window forward, if it has one. */
     private boolean resumeWindow(@NonNull String siteId) {
         ActivityManager manager =
@@ -163,6 +180,8 @@ public class NsiteShortcutsPlugin extends Plugin {
                 if (base == null) continue;
                 if (!siteId.equals(base.getStringExtra(NsiteAppActivity.EXTRA_SITE_ID))) continue;
                 task.moveToFront();
+                // The one way in that never reaches NsiteAppActivity.onCreate.
+                reportUsed(getContext(), siteId);
                 return true;
             }
         } catch (RuntimeException e) {

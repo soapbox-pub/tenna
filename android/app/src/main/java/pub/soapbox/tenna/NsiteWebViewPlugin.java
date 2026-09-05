@@ -8,11 +8,12 @@ import android.content.res.ColorStateList;
 import android.graphics.Color;
 import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
+import android.util.Log;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
+import android.webkit.WebResourceError;
 import android.webkit.WebResourceRequest;
-import android.webkit.WebResourceResponse;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
@@ -41,7 +42,6 @@ import com.getcapacitor.annotation.CapacitorPlugin;
 import org.json.JSONException;
 import org.json.JSONObject;
 
-import java.io.File;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -65,9 +65,9 @@ import java.util.Set;
  * Everything else here follows from that one decision:
  *
  * <ul>
- *   <li>Files are served by {@link NsiteFileServer} on the WebView's own
- *       background thread, so no file bytes cross the Capacitor bridge. The
- *       bridge carries the manifest once and the signer calls, nothing more.
+ *   <li>Files are served by {@link NsiteFileServer} over {@link NsiteHttpServer}
+ *       on loopback, so no file bytes cross the Capacitor bridge. The bridge
+ *       carries the manifest once and the signer calls, nothing more.
  *   <li>Each site gets its own origin under {@code *.nsite.localhost}, which
  *       separates localStorage and IndexedDB per site and keeps the document
  *       in a secure context.
@@ -86,19 +86,7 @@ import java.util.Set;
 @CapacitorPlugin(name = "NsiteWebView")
 public class NsiteWebViewPlugin extends Plugin {
 
-    /**
-     * Parent domain for site origins.
-     *
-     * A {@code .localhost} name is treated as potentially trustworthy, so the
-     * document is a secure context and can use crypto.subtle, service workers
-     * and the rest. Nothing resolves it: every same-origin request is answered
-     * by {@link NsiteFileServer}.
-     *
-     * Unlike the shared, public {@code iframe.diy} domain the iframe path uses,
-     * this one is reachable only from inside this app's WebView, so the site
-     * label can be the plain NIP-5A subdomain rather than an HMAC of it.
-     */
-    private static final String SITE_DOMAIN = "nsite.localhost";
+    private static final String TAG = "NsiteWebView";
 
     /** Injected object name the NIP-07 provider posts through. */
     private static final String HOST_OBJECT = "tennaHost";
@@ -178,8 +166,13 @@ public class NsiteWebViewPlugin extends Plugin {
             return;
         }
 
-        final String siteHost = siteId.toLowerCase() + "." + SITE_DOMAIN;
-        final String origin = "https://" + siteHost;
+        if (NsiteHttpServer.port() == 0) {
+            call.reject("The local server for sites is not running");
+            return;
+        }
+
+        final String siteHost = NsiteOrigins.hostFor(siteId);
+        final String origin = NsiteOrigins.originFor(siteId);
 
         getActivity().runOnUiThread(() -> {
             destroyWebView();
@@ -189,10 +182,14 @@ public class NsiteWebViewPlugin extends Plugin {
             fileServer = new NsiteFileServer(
                 files,
                 servers,
-                new File(getContext().getCacheDir(), "nsite"),
+                NsiteFileServer.cacheDir(getContext()),
                 // Raised on the WebView's background thread.
                 siteChrome -> getActivity().runOnUiThread(() -> applySiteChrome(siteChrome))
             );
+            // The HTTP server looks the host up here for every request the
+            // site and its worker make, rather than parsing the manifest
+            // again from disk.
+            NsiteFileServers.register(siteHost, fileServer);
 
             WebView view = new WebView(getContext());
             configure(view);
@@ -381,6 +378,8 @@ public class NsiteWebViewPlugin extends Plugin {
     private void destroyWebView() {
         WebView view = webView;
         ViewGroup frame = container;
+        NsiteFileServer server = fileServer;
+        String served = host;
         webView = null;
         container = null;
         pill = null;
@@ -388,6 +387,8 @@ public class NsiteWebViewPlugin extends Plugin {
         replyProxy = null;
         host = null;
         shuttingDown = false;
+
+        if (server != null && served != null) NsiteFileServers.unregister(served, server);
 
         if (frame != null) {
             // Whoever got here first wins: opening another site, or the
@@ -417,10 +418,9 @@ public class NsiteWebViewPlugin extends Plugin {
      * owns every panel: the permissions popover conceals the site and appears
      * over it, anchored to the React chrome in the same place.
      *
-     * This is the pinned site's chrome — a site opened from Tenna hangs the
-     * same button off {@link NsiteTopBarView} instead. Returns null when there
-     * is no signer to have granted anything, because an empty pill is a smudge
-     * over the corner of a page that has done nothing to deserve one.
+     * Returns null when there is no signer to have granted anything, because
+     * an empty pill is a smudge over the corner of a page that has done
+     * nothing to deserve one.
      */
     @Nullable
     private View buildPill(boolean hasSigner) {
@@ -490,7 +490,7 @@ public class NsiteWebViewPlugin extends Plugin {
         // `viewport-fit=cover` — the whole point — with it.
         settings.setUseWideViewPort(true);
 
-        // Nothing an nsite is served comes from the device.
+        // Nothing an nsite is served comes from the device's own files.
         settings.setAllowFileAccess(false);
         settings.setAllowContentAccess(false);
         settings.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
@@ -509,20 +509,18 @@ public class NsiteWebViewPlugin extends Plugin {
 
         view.setWebViewClient(new WebViewClient() {
             @Override
-            public WebResourceResponse shouldInterceptRequest(WebView v, WebResourceRequest request) {
-                NsiteFileServer server = fileServer;
-                String expected = host;
-                if (server == null || expected == null) return null;
-                return server.serve(expected, request.getUrl());
-            }
-
-            @Override
             public boolean shouldOverrideUrlLoading(WebView v, WebResourceRequest request) {
                 Uri url = request.getUrl();
                 String expected = host;
                 // Keep the site inside its own origin. Anything else it tries
                 // to navigate to is a link out, which is not ours to follow.
                 return expected == null || !expected.equalsIgnoreCase(url.getHost());
+            }
+
+            @Override
+            public void onReceivedError(WebView v, WebResourceRequest request, WebResourceError error) {
+                if (!request.isForMainFrame()) return;
+                Log.w(TAG, "Site failed to load " + request.getUrl() + ": " + error.getErrorCode() + " " + error.getDescription());
             }
 
             @Override

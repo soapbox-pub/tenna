@@ -4,6 +4,7 @@ import { Shield, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
+import { NappPush, supportsNappPush } from '@/lib/nappPushPlugin';
 import {
   clearNsitePermissions,
   getNsiteAllowance,
@@ -85,14 +86,27 @@ export function NsitePermissionManager({
     : undefined;
   const permissions = allowance?.permissions ?? [];
 
+  // Taking back "send notifications" has to reach further than the stored
+  // decision: the subscriptions the site set are on disk on the native side,
+  // and the push service would go on listening for them.
+  const forgetSubscriptions = () => {
+    if (!supportsNappPush()) return;
+    void NappPush.set({ siteId, label: siteId, subscriptions: '[]' }).catch(() => {
+      // Left as they were; the next set() from the site prompts again.
+    });
+  };
+
   const handleRemove = (perm: NsitePermission) => {
     if (!user) return;
     removeNsitePermission(siteId, user.pubkey, perm.type, perm.kind);
+    if (perm.type === 'push') forgetSubscriptions();
   };
 
   const handleClearAll = () => {
     if (!user) return;
+    const hadPush = permissions.some((perm) => perm.type === 'push');
     clearNsitePermissions(siteId, user.pubkey);
+    if (hadPush) forgetSubscriptions();
   };
 
   // Don't render the manager if no user is logged in.

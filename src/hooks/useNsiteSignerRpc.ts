@@ -1,14 +1,18 @@
 /**
- * Hook that provides a JSON-RPC handler for proxying NIP-07 signer calls
- * from a sandboxed nsite iframe to the parent user's signer.
+ * Hook that provides a JSON-RPC handler for the calls a sandboxed nsite makes
+ * on its host: NIP-07 signer calls, proxied to the user's signer, and
+ * `napp.push.*` calls, which hand the site's relay subscriptions to the native
+ * push service.
  *
- * Each `nostr.*` RPC method is gated by the permission system. If no
- * stored decision exists, a prompt is shown to the user. Prompts are
- * serialized (one at a time) to prevent overwhelming the user.
+ * Each method is gated by the permission system. If no stored decision
+ * exists, a prompt is shown to the user. Prompts are serialized (one at a
+ * time) to prevent overwhelming the user.
  */
 import { useCallback, useRef, useState } from 'react';
 
 import { useCurrentUser } from '@/hooks/useCurrentUser';
+import { NappPush, supportsNappPush } from '@/lib/nappPushPlugin';
+import { normalizeNappSubscriptions } from '@/lib/nappSubscriptions';
 import {
   getNsitePermission,
   setNsitePermission,
@@ -256,11 +260,43 @@ export function useNsiteSignerRpc({
           return await signer.nip44.decrypt(pubkey, ciphertext);
         }
 
+        // ------------------------------------------------------------------
+        // napp.push — relay subscriptions Tenna holds open for the site
+        // ------------------------------------------------------------------
+        case 'napp.push.get': {
+          if (!supportsNappPush()) throw new Error('Push is not available on this platform');
+          const { subscriptions } = await NappPush.get({ siteId });
+          return JSON.parse(subscriptions) as unknown;
+        }
+
+        case 'napp.push.set': {
+          if (!supportsNappPush()) throw new Error('Push is not available on this platform');
+
+          // Refused before the user is asked: a prompt for a request that
+          // would then fail on its shape is a prompt for nothing.
+          const subscriptions = normalizeNappSubscriptions(p.subscriptions);
+
+          // Clearing needs no one's permission.
+          if (subscriptions.length > 0) {
+            await checkPermission('push', null, { type: 'push', kind: null });
+
+            const { granted } = await NappPush.requestPermission();
+            if (!granted) throw new Error('Notifications are turned off for Tenna');
+          }
+
+          await NappPush.set({
+            siteId,
+            label: siteName,
+            subscriptions: JSON.stringify(subscriptions),
+          });
+          return undefined;
+        }
+
         default:
           throw new Error(`Method not found: ${method}`);
       }
     },
-    [user, checkPermission],
+    [user, checkPermission, siteId, siteName],
   );
 
   return { onRpc, pendingPrompt, resolvePrompt };

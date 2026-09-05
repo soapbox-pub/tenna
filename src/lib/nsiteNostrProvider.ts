@@ -1,10 +1,11 @@
 /**
- * Generates the injected NIP-07 provider script for sandboxed nsites.
+ * Generates the injected bridge script for sandboxed nsites.
  *
  * The script defines `window.nostr` conforming to the NIP-07 interface.
  * `getPublicKey()` returns the embedded pubkey instantly (always allowed).
  * All other methods (`signEvent`, `nip04.*`, `nip44.*`) send JSON-RPC 2.0
- * requests to the host and await responses.
+ * requests to the host and await responses. Where the host can deliver
+ * notifications it also defines `window.napp.push`, over the same channel.
  *
  * A serial queue ensures only one RPC is in flight at a time, preventing
  * the host from being overwhelmed with concurrent permission prompts.
@@ -51,9 +52,39 @@ function getTransportSource(transport: NsiteRpcTransport): {
   };
 }
 
+/** What the bridge script defines beyond `window.nostr`. */
+export interface NsiteBridgeOptions {
+  /**
+   * Define `window.napp.push`, the API a site uses to have the host hold
+   * relay subscriptions open for it and wake its service worker for events.
+   * Only where the host can honour it — see `supportsNappPush`.
+   */
+  napp?: boolean;
+}
+
+/**
+ * The `window.napp` block, for hosts that can deliver.
+ *
+ * Frozen, so a site cannot swap the methods out from under its own code —
+ * or another script's — after the fact.
+ */
+const NAPP_SOURCE = `
+  window.napp = Object.freeze({
+    push: Object.freeze({
+      set: function(subscriptions) {
+        return rpc('napp.push.set', { subscriptions: subscriptions });
+      },
+      get: function() {
+        return rpc('napp.push.get', {});
+      }
+    })
+  });
+`;
+
 export function getNsiteNostrProviderScript(
   pubkey: string,
   transport: NsiteRpcTransport = 'postMessage',
+  options: NsiteBridgeOptions = {},
 ): string {
   const { receive, send } = getTransportSource(transport);
 
@@ -155,7 +186,7 @@ ${receive}
       }
     }
   };
-
+${options.napp ? NAPP_SOURCE : ''}
   // Signal availability to the nsite.
   try {
     window.dispatchEvent(new Event('nostr:ready'));

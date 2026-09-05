@@ -309,11 +309,12 @@ public class NsiteShortcutsPlugin extends Plugin {
      * site, so a back gesture off its first page should take the recents card
      * with it the way closing an app does, not leave an empty one behind.
      *
-     * The record goes with it, unless the site is on the home screen. A window
-     * opened from the wall is resumed from its record for as long as it exists,
-     * and once it doesn't the wall is how the site gets opened again — but a
-     * pinned shortcut has no wall behind it and must keep its manifest, so a
-     * launcher that won't say whether a site is pinned is taken at its worst.
+     * The record goes with it, unless the site is on the home screen or has
+     * asked for notifications. A window opened from the wall is resumed from
+     * its record for as long as it exists, and once it doesn't the wall is how
+     * the site gets opened again — but a pinned shortcut has no wall behind it
+     * and must keep its manifest, so a launcher that won't say whether a site
+     * is pinned is taken at its worst.
      */
     @PluginMethod
     public void finish(PluginCall call) {
@@ -324,7 +325,11 @@ public class NsiteShortcutsPlugin extends Plugin {
         final boolean fromWall =
             intent != null && intent.getBooleanExtra(NsiteAppActivity.EXTRA_FROM_WALL, false);
 
-        if (siteId != null && Boolean.FALSE.equals(isPinned(siteId))) {
+        // A site with subscriptions keeps its record too: its worker is
+        // served from that manifest when an event arrives for it.
+        if (siteId != null
+            && Boolean.FALSE.equals(isPinned(siteId))
+            && !NappSubscriptions.has(getContext(), siteId)) {
             NsiteSites.forget(getContext(), siteId);
         }
 

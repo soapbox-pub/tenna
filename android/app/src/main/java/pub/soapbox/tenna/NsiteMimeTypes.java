@@ -60,6 +60,11 @@ final class NsiteMimeTypes {
         return type != null ? type : "application/octet-stream";
     }
 
+    /** Whether a response of this type is something a worker could be. */
+    static boolean isScript(String mimeType) {
+        return "application/javascript".equals(mimeType) || "text/javascript".equals(mimeType);
+    }
+
     /**
      * The charset to declare, or null for binary.
      *

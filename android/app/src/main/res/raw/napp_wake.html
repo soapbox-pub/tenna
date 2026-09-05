@@ -1,0 +1,59 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>napp</title>
+</head>
+<body>
+<script>
+/*
+ * Tenna's wake page, loaded at a site's origin in a WebView with no window.
+ *
+ * Nothing native can start a service worker; only a document at its origin
+ * can, by posting to it. This page relays in both directions: a push from the
+ * host goes to the worker as the message the shim turns into a `push` event,
+ * and the shim's reply, once every waitUntil has settled, comes back the same
+ * way. The host object `nappHost` exists only in the WebView the push service
+ * made; anywhere else this page does nothing.
+ */
+(function () {
+  'use strict';
+  var host = window.nappHost;
+  if (!host) return;
+
+  function send(m) { host.postMessage(JSON.stringify(m)); }
+
+  function worker() {
+    if (!navigator.serviceWorker) return Promise.resolve(null);
+    return navigator.serviceWorker.getRegistrations().then(function (regs) {
+      for (var i = 0; i < regs.length; i++) { if (regs[i].active) return regs[i].active; }
+      if (regs.length === 0) return null;
+      return Promise.race([
+        navigator.serviceWorker.ready.then(function (r) { return r.active; }),
+        new Promise(function (r) { setTimeout(function () { r(null); }, 10000); })
+      ]);
+    }).catch(function () { return null; });
+  }
+
+  if (navigator.serviceWorker) {
+    navigator.serviceWorker.addEventListener('message', function (e) {
+      var m = e.data;
+      if (m && m.__napp === 'done') send({ type: 'done', id: m.id, delivered: true });
+    });
+  }
+
+  host.onmessage = function (e) {
+    var m;
+    try { m = JSON.parse(e.data); } catch (err) { return; }
+    if (!m || m.type !== 'push') return;
+    worker().then(function (w) {
+      if (!w) { send({ type: 'done', id: m.id, delivered: false }); return; }
+      w.postMessage({ __napp: 'push', id: m.id, data: m.data });
+    });
+  };
+
+  send({ type: 'ready' });
+})();
+</script>
+</body>
+</html>

@@ -94,10 +94,13 @@ public class NsiteAppActivity extends BridgeActivity {
         // end of it, and only plugins registered by then are reachable.
         registerPlugin(NsiteWebViewPlugin.class);
         registerPlugin(NsiteShortcutsPlugin.class);
+        registerPlugin(NappPushPlugin.class);
         super.onCreate(savedInstanceState);
 
         silenceTransitions();
         describeTask();
+        // See MainActivity: whichever window comes up first brings it back.
+        NappPushService.sync(this);
     }
 
     /**

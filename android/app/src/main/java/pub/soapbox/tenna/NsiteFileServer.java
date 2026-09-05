@@ -1,7 +1,10 @@
 package pub.soapbox.tenna;
 
+import android.content.Context;
 import android.net.Uri;
-import android.webkit.WebResourceResponse;
+
+import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -11,6 +14,7 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.io.SequenceInputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
@@ -24,9 +28,9 @@ import java.util.Map;
  * This is the whole reason the Android path exists as native code. The site is
  * the WebView's top-level document, so it gets real safe-area insets — but
  * only if nothing has to round-trip its bytes through the Capacitor bridge to
- * get there. Every request is resolved here, on the background thread
- * {@code shouldInterceptRequest} already runs on, and answered from a
- * content-addressed disk cache or a direct HTTPS fetch.
+ * get there. Every request is resolved here, on whichever thread
+ * {@link NsiteHttpServer} took it on, and answered from a content-addressed
+ * disk cache or a direct HTTPS fetch.
  *
  * Blobs are named by sha256, so the cache never needs invalidating: a given
  * name always denotes the same bytes. Reopening a site costs nothing after the
@@ -38,19 +42,63 @@ final class NsiteFileServer {
     /**
      * Told what the site's own document asks for, the first time it is served.
      *
-     * Raised on the WebView's background thread, before the renderer has been
-     * given a byte of the document — early enough that the view can be laid
-     * out for the site before it paints.
+     * Raised on the serving thread, before the renderer has been given a byte
+     * of the document — early enough that the view can be laid out for the
+     * site before it paints.
      */
     interface ChromeListener {
         void onSiteChrome(NsiteSiteChrome chrome);
+    }
+
+    /** What to send back: the transport-neutral shape of an HTTP response. */
+    static final class Response {
+        final int status;
+        @NonNull final String reason;
+        @NonNull final String mimeType;
+        @Nullable final String charset;
+        @NonNull final Map<String, String> headers;
+        @NonNull final InputStream body;
+        /** Exact byte length of {@link #body}; every body served here is known in advance. */
+        final long length;
+
+        Response(
+            int status,
+            @NonNull String reason,
+            @NonNull String mimeType,
+            @Nullable String charset,
+            @NonNull Map<String, String> headers,
+            @NonNull InputStream body,
+            long length
+        ) {
+            this.status = status;
+            this.reason = reason;
+            this.mimeType = mimeType;
+            this.charset = charset;
+            this.headers = headers;
+            this.body = body;
+            this.length = length;
+        }
+
+        static Response text(int status, String reason, String text) {
+            byte[] bytes = text.getBytes(StandardCharsets.UTF_8);
+            Map<String, String> headers = new HashMap<>();
+            headers.put("Cache-Control", "no-store");
+            return new Response(status, reason, "text/plain", "UTF-8", headers, new ByteArrayInputStream(bytes), bytes.length);
+        }
+
+        static Response empty(int status, String reason) {
+            Map<String, String> headers = new HashMap<>();
+            headers.put("Cache-Control", "no-store");
+            return new Response(status, reason, "text/plain", "UTF-8", headers, new ByteArrayInputStream(new byte[0]), 0);
+        }
     }
 
     /** Manifest path (e.g. {@code /index.html}) to sha256. */
     private final Map<String, String> files;
     private final List<String> servers;
     private final File cacheDir;
-    private final ChromeListener chromeListener;
+    /** Null for a server with no view to lay out — one serving a worker. */
+    @Nullable private final ChromeListener chromeListener;
 
     /** The document is served again on every SPA route; sniff it once. */
     private volatile boolean chromeReported;
@@ -67,7 +115,7 @@ final class NsiteFileServer {
         Map<String, String> files,
         List<String> servers,
         File cacheDir,
-        ChromeListener chromeListener
+        @Nullable ChromeListener chromeListener
     ) {
         this.files = files;
         this.servers = servers;
@@ -77,15 +125,27 @@ final class NsiteFileServer {
         cacheDir.mkdirs();
     }
 
-    /**
-     * Resolve a request, or return null to let it go to the network.
-     *
-     * Requests for anything but our own origin are somebody else's business —
-     * an nsite fetching a relay, an avatar, a Blossom blob of its own.
-     */
-    WebResourceResponse serve(String expectedHost, Uri uri) {
-        if (!expectedHost.equalsIgnoreCase(uri.getHost())) return null;
+    /** A server for a parsed manifest, with nothing to lay out. */
+    static NsiteFileServer forManifest(@NonNull Context context, @NonNull NsiteManifest manifest) {
+        return new NsiteFileServer(manifest.files, manifest.servers, cacheDir(context), null);
+    }
 
+    /** The one blob cache every server shares: blobs are named by content. */
+    static File cacheDir(@NonNull Context context) {
+        return new File(context.getCacheDir(), "nsite");
+    }
+
+    /**
+     * Resolve a request, appending {@code scriptSuffix} to the file if it is
+     * a script the manifest names outright.
+     *
+     * A worker script is the one file the host has to add to: the site's own
+     * bytes, then the push shim after them. The suffix is withheld from the
+     * SPA fallback — a request for a script that isn't there gets the site's
+     * document, and a document is not a script to be extended.
+     */
+    @NonNull
+    Response serve(@NonNull Uri uri, @Nullable String scriptSuffix) {
         String path = uri.getPath();
         if (path == null || path.isEmpty()) path = "/";
         if (path.endsWith("/")) path = path + "index.html";
@@ -98,13 +158,13 @@ final class NsiteFileServer {
             sha256 = files.get("/index.html");
             servingPath = "/index.html";
         }
-        if (sha256 == null) return textResponse(404, "Not Found", "Not Found");
+        if (sha256 == null) return Response.text(404, "Not Found", "Not Found");
 
         File blob;
         try {
             blob = blob(sha256);
         } catch (IOException e) {
-            return textResponse(502, "Bad Gateway", "Failed to fetch " + sha256);
+            return Response.text(502, "Bad Gateway", "Failed to fetch " + sha256);
         }
 
         String mimeType = NsiteMimeTypes.of(servingPath);
@@ -115,20 +175,32 @@ final class NsiteFileServer {
         headers.put("Cache-Control", "no-cache");
 
         try {
-            InputStream body = "/index.html".equals(servingPath)
-                ? documentStream(blob)
-                : new FileInputStream(blob);
+            InputStream body;
+            long length;
+            if ("/index.html".equals(servingPath)) {
+                byte[] document = document(blob);
+                body = new ByteArrayInputStream(document);
+                length = document.length;
+            } else if (scriptSuffix != null && servingPath.equals(path) && NsiteMimeTypes.isScript(mimeType)) {
+                byte[] suffix = ("\n" + scriptSuffix).getBytes(StandardCharsets.UTF_8);
+                body = new SequenceInputStream(new FileInputStream(blob), new ByteArrayInputStream(suffix));
+                length = blob.length() + suffix.length;
+            } else {
+                body = new FileInputStream(blob);
+                length = blob.length();
+            }
 
-            return new WebResourceResponse(
-                mimeType,
-                NsiteMimeTypes.encodingFor(mimeType),
+            return new Response(
                 200,
                 "OK",
+                mimeType,
+                NsiteMimeTypes.encodingFor(mimeType),
                 headers,
-                body
+                body,
+                length
             );
         } catch (IOException e) {
-            return textResponse(500, "Internal Error", "Unreadable blob");
+            return Response.text(500, "Internal Error", "Unreadable blob");
         }
     }
 
@@ -140,17 +212,17 @@ final class NsiteFileServer {
      * than asked for afterwards with {@code evaluateJavascript}, which would
      * arrive a frame late and show the site jumping into place.
      */
-    private InputStream documentStream(File blob) throws IOException {
+    private byte[] document(File blob) throws IOException {
         byte[] bytes = readFully(blob);
 
-        if (!chromeReported) {
+        if (!chromeReported && chromeListener != null) {
             chromeReported = true;
             chromeListener.onSiteChrome(
                 NsiteSiteChrome.read(new String(bytes, StandardCharsets.UTF_8))
             );
         }
 
-        return new ByteArrayInputStream(bytes);
+        return bytes;
     }
 
     private static byte[] readFully(File file) throws IOException {
@@ -247,20 +319,5 @@ final class NsiteFileServer {
         } finally {
             connection.disconnect();
         }
-    }
-
-    // -----------------------------------------------------------------------
-
-    private static WebResourceResponse textResponse(int status, String reason, String body) {
-        Map<String, String> headers = new HashMap<>();
-        headers.put("Cache-Control", "no-store");
-        return new WebResourceResponse(
-            "text/plain",
-            "UTF-8",
-            status,
-            reason,
-            headers,
-            new ByteArrayInputStream(body.getBytes(StandardCharsets.UTF_8))
-        );
     }
 }

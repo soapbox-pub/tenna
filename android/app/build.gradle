@@ -43,6 +43,8 @@ dependencies {
     // Capacitor depends on this too, but only as `implementation`, so it
     // doesn't reach this module's compile classpath.
     implementation "androidx.webkit:webkit:$androidxWebkitVersion"
+    // NappPushService: the WebSocket client that keeps relays open.
+    implementation "com.squareup.okhttp3:okhttp:$okhttpVersion"
     implementation project(':capacitor-android')
     testImplementation "junit:junit:$junitVersion"
     androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"

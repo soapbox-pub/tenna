@@ -3,6 +3,7 @@ import type { PluginListenerHandle } from '@capacitor/core';
 import { useEffect, useRef } from 'react';
 
 import type { NsiteFrameProps } from '@/components/nsite/types';
+import { supportsNappPush } from '@/lib/nappPushPlugin';
 import { buildManifest, resolveServers } from '@/lib/nsiteFiles';
 import { NsiteWebView, type NsiteRpcEvent } from '@/lib/nsiteNativePlugin';
 import { getNsiteNostrProviderScript } from '@/lib/nsiteNostrProvider';
@@ -76,8 +77,11 @@ export function NsiteNative({
         siteId: getNsiteSubdomain(event),
         files: Object.fromEntries(buildManifest(event)),
         servers: resolveServers(event),
+        // A site in its own WebView can register a service worker, and the
+        // push service can wake it, so this is the one frame that offers
+        // `window.napp.push` alongside `window.nostr`.
         providerScript: pubkey
-          ? getNsiteNostrProviderScript(pubkey, 'webMessage')
+          ? getNsiteNostrProviderScript(pubkey, 'webMessage', { napp: supportsNappPush() })
           : undefined,
       });
     })().catch((err) => {

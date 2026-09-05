@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Check, KeyRound, Lock, Pen, ShieldAlert, X } from 'lucide-react';
+import { Bell, Check, KeyRound, Lock, Pen, ShieldAlert, X } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -37,6 +37,8 @@ function getPromptIcon(type: NsitePromptState['type']) {
     case 'nip04.decrypt':
     case 'nip44.decrypt':
       return <KeyRound className="size-5 text-violet-500" />;
+    case 'push':
+      return <Bell className="size-5 text-emerald-500" />;
   }
 }
 
@@ -54,6 +56,8 @@ function getPromptTitle(type: NsitePromptState['type'], kind: number | null): st
       return 'Encrypt message (NIP-44)';
     case 'nip44.decrypt':
       return 'Decrypt message (NIP-44)';
+    case 'push':
+      return 'Send notifications';
   }
 }
 
@@ -67,6 +71,8 @@ function getPromptDescription(type: NsitePromptState['type']): string {
     case 'nip04.decrypt':
     case 'nip44.decrypt':
       return 'This app wants to decrypt a message using your keys.';
+    case 'push':
+      return 'This app wants Tenna to watch relays for it and notify you of new events, even while it is closed.';
   }
 }
 

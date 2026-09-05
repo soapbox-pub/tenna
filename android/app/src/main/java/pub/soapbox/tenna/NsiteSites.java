@@ -114,6 +114,7 @@ final class NsiteSites {
         }
 
         write(new File(dir, key + ".json"), json.toString().getBytes(StandardCharsets.UTF_8));
+        NsiteFileServers.invalidate(siteId);
 
         // Kept even though the launcher has its own copy: the icon is wanted
         // again on every cold start, for the recents card.
@@ -178,6 +179,7 @@ final class NsiteSites {
         new File(dir, key + ".json").delete();
         //noinspection ResultOfMethodCallIgnored
         new File(dir, key + ".png").delete();
+        NsiteFileServers.invalidate(siteId);
     }
 
     /**

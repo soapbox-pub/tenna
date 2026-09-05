@@ -17,13 +17,20 @@ export { getKindLabel } from '@/lib/kindLabels';
 // Types
 // ---------------------------------------------------------------------------
 
-/** Operations that require permission. `getPublicKey` is always allowed. */
+/**
+ * Operations that require permission. `getPublicKey` is always allowed.
+ *
+ * `push` is the one that isn't a signer call: it is a site asking to set
+ * relay subscriptions that Tenna will hold open on its behalf and wake it for,
+ * which is to say asking to send notifications.
+ */
 export type NsitePermissionType =
   | 'signEvent'
   | 'nip04.encrypt'
   | 'nip04.decrypt'
   | 'nip44.encrypt'
-  | 'nip44.decrypt';
+  | 'nip44.decrypt'
+  | 'push';
 
 /** A single remembered permission decision. */
 export interface NsitePermission {
@@ -234,5 +241,7 @@ export function getPermissionLabel(
       return 'Encrypt (NIP-44)';
     case 'nip44.decrypt':
       return 'Decrypt (NIP-44)';
+    case 'push':
+      return 'Send notifications';
   }
 }

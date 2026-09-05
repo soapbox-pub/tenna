@@ -71,6 +71,10 @@ export function DeepLinkHandler() {
       const listener = await App.addListener('appUrlOpen', (event) => {
         try {
           const url = new URL(event.url);
+          // A site's window is keyed on an opaque `tenna-nsite:` URI, and
+          // relaunching it (a shortcut press, a notification tap) delivers
+          // that URI here as if it were a link. It names no route.
+          if (url.protocol === 'tenna-nsite:') return;
           const path = url.pathname + url.search + url.hash;
           if (path) {
             navigate(path);

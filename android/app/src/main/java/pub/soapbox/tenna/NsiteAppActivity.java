@@ -60,7 +60,7 @@ public class NsiteAppActivity extends BridgeActivity {
     /** Scheme for the per-site data URI that separates one task from another. */
     private static final String TASK_SCHEME = "tenna-nsite";
 
-    /** Recents card tint, matching the app's own background. */
+    /** Recents card tint for a site with no icon, matching Tenna's background. */
     private static final int TASK_COLOR = 0xFF150609;
 
     /** The intent a pinned shortcut fires. */
@@ -194,6 +194,14 @@ public class NsiteAppActivity extends BridgeActivity {
      * the screen, which undoes most of what the separate task was for. The
      * label is known immediately; the icon is whatever was drawn when the site
      * was opened or pinned.
+     *
+     * The colour goes with the icon rather than being Tenna's own, because the
+     * switcher draws one behind the other — see {@link NsiteSites#taskIcon}.
+     *
+     * What the label reaches is only the card's accessibility description; the
+     * name printed on the card is the launcher reading this activity's
+     * {@code android:label} off the manifest, which is the same string for
+     * every site and not ours to vary per task.
      */
     private void describeTask() {
         String siteId = getIntent() == null ? null : getIntent().getStringExtra(EXTRA_SITE_ID);
@@ -202,19 +210,24 @@ public class NsiteAppActivity extends BridgeActivity {
         NsiteSites.Record record = NsiteSites.load(this, siteId);
         if (record == null) return;
 
-        Bitmap icon = NsiteSites.taskIcon(this, siteId);
-        setTaskDescription(taskDescription(record.label, icon));
+        NsiteSites.TaskIcon icon = NsiteSites.taskIcon(this, siteId);
+        setTaskDescription(taskDescription(
+            record.label,
+            icon == null ? null : icon.bitmap,
+            icon == null ? TASK_COLOR : icon.color
+        ));
     }
 
     @SuppressWarnings("deprecation")
     private ActivityManager.TaskDescription taskDescription(
         @NonNull String label,
-        @Nullable Bitmap icon
+        @Nullable Bitmap icon,
+        int color
     ) {
         // The Builder form arrives in API 33 and this module's floor is 24, so
         // the three-argument constructor is the one that reaches every device
         // the app runs on. It is deprecated, not withdrawn. The colour has to
         // be fully opaque or it is rejected.
-        return new ActivityManager.TaskDescription(label, icon, TASK_COLOR);
+        return new ActivityManager.TaskDescription(label, icon, color);
     }
 }

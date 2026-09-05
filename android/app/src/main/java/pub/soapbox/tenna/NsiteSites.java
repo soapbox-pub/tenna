@@ -3,6 +3,16 @@ package pub.soapbox.tenna;
 import android.content.Context;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
+import android.graphics.Canvas;
+import android.graphics.Color;
+import android.graphics.Paint;
+import android.graphics.Path;
+import android.graphics.PorterDuff;
+import android.graphics.PorterDuffXfermode;
+import android.graphics.Rect;
+import android.graphics.drawable.AdaptiveIconDrawable;
+import android.graphics.drawable.ColorDrawable;
+import android.os.Build;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
@@ -49,8 +59,17 @@ final class NsiteSites {
      */
     private static final String DIRECTORY = "nsite-pinned";
 
-    /** Squares of this size in the recents switcher; the icon is drawn at 4x that. */
+    /** Squares of this size wherever the icon is handed across a binder. */
     private static final int TASK_ICON_SIZE = 192;
+
+    /**
+     * The share of an adaptive canvas that is the icon: 72dp of the 108.
+     *
+     * The stored PNG is drawn to that spec — see {@code appIconBitmap} — so
+     * the outer ring of it is margin for the launcher's mask and parallax
+     * rather than part of the picture.
+     */
+    private static final float VIEWPORT = 72f / 108f;
 
     private NsiteSites() {}
 
@@ -260,29 +279,184 @@ final class NsiteSites {
     }
 
     /**
-     * The site's icon, scaled for a recents card.
+     * The site's icon as the launcher wants it: a whole adaptive canvas.
      *
-     * {@code TaskDescription} carries its bitmap across a binder transaction,
-     * so it gets a small copy rather than the full-size artwork the launcher
-     * was given.
+     * Only for a caller handing the bitmap to {@code ShortcutManager}, which
+     * takes it as an adaptive icon's layer and does the cropping and the
+     * masking itself. Anything that draws the icon rather than delegating it
+     * wants {@link #taskIcon} or {@link #tileIcon} instead — this one is
+     * two thirds picture and one third margin.
      */
     @Nullable
-    static Bitmap taskIcon(Context context, @NonNull String siteId) {
-        File file = new File(directory(context), key(siteId) + ".png");
-        if (!file.exists()) return null;
-
-        Bitmap bitmap = BitmapFactory.decodeFile(file.getAbsolutePath());
-        if (bitmap == null) return null;
-        if (bitmap.getWidth() <= TASK_ICON_SIZE && bitmap.getHeight() <= TASK_ICON_SIZE) {
-            return bitmap;
+    static Bitmap adaptiveIcon(Context context, @NonNull String siteId) {
+        Bitmap stored = stored(context, siteId);
+        if (stored == null) return null;
+        if (stored.getWidth() <= TASK_ICON_SIZE && stored.getHeight() <= TASK_ICON_SIZE) {
+            return stored;
         }
 
-        Bitmap scaled = Bitmap.createScaledBitmap(bitmap, TASK_ICON_SIZE, TASK_ICON_SIZE, true);
-        if (scaled != bitmap) bitmap.recycle();
+        Bitmap scaled = Bitmap.createScaledBitmap(stored, TASK_ICON_SIZE, TASK_ICON_SIZE, true);
+        if (scaled != stored) stored.recycle();
         return scaled;
     }
 
+    /** A site's icon and the colour it was standing on when it was cut out. */
+    static final class TaskIcon {
+        final Bitmap bitmap;
+        final int color;
+
+        private TaskIcon(Bitmap bitmap, int color) {
+            this.bitmap = bitmap;
+            this.color = color;
+        }
+    }
+
+    /**
+     * The site's icon as a finished picture, cut to the platform's icon shape.
+     *
+     * For a slot that draws a bitmap into a round hole and rounds nothing
+     * itself: the recents card and a notification's large icon. Handed the
+     * stored canvas whole they show the icon at half size, because the
+     * switcher inserts every task icon into an adaptive one of its own at a
+     * fixed scale — so a canvas already inset for a mask is inset a second
+     * time. Cropping to the viewport spends that inset once instead of twice.
+     *
+     * The shrink itself is not ours to refuse, which is what {@link #color}
+     * is for: the switcher fills the circle behind the icon with the task's
+     * primary colour, so telling it the colour the mask cut into turns a
+     * picture floating in a dark disc into one icon on its own field.
+     */
+    @Nullable
+    static TaskIcon taskIcon(Context context, @NonNull String siteId) {
+        Bitmap tile = tileIcon(context, siteId);
+        if (tile == null) return null;
+
+        // Read before the mask, which recycles what it cuts.
+        int color = corners(tile);
+        return new TaskIcon(mask(tile), color);
+    }
+
+    /**
+     * The same picture, left square, for a caller that clips its own corners.
+     *
+     * The in-app share picker draws it into a squircle of its own; cutting it
+     * to the launcher's circle first would leave the tile's gradient showing
+     * through the corners.
+     */
+    @Nullable
+    static Bitmap tileIcon(Context context, @NonNull String siteId) {
+        Bitmap stored = stored(context, siteId);
+        if (stored == null) return null;
+
+        Rect source = new Rect(
+            Math.round((stored.getWidth() * (1 - VIEWPORT)) / 2f),
+            Math.round((stored.getHeight() * (1 - VIEWPORT)) / 2f),
+            Math.round((stored.getWidth() * (1 + VIEWPORT)) / 2f),
+            Math.round((stored.getHeight() * (1 + VIEWPORT)) / 2f)
+        );
+
+        Bitmap cropped = Bitmap.createBitmap(
+            TASK_ICON_SIZE,
+            TASK_ICON_SIZE,
+            Bitmap.Config.ARGB_8888
+        );
+
+        new Canvas(cropped).drawBitmap(
+            stored,
+            source,
+            new Rect(0, 0, TASK_ICON_SIZE, TASK_ICON_SIZE),
+            new Paint(Paint.FILTER_BITMAP_FLAG | Paint.ANTI_ALIAS_FLAG)
+        );
+
+        stored.recycle();
+        return cropped;
+    }
+
     // -----------------------------------------------------------------------
+
+    @Nullable
+    private static Bitmap stored(Context context, @NonNull String siteId) {
+        File file = new File(directory(context), key(siteId) + ".png");
+        if (!file.exists()) return null;
+        return BitmapFactory.decodeFile(file.getAbsolutePath());
+    }
+
+    /**
+     * The colour in the four corners of a square, which is the colour the
+     * icon mask is about to cut away.
+     *
+     * Averaged rather than sampled, because a tile drawn as a gradient has no
+     * one corner colour; opaque whatever it finds, since it is going behind
+     * the icon rather than over it.
+     */
+    private static int corners(@NonNull Bitmap square) {
+        int right = square.getWidth() - 1;
+        int bottom = square.getHeight() - 1;
+
+        int[] pixels = {
+            square.getPixel(0, 0),
+            square.getPixel(right, 0),
+            square.getPixel(0, bottom),
+            square.getPixel(right, bottom),
+        };
+
+        int red = 0;
+        int green = 0;
+        int blue = 0;
+        for (int pixel : pixels) {
+            red += Color.red(pixel);
+            green += Color.green(pixel);
+            blue += Color.blue(pixel);
+        }
+
+        return Color.rgb(red / pixels.length, green / pixels.length, blue / pixels.length);
+    }
+
+    /** The square cut to {@link #iconMask}, or left alone where there is none. */
+    @Nullable
+    private static Bitmap mask(@Nullable Bitmap square) {
+        if (square == null) return null;
+
+        Path shape = iconMask(square.getWidth(), square.getHeight());
+        if (shape == null) return square;
+
+        Bitmap cut = Bitmap.createBitmap(
+            square.getWidth(),
+            square.getHeight(),
+            Bitmap.Config.ARGB_8888
+        );
+
+        Canvas canvas = new Canvas(cut);
+        Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        canvas.drawPath(shape, paint);
+        paint.setXfermode(new PorterDuffXfermode(PorterDuff.Mode.SRC_IN));
+        canvas.drawBitmap(square, 0, 0, paint);
+
+        square.recycle();
+        return cut;
+    }
+
+    /**
+     * The shape this device cuts an app icon to, at the given size.
+     *
+     * Read off the platform rather than assumed to be a circle, because it is
+     * a device configuration and the recents switcher compares against the
+     * same one. Null before adaptive icons existed, where there is no shape to
+     * cut to and nothing that would cut one.
+     */
+    @Nullable
+    private static Path iconMask(int width, int height) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return null;
+
+        AdaptiveIconDrawable shape = new AdaptiveIconDrawable(
+            new ColorDrawable(Color.BLACK),
+            new ColorDrawable(Color.BLACK)
+        );
+        shape.setBounds(0, 0, width, height);
+
+        Path mask = new Path(shape.getIconMask());
+        return mask.isEmpty() ? null : mask;
+    }
 
     private static File directory(Context context) {
         File dir = new File(context.getFilesDir(), DIRECTORY);

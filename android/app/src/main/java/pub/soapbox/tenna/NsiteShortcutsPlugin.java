@@ -567,7 +567,7 @@ public class NsiteShortcutsPlugin extends Plugin {
         NsiteSites.Record record = NsiteSites.load(context, siteId);
         String label = call.getString("label", record != null ? record.label : siteId);
         Bitmap bitmap = decode(call.getString("icon"));
-        if (bitmap == null) bitmap = NsiteSites.taskIcon(context, siteId);
+        if (bitmap == null) bitmap = NsiteSites.adaptiveIcon(context, siteId);
 
         try {
             ShortcutManagerCompat.pushDynamicShortcut(
@@ -605,7 +605,7 @@ public class NsiteShortcutsPlugin extends Plugin {
             site.put("event", record.event);
             site.put("shareTarget", record.shareTarget);
 
-            String icon = encode(NsiteSites.taskIcon(context, record.siteId));
+            String icon = encode(NsiteSites.tileIcon(context, record.siteId));
             if (icon != null) site.put("icon", icon);
 
             sites.put(site);

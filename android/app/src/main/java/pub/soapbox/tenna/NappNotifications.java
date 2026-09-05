@@ -96,8 +96,8 @@ final class NappNotifications {
             builder.setContentText(body).setStyle(new NotificationCompat.BigTextStyle().bigText(body));
         }
 
-        Bitmap icon = NsiteSites.taskIcon(context, siteId);
-        if (icon != null) builder.setLargeIcon(icon);
+        NsiteSites.TaskIcon icon = NsiteSites.taskIcon(context, siteId);
+        if (icon != null) builder.setLargeIcon(icon.bitmap);
 
         // A tagged notification replaces the last one with the same tag, as
         // it does on the web; an untagged one is always another.

@@ -53,9 +53,16 @@ export function LoginArea({ className }: LoginAreaProps) {
       {currentUser ? (
         <AccountSwitcher onAddAccountClick={() => setAuthDialogOpen(true)} />
       ) : (
+        /*
+          The wall's own yellow rather than the default surface colour — it is
+          the brightest thing on a dark screen, which is what the one way in
+          should be, and it carries enough contrast against the near-black it
+          sits on to take dark text. The focus ring is white so that it stays
+          visible against the fill rather than blending into it.
+        */
         <Button
           onClick={handleJoin}
-          className="flex items-center gap-2 px-5 py-2 rounded-full bg-primary text-primary-foreground font-medium transition-all hover:bg-primary/90 animate-scale-in"
+          className="flex items-center gap-2 px-5 py-2 rounded-full bg-[#FEF960] text-[#150609] font-semibold transition-all hover:bg-[#FFFCA5] focus-visible:ring-white/80 focus-visible:border-white animate-scale-in"
         >
           <span className="truncate">Join</span>
         </Button>

@@ -4,6 +4,7 @@ import { useState } from 'react';
 
 import { AddNsiteDialog } from '@/components/AddNsiteDialog';
 import { AddAppTile, AppIcon, AppIconSkeleton } from '@/components/AppIcon';
+import { LoginArea } from '@/components/auth/LoginArea';
 import { NsiteViewer } from '@/components/NsiteViewer';
 import { useAddedNsites } from '@/hooks/useAddedNsites';
 import { useNsites } from '@/hooks/useNsites';
@@ -74,7 +75,17 @@ const Index = () => {
         certain size a grid of app icons stops reading as a home screen and
         starts reading as a poster.
       */}
-      <div className="relative mx-auto max-w-2xl px-5 pb-safe-offset-20 pt-safe-offset-10 sm:px-8 sm:pt-safe-offset-16">
+      <div className="relative mx-auto max-w-2xl px-5 pb-safe-offset-20 pt-safe-offset-4 sm:px-8 sm:pt-safe-offset-8">
+        {/*
+          The one thing on the wall that isn't an app. Signing in belongs to
+          Tenna rather than to any site on it: the identity the browser holds
+          is the one every site it opens ends up asking to sign with, so the
+          way in sits above the lineup instead of somewhere inside it.
+        */}
+        <header className="mb-7 flex items-center justify-end sm:mb-10">
+          <LoginArea />
+        </header>
+
         <div className="grid grid-cols-4 gap-x-4 gap-y-7 sm:grid-cols-5 sm:gap-x-6 sm:gap-y-9 lg:grid-cols-6">
           {loading &&
             Array.from({ length: 6 }).map((_, i) => <AppIconSkeleton key={i} />)}

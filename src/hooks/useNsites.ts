@@ -1,18 +1,9 @@
-import type { NostrEvent } from '@nostrify/nostrify';
 import { useNostr } from '@nostrify/react';
 import { useQuery } from '@tanstack/react-query';
 
+import { isServableNsite } from '@/lib/nsiteFiles';
 import { NSITE_NAMED_KIND } from '@/lib/nsiteSubdomain';
 import { CHANNEL_CURATOR_PUBKEY, NSITE_RELAY } from '@/lib/tenna';
-
-/** A servable nsite needs a `d` tag and at least an `/index.html` entry. */
-function isValidNsite(event: NostrEvent): boolean {
-  const d = event.tags.find(([name]) => name === 'd')?.[1];
-  const hasIndex = event.tags.some(
-    ([name, path, sha256]) => name === 'path' && path === '/index.html' && sha256,
-  );
-  return Boolean(d && hasIndex);
-}
 
 /**
  * Fetch the curator's named nsites (NIP-5A kind 35128) — the channel lineup.
@@ -31,7 +22,7 @@ export function useNsites() {
         { signal },
       );
       return events
-        .filter(isValidNsite)
+        .filter(isServableNsite)
         .sort((a, b) => a.created_at - b.created_at);
     },
     staleTime: 60_000,

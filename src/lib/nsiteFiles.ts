@@ -5,6 +5,7 @@
 import type { NostrEvent } from '@nostrify/nostrify';
 
 import { APP_BLOSSOM_SERVERS } from '@/lib/appBlossom';
+import { isNsiteKind, NSITE_NAMED_KIND } from '@/lib/nsiteSubdomain';
 
 /**
  * Build the path→sha256 manifest from a nsite event's `path` tags.
@@ -18,6 +19,18 @@ export function buildManifest(event: NostrEvent): Map<string, string> {
     }
   }
   return manifest;
+}
+
+/**
+ * Whether an event is an nsite that can actually be served: it needs a name to
+ * be addressed by and an `/index.html` to open on.
+ */
+export function isServableNsite(event: NostrEvent): boolean {
+  const named = event.kind !== NSITE_NAMED_KIND || Boolean(event.tags.find(([n]) => n === 'd')?.[1]);
+  const hasIndex = event.tags.some(
+    ([name, path, sha256]) => name === 'path' && path === '/index.html' && sha256,
+  );
+  return isNsiteKind(event.kind) && named && hasIndex;
 }
 
 /**

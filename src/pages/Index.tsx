@@ -2,9 +2,12 @@ import type { NostrEvent } from '@nostrify/nostrify';
 import { useSeoMeta } from '@unhead/react';
 import { useState } from 'react';
 
-import { AppIcon, AppIconSkeleton } from '@/components/AppIcon';
+import { AddNsiteDialog } from '@/components/AddNsiteDialog';
+import { AddAppTile, AppIcon, AppIconSkeleton } from '@/components/AppIcon';
 import { NsiteViewer } from '@/components/NsiteViewer';
+import { useAddedNsites } from '@/hooks/useAddedNsites';
 import { useNsites } from '@/hooks/useNsites';
+import { getNsiteSubdomain } from '@/lib/nsiteSubdomain';
 
 /** Decorative star field scattered behind the apps. */
 const STARS: Array<{ top: string; left: string; color: string; delay: string; size: string }> = [
@@ -25,13 +28,25 @@ const Index = () => {
   });
 
   const { data: nsites, isLoading } = useNsites();
+  const added = useAddedNsites();
 
   // The site tuned in over the wall, where a site can't be given a window of
   // its own. On Android pressing a tile launches one instead and nothing here
   // ever fills — see `useNsiteWindow`.
   const [active, setActive] = useState<{ event: NostrEvent; channel: number } | null>(null);
+  const [adding, setAdding] = useState(false);
 
-  const empty = !isLoading && (!nsites || nsites.length === 0);
+  // The curator's lineup first, then whatever the user added, so a site keeps
+  // the channel it was on when the next one is added after it. A site already
+  // in the lineup is not a second tile: the curator got there first, and the
+  // wall shows one tile per site.
+  const curated = nsites ?? [];
+  const curatedIds = new Set(curated.map(getNsiteSubdomain));
+  const own = (added.events ?? []).filter((event) => !curatedIds.has(getNsiteSubdomain(event)));
+
+  const lineup = [...curated, ...own];
+  const loading = isLoading || added.isLoading;
+  const empty = !loading && lineup.length === 0;
 
   return (
     <main className="relative min-h-screen overflow-hidden bg-[#150609] text-white">
@@ -61,17 +76,22 @@ const Index = () => {
       */}
       <div className="relative mx-auto max-w-2xl px-5 pb-safe-offset-20 pt-safe-offset-10 sm:px-8 sm:pt-safe-offset-16">
         <div className="grid grid-cols-4 gap-x-4 gap-y-7 sm:grid-cols-5 sm:gap-x-6 sm:gap-y-9 lg:grid-cols-6">
-          {isLoading &&
+          {loading &&
             Array.from({ length: 6 }).map((_, i) => <AppIconSkeleton key={i} />)}
 
-          {nsites?.map((event, i) => (
+          {lineup.map((event, i) => (
             <AppIcon
               key={event.id}
               event={event}
               channel={i + 1}
               onSelect={() => setActive({ event, channel: i + 1 })}
+              onRemove={
+                i >= curated.length ? () => added.remove(getNsiteSubdomain(event)) : undefined
+              }
             />
           ))}
+
+          {!loading && <AddAppTile onSelect={() => setAdding(true)} />}
         </div>
 
         {empty && (
@@ -82,6 +102,13 @@ const Index = () => {
           </div>
         )}
       </div>
+
+      <AddNsiteDialog
+        open={adding}
+        onOpenChange={setAdding}
+        addedIds={[...curatedIds, ...added.stored.map((site) => site.id)]}
+        onAdd={added.add}
+      />
 
       {active && (
         <NsiteViewer

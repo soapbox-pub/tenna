@@ -1,5 +1,5 @@
 import type { NostrEvent } from '@nostrify/nostrify';
-import { Check, SquarePlus } from 'lucide-react';
+import { Check, Plus, SquarePlus, Trash2 } from 'lucide-react';
 import { useCallback, useRef, type ReactNode } from 'react';
 
 import {
@@ -22,6 +22,8 @@ interface AppIconProps {
   channel: number;
   /** Tune the site in here, for platforms that can't give it a window. */
   onSelect: () => void;
+  /** Take the site off the wall, for the ones the user put there. */
+  onRemove?: () => void;
 }
 
 /**
@@ -72,6 +74,45 @@ export function AppIconSkeleton() {
 }
 
 /**
+ * The tile at the end of the lineup, which is not a site but the way to add
+ * one.
+ *
+ * It sits in the grid as a tile because that is where a person looks for it,
+ * and it is drawn as an empty one — no artwork, no colour of its own — so it
+ * reads as a slot waiting to be filled rather than as another app.
+ */
+export function AddAppTile({ onSelect }: { onSelect: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onSelect}
+      title="Add an app"
+      className="group flex w-full flex-col items-center gap-2 outline-none"
+    >
+      <TileFrame className="motion-safe:transition-transform motion-safe:duration-200 group-hover:-translate-y-1 group-active:scale-95 group-focus-visible:-translate-y-1">
+        <span
+          aria-hidden="true"
+          className="app-squircle absolute -inset-[3px] bg-[#FEF960] opacity-0 transition-opacity group-focus-visible:opacity-100"
+        />
+        <TileFace background="rgba(255,255,255,0.09)">
+          <span className="absolute inset-0 flex items-center justify-center">
+            <Plus
+              aria-hidden="true"
+              strokeWidth={1.5}
+              className="h-1/2 w-1/2 text-white/70 transition-colors group-hover:text-white group-focus-visible:text-white"
+            />
+          </span>
+        </TileFace>
+      </TileFrame>
+
+      <span className="w-full truncate px-0.5 text-center text-xs text-white/90 drop-shadow-[0_1px_3px_rgba(0,0,0,0.9)] sm:text-sm">
+        Add app
+      </span>
+    </button>
+  );
+}
+
+/**
  * One app on the home screen: a rounded tile with the site's own icon on it
  * and its name underneath.
  *
@@ -86,7 +127,7 @@ export function AppIconSkeleton() {
  * the alpha of what it wraps and so follows the squircle, and the halo is a
  * second squircle sitting a few pixels proud behind it.
  */
-export function AppIcon({ event, channel, onSelect }: AppIconProps) {
+export function AppIcon({ event, channel, onSelect, onRemove }: AppIconProps) {
   const { data: app, isPending } = useNsiteApp(event);
 
   // The nsite's own name until the site says what it calls itself.
@@ -165,18 +206,28 @@ export function AppIcon({ event, channel, onSelect }: AppIconProps) {
     </button>
   );
 
-  // No menu where there is nothing to put in it. On the web and on iOS a long
-  // press on a tile should do what it has always done, which is nothing.
-  if (!pinning.available) return tile;
+  // No menu where there is nothing to put in it. A site off the curator's
+  // lineup on a platform without launcher shortcuts can neither be pinned nor
+  // removed, and a long press on its tile should do what it has always done,
+  // which is nothing.
+  if (!pinning.available && !onRemove) return tile;
 
   return (
     <ContextMenu onOpenChange={handleOpenChange}>
       <ContextMenuTrigger asChild>{tile}</ContextMenuTrigger>
       <ContextMenuContent className="w-56">
-        <ContextMenuItem onSelect={pinning.pin} disabled={pinning.pinned}>
-          {pinning.pinned ? <Check /> : <SquarePlus />}
-          {pinning.pinned ? 'On your home screen' : 'Add to home screen'}
-        </ContextMenuItem>
+        {pinning.available && (
+          <ContextMenuItem onSelect={pinning.pin} disabled={pinning.pinned}>
+            {pinning.pinned ? <Check /> : <SquarePlus />}
+            {pinning.pinned ? 'On your home screen' : 'Add to home screen'}
+          </ContextMenuItem>
+        )}
+        {onRemove && (
+          <ContextMenuItem onSelect={onRemove} variant="destructive">
+            <Trash2 />
+            Remove from Tenna
+          </ContextMenuItem>
+        )}
       </ContextMenuContent>
     </ContextMenu>
   );

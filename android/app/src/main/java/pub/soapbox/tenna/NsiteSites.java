@@ -192,6 +192,33 @@ final class NsiteSites {
         return record == null ? null : record.shareTarget;
     }
 
+    /**
+     * Record what a site will take from the share sheet, on a record it has.
+     *
+     * Its own entry point because the channel wall learns this about a site
+     * long after the site was opened or pinned — a site put on the home screen
+     * before Tenna read share targets at all has a record with nothing in that
+     * field, and would go on having one until the day it was opened again.
+     *
+     * An empty string clears it, which is how a site that has since dropped
+     * the member loses its place in the sheet.
+     */
+    static boolean setShareTarget(
+        Context context,
+        @NonNull String siteId,
+        @NonNull String shareTarget
+    ) throws IOException {
+        Record record = load(context, siteId);
+        if (record == null) return false;
+
+        String current = record.shareTarget;
+        String next = shareTarget.isEmpty() ? null : shareTarget;
+        if (current == null ? next == null : current.equals(next)) return false;
+
+        save(context, siteId, record.label, record.event, null, shareTarget);
+        return true;
+    }
+
     @Nullable
     private static Record read(File file, @Nullable String siteId) {
         if (!file.exists()) return null;

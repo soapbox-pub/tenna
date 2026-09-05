@@ -117,6 +117,11 @@ export interface NsiteShortcutsPlugin {
    * Separate from {@link NsiteShortcutsPlugin.pin} because pinning is a
    * request the system answers out of our sight: the shortcut only becomes a
    * share target once it is known to be on the home screen.
+   *
+   * Also where the site's `share_target` is written to its record. The wall is
+   * the only place a web app manifest is read, and it reads one long after the
+   * site was pinned — so this is the moment a site pinned before Tenna knew
+   * about share targets gains one.
    */
   setShareTarget(options: {
     siteId: string;
@@ -125,6 +130,13 @@ export interface NsiteShortcutsPlugin {
     label?: string;
     icon?: string;
     shareCategories?: string[];
+    /**
+     * The site's `share_target` as JSON text, or `''` if it has none.
+     *
+     * Omit only when the site's manifest hasn't been read; an empty string is
+     * how a site that dropped the member loses its place in the sheet.
+     */
+    shareTarget?: string;
   }): Promise<void>;
 
   /** Every pinned site that declared a `share_target`. */

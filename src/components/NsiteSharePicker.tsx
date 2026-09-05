@@ -22,6 +22,7 @@ import { planShareDelivery, type NsiteSharePayload } from '@/lib/nsiteShareTarge
 interface NsiteSharePickerProps {
   share: NsitePendingShare | null;
   onDismiss: () => void;
+  onHandOff: () => void;
 }
 
 /** One site the share could go to, with the tile to press. */
@@ -59,7 +60,7 @@ function destinations(
  * simply absent. So Tenna takes shares under its own name too and asks here,
  * which is the way in that never depends on that ranking.
  */
-export function NsiteSharePicker({ share, onDismiss }: NsiteSharePickerProps) {
+export function NsiteSharePicker({ share, onDismiss, onHandOff }: NsiteSharePickerProps) {
   const { toast } = useToast();
 
   const { data: sites, isPending } = useQuery({
@@ -92,7 +93,7 @@ export function NsiteSharePicker({ share, onDismiss }: NsiteSharePickerProps) {
         });
         // The site's window owns the share from here; releasing it is that
         // window's business, once it has read what is in it.
-        onDismiss();
+        onHandOff();
       } catch (err) {
         toast({
           title: 'Could not share to that app',

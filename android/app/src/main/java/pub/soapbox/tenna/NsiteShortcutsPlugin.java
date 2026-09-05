@@ -135,6 +135,11 @@ public class NsiteShortcutsPlugin extends Plugin {
                     NsiteAppActivity.shareIntentFor(context, site, shareToken),
                     ActivityOptions.makeCustomAnimation(context, 0, 0).toBundle()
                 );
+                // Handed on, so the wall stops holding it: this activity's
+                // intent outlives the picker, and would otherwise put a spent
+                // share back on screen the next time it is read.
+                Intent held = getActivity().getIntent();
+                if (held != null) held.removeExtra(NsiteShareActivity.EXTRA_SHARE_TOKEN);
             } else if (!resumeWindow(site)) {
                 getActivity().startActivity(
                     NsiteAppActivity.intentFor(context, site, channel, true),
@@ -442,6 +447,12 @@ public class NsiteShortcutsPlugin extends Plugin {
      * Withdrawing is safe. Removing a dynamic shortcut leaves a pinned copy on
      * the home screen, still enabled and still pointing at the same site — so
      * the worst this can do is cost a site its place in the share menu.
+     *
+     * This is also where a site's {@code share_target} is written down. The
+     * wall is the only place a web app manifest is ever read, and it reads one
+     * long after the site was pinned — a site put on the home screen before
+     * Tenna knew about share targets at all has a record with nothing in that
+     * field, and the picker reads records rather than the wall.
      */
     @PluginMethod
     public void setShareTarget(PluginCall call) {
@@ -453,6 +464,15 @@ public class NsiteShortcutsPlugin extends Plugin {
 
         Context context = getContext();
         String id = NsiteSites.key(siteId);
+
+        String shareTarget = call.getString("shareTarget");
+        if (shareTarget != null) {
+            try {
+                NsiteSites.setShareTarget(context, siteId, shareTarget);
+            } catch (IOException e) {
+                Log.w(TAG, "Could not record a share target", e);
+            }
+        }
 
         if (!Boolean.TRUE.equals(call.getBoolean("enabled", false))) {
             ShortcutManagerCompat.removeDynamicShortcuts(context, Collections.singletonList(id));

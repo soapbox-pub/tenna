@@ -43,6 +43,11 @@ export function useNsitePin(
   const siteId = getNsiteSubdomain(event);
   const shareTarget = app?.shareTarget ?? null;
 
+  // Whether the site's manifest has been read at all. Until it has, nothing
+  // here knows the difference between a site with no share target and one
+  // whose target simply hasn't arrived yet.
+  const known = !!app;
+
   // Held in a ref so that re-checking the launcher does not depend on the
   // tile's artwork, which resolves separately and later.
   const tile = useRef({ name, app });
@@ -56,20 +61,31 @@ export function useNsitePin(
    * and a site the user declined has no business in the share menu. Taking one
    * back out leaves its launcher icon alone; a dynamic shortcut and a pinned
    * one are the same object, and removing the first keeps the second.
+   *
+   * Run for every site whose manifest has been read, not only for the ones
+   * that declared a target, because this is also what writes the answer to the
+   * site's record. The wall is the only place a manifest is ever read, and it
+   * reads one long after the site was pinned — so a site that has since
+   * dropped the member is only ever taken back out of the sheet here.
    */
   const syncShare = useCallback(async (isPinned: boolean) => {
-    if (!shareTarget) return;
+    if (!known) return;
+
+    const offered = isPinned && !!shareTarget;
     const { name, app } = tile.current;
-    const icon = isPinned ? await renderAppIconPng(name, app) : null;
+    const icon = offered ? await renderAppIconPng(name, app) : null;
 
     await NsiteShortcuts.setShareTarget({
       siteId,
-      enabled: isPinned,
+      enabled: offered,
       label: name,
       icon: icon ?? undefined,
-      shareCategories: shareCategories(shareTarget),
+      shareCategories: shareTarget ? shareCategories(shareTarget) : undefined,
+      // The empty string is "read, and hasn't got one" — distinct from
+      // omitting it, which is "not read, leave the record alone".
+      shareTarget: shareTarget ? JSON.stringify(shareTarget) : '',
     });
-  }, [siteId, shareTarget]);
+  }, [siteId, shareTarget, known]);
 
   const check = useCallback(async () => {
     const { pinned } = await NsiteShortcuts.isPinned({ siteId });

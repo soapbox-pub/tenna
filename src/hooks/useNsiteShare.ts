@@ -147,6 +147,7 @@ export function useShareToken(initial: string | undefined): string | undefined {
 export function usePendingShare(): {
   share: NsitePendingShare | null;
   dismiss: () => void;
+  handOff: () => void;
 } {
   const [share, setShare] = useState<NsitePendingShare | null>(null);
 
@@ -179,6 +180,9 @@ export function usePendingShare(): {
 
   return {
     share,
+
+    // Closed with nowhere to go: nobody is coming for the staged bytes, so
+    // they go now rather than waiting on the next sweep.
     dismiss: () => {
       setShare((current) => {
         if (current?.token) {
@@ -187,5 +191,10 @@ export function usePendingShare(): {
         return null;
       });
     },
+
+    // Given to a site instead. The staging directory has to outlive this
+    // window — the site's own window is about to open and read it — so this
+    // closes the picker and lets go of the share without unstaging it.
+    handOff: () => setShare(null),
   };
 }

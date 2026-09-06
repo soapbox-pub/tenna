@@ -60,6 +60,14 @@ final class NappNotificationStore {
         @NonNull final String options;
         /** Where a tap goes, as a site-absolute path, or null for the front page. */
         @Nullable final String url;
+        /**
+         * Whether it was drawn as a conversation.
+         *
+         * Which is to say: whether it is in the shade at all, as far as the
+         * site's bundle is concerned. Android lifts a conversation into its
+         * own section, where it neither joins a group nor counts towards one.
+         */
+        final boolean conversation;
         final long postedAt;
 
         Entry(
@@ -68,6 +76,7 @@ final class NappNotificationStore {
             @NonNull String title,
             @NonNull String options,
             @Nullable String url,
+            boolean conversation,
             long postedAt
         ) {
             this.key = key;
@@ -75,6 +84,7 @@ final class NappNotificationStore {
             this.title = title;
             this.options = options;
             this.url = url;
+            this.conversation = conversation;
             this.postedAt = postedAt;
         }
 
@@ -86,6 +96,7 @@ final class NappNotificationStore {
             json.put("title", title);
             json.put("options", options);
             if (url != null) json.put("url", url);
+            if (conversation) json.put("conversation", true);
             json.put("postedAt", postedAt);
             return json;
         }
@@ -105,6 +116,7 @@ final class NappNotificationStore {
                 title,
                 options,
                 json.optString("url", null),
+                json.optBoolean("conversation", false),
                 json.optLong("postedAt", 0)
             );
         }

@@ -200,29 +200,69 @@ await registration.showNotification('Alice', {
 Each site is its own app as far as the shade is concerned, and none of it is
 declared:
 
-- **Its notifications bundle under a header of their own**, named after the
-  site, rather than into one pile marked Tenna. The header appears once the
-  site has two out; below that the notification stands on its own, which it
-  can, since it already carries everything below.
+- **The notification leads with its own picture.** A notification with a `body`
+  is drawn as a *conversation*: `icon` large and round on the left, the site's
+  name where the shade would otherwise print Tenna's, the title as the person
+  speaking, and Tenna's own mark badged small into the corner. See
+  [The conversation](#the-conversation).
 - **The status-bar icon is the site's**, out of its `badge` or its manifest.
   See [The badge](#the-badge).
-- **The colour** tinting both is the site's own — the same one its tile is
-  drawn on, on Tenna's channel wall.
-- **The site's name** sits under the title of every notification, whatever the
-  site put in the title.
+- **The colour** is the site's own — the same one its tile is drawn on, on
+  Tenna's channel wall.
 - **A channel group of its own** in the system's notification settings, named
   after the site, so a user can mute one site without muting the rest. It is
   the nearest Android has to a per-origin notification permission. Sites do not
   name channels inside it: that arrived with `data.napp` and left with it,
   since a channel a site names is a settings entry the user cannot be rid of
   short of reinstalling.
+- **A bundle of its own**, for the notifications that are *not* conversations —
+  one with no `body`, or one showing an `image`. Those gather under a header
+  named after the site rather than into one pile marked Tenna, once the site
+  has two of them out. A conversation never joins it, because Android lifts
+  conversations into a section of their own at the top of the shade.
+
+##### The conversation
+
+Since Android 12 a plain notification is drawn with the **app's** icon in the
+circle on the left and whatever the app passed as its large icon shrunk into
+the far corner. For an nsite that is backwards twice over: the row leads with
+Tenna's mark, and the picture the notification is actually about — the sender's
+face — lands in the smallest slot in it. No amount of `badge` fixes this; the
+badge is the status bar's, and the shade does not consult it.
+
+The one layout Android has that does the right thing is the conversation, and
+it is what every messaging app on the platform uses. So a notification with a
+`body` and no `image` is drawn as one, out of nothing but the standard options:
+
+| The standard says | The conversation shows |
+| ----------------- | ---------------------- |
+| `title`           | who it is from         |
+| `icon`            | their face, round, on the left |
+| `body`            | what they said         |
+| the site's name   | in place of the app's, at the head of the row |
+
+Nothing is declared and nothing can ask for it. A notification with no `body`
+has nobody speaking and is drawn the ordinary way; one with an `image` is a
+photograph, and showing the photograph is the point.
+
+Two consequences worth knowing. Android files conversations in their own
+section above everything else, so they neither join the site's bundle nor
+count towards it. And each one is a long-lived shortcut behind the scenes,
+keyed on the site and the notification's `tag` — so **a site that tags its
+notifications gets one thread per tag**, and one that doesn't gets a single
+unnamed thread per site. Tag them. Shortcuts are rate-limited and evictable,
+and an untagged notification cannot be given one of its own without spending
+the whole budget in an afternoon.
 
 ##### The badge
 
 `badge` is the standard's name for the image that stands for a notification
 "when there is not enough space to display the notification itself, such as a
 device's notification bar". That is Android's small icon exactly, so that is
-what it becomes. Three answers, in order:
+what it becomes — which since Android 12 means **the status bar and nowhere
+else**. What the shade shows is [the conversation](#the-conversation).
+
+Three answers, in order:
 
 1. **The notification's own `badge`**, in any of the shapes under
    [Pictures](#pictures). A site that draws one per kind of notification gets
@@ -270,8 +310,10 @@ behaviour rather than a glitch worth working around. The same is true of a
 
 The picture beside a notification is `icon`, and the site's own tile — as it
 appears on Tenna's home screen — where it names none, so a site that declares
-nothing still looks like itself. It is left square; Android clips a large icon
-to its own shape, and cropping it round here would crop it twice.
+nothing still looks like itself. In a conversation it is cut to a circle,
+because that is the shape the slot is; anywhere else it is left square, since
+Android clips a large icon to its own shape and cropping it here would crop it
+twice.
 
 #### Tapping, buttons and replies
 
@@ -330,16 +372,14 @@ moving on to the next event for the site, with a timeout of twenty seconds.
 
 #### What is not there yet
 
-- **Anything past the standard.** There is no way for a site to ask for a
-  `MessagingStyle` conversation with faces on it, an inbox of lines, a progress
-  bar, a bundle key of its own or a channel of its own. There briefly was, in
-  `options.data.napp`, and it was withdrawn — those are worth having, but not
-  before the per-site basics are right on a device, and not in a shape settled
-  in the abstract. Anything that comes back will come back as the standard
-  spelling of it wherever one exists.
-- **Conversation shortcuts.** Android 11's conversation section, the one that
-  puts a chat above everything else in the shade, needs a long-lived dynamic
-  shortcut per conversation. Nothing publishes one.
+- **Anything past the standard.** There is no way for a site to *ask* for
+  anything — no multi-line conversation, no inbox of lines, no progress bar, no
+  bundle key of its own, no channel of its own. There briefly was, in
+  `options.data.napp`, and it was withdrawn. Some of it is worth having, but
+  not in a shape settled in the abstract, and anything that comes back will
+  come back as the standard spelling of it wherever one exists. What a
+  conversation shows today is one message, because one message is all a web
+  notification carries.
 - **Calls.** No `CallStyle`, no full-screen intent, no ringtone channel.
 - **`Notification` and `showNotification` in the page** are not shimmed;
   only the worker's are.

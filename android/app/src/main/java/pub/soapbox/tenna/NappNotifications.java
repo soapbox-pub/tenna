@@ -7,6 +7,7 @@ import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.content.Context;
 import android.content.Intent;
+import android.content.pm.ShortcutManager;
 import android.graphics.Bitmap;
 import android.os.Build;
 import android.service.notification.StatusBarNotification;
@@ -16,7 +17,10 @@ import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.core.app.NotificationCompat;
 import androidx.core.app.NotificationManagerCompat;
+import androidx.core.app.Person;
 import androidx.core.app.RemoteInput;
+import androidx.core.content.pm.ShortcutInfoCompat;
+import androidx.core.content.pm.ShortcutManagerCompat;
 import androidx.core.graphics.drawable.IconCompat;
 
 import org.json.JSONException;
@@ -88,6 +92,27 @@ final class NappNotifications {
 
     /** For notifications the site gave no tag; each gets a slot of its own. */
     private static final AtomicInteger UNTAGGED = new AtomicInteger(1);
+
+    /** Conversation shortcuts, kept apart from the one shortcut a site has. */
+    private static final String CONVERSATION_PREFIX = "napp.conversation.";
+
+    /**
+     * Ranked last, so a full shortcut list loses a conversation rather than a
+     * site's place in the share sheet. Higher is less important.
+     */
+    private static final int CONVERSATION_RANK = 1_000;
+
+    /**
+     * What was last published for a shortcut id, so an unchanged push can be
+     * skipped rather than spent out of the day's quota.
+     *
+     * In memory only. A restarted process publishes once more per
+     * conversation, which is right anyway — the system may have evicted them
+     * meanwhile — and cannot go stale the way a written-down copy of somebody
+     * else's state could.
+     */
+    private static final java.util.Map<String, String> PUBLISHED =
+        new java.util.concurrent.ConcurrentHashMap<>();
 
     /**
      * How long after acting on a notification a site may open its own window.
@@ -224,12 +249,25 @@ final class NappNotifications {
         NsiteSites.TaskIcon tile = NsiteSites.taskIcon(context, siteId);
         if (tile != null) builder.setColor(tile.color).setColorized(false);
 
-        Bitmap large = options.icon == null
-            ? null
-            : NappImages.cached(context, siteId, options.icon, NappImages.SHAPE_PLAIN, again);
-        builder.setLargeIcon(large != null ? large : (tile == null ? null : tile.bitmap));
+        String thread = conversation(context, siteId, record, builder, title, options, tag, again);
+        if (thread != null) {
+            // A group of its own, which is a group of one. Android lifts a
+            // conversation out of the shade's ordinary section entirely, so it
+            // can neither join the site's bundle nor be swept into the pile
+            // Android makes of four loose notifications from one app — and an
+            // explicit key is how it opts out of the second without asking for
+            // the first.
+            builder.setShortcutId(thread).setGroup(thread);
+        } else {
+            // No conversation: the picture has nowhere better to go than the
+            // corner slot Android 12 put it in.
+            Bitmap large = options.icon == null
+                ? null
+                : NappImages.cached(context, siteId, options.icon, NappImages.SHAPE_PLAIN, again);
+            builder.setLargeIcon(large != null ? large : (tile == null ? null : tile.bitmap));
+            style(context, siteId, builder, title, options, again);
+        }
 
-        style(context, siteId, builder, options, again);
         actions(context, siteId, builder, key, options, again);
 
         try {
@@ -245,6 +283,7 @@ final class NappNotifications {
             title,
             json.toString(),
             options.url,
+            thread != null,
             System.currentTimeMillis()
         ));
 
@@ -274,7 +313,11 @@ final class NappNotifications {
     }
 
     /**
-     * How the notification expands: into its photograph, or into its text.
+     * How the notification is drawn.
+     *
+     * A photograph if the site sent one; otherwise a conversation, which is
+     * the only layout Android has that puts the notification's <i>own</i>
+     * picture where a person can see it — see {@link #conversation}.
      *
      * A picture not yet decoded is shown flat and expands when it lands.
      */
@@ -282,6 +325,7 @@ final class NappNotifications {
         Context context,
         String siteId,
         NotificationCompat.Builder builder,
+        String title,
         @NonNull NappOptions options,
         NappImages.OnLoaded again
     ) {
@@ -301,10 +345,173 @@ final class NappNotifications {
             }
         }
 
-        if (!options.body.isEmpty()) {
-            builder
-                .setContentText(options.body)
-                .setStyle(new NotificationCompat.BigTextStyle().bigText(options.body));
+        if (options.body.isEmpty()) return;
+
+        builder
+            .setContentText(options.body)
+            .setStyle(new NotificationCompat.BigTextStyle().bigText(options.body));
+    }
+
+    /**
+     * Draw the notification as a conversation, and say which one.
+     *
+     * This is about where the picture goes. Since Android 12 a plain
+     * notification is drawn with the <i>app's</i> icon in the circle on the
+     * left and whatever was passed to {@code setLargeIcon} shrunk into the
+     * far corner — so an nsite's notification led with Tenna's mark and put
+     * the thing the notification was actually about, the sender's face, in
+     * the smallest slot on the row. Nothing about the small icon changes that;
+     * it is the status bar's, and the shade does not consult it.
+     *
+     * The one layout that does what is wanted is the conversation: a
+     * {@code MessagingStyle} notification naming a long-lived shortcut, where
+     * the system draws the <i>shortcut's</i> icon large on the left and badges
+     * the app's own into its corner. That is the shape every messaging app on
+     * the platform has, and it is reached here from nothing but the standard
+     * options — the title is who it is from, {@code icon} is their face, and
+     * {@code body} is what they said, which is what a web notification has
+     * always been.
+     *
+     * Returns the shortcut id to hang the notification on, or null if the
+     * conversation could not be published and it should be drawn the ordinary
+     * way.
+     */
+    @Nullable
+    private static String conversation(
+        Context context,
+        String siteId,
+        NsiteSites.Record record,
+        NotificationCompat.Builder builder,
+        String title,
+        @NonNull NappOptions options,
+        String tag,
+        NappImages.OnLoaded again
+    ) {
+        if (options.body.isEmpty() || options.image != null) return null;
+
+        // The site's own tile stands in until the face lands, and for a site
+        // that names none — so the left of the row is never empty, and never
+        // Tenna.
+        Bitmap face = options.icon == null
+            ? null
+            : NappImages.cached(context, siteId, options.icon, NappImages.SHAPE_ROUND, again);
+
+        // Whether that is the picture the site asked for or the stand-in. The
+        // shortcut has to be published again when the real one lands, and the
+        // two bitmaps are otherwise indistinguishable from here.
+        boolean own = face != null;
+
+        if (face == null) {
+            NsiteSites.TaskIcon tile = NsiteSites.taskIcon(context, siteId);
+            face = tile == null ? null : tile.bitmap;
+        }
+        if (face == null) return null;
+
+        String id = shortcutId(siteId, tag);
+
+        Person sender = new Person.Builder()
+            .setName(title)
+            // Stable across notifications, so the system keeps the thread
+            // attributed to the same person rather than starting over.
+            .setKey(id)
+            .setIcon(IconCompat.createWithBitmap(face))
+            .build();
+
+        String signature = record.label + "\u0000" + (own ? options.icon : "");
+        if (!publish(context, record, id, signature, sender, face, options.url)) return null;
+
+        NotificationCompat.MessagingStyle style =
+            new NotificationCompat.MessagingStyle(new Person.Builder().setName("You").build())
+                // A title would make the system draw it as a room with two
+                // people in it. Without one it lays it out as the 1:1 it is
+                // and titles it with the sender's name, which is the site's
+                // own title and where it belonged all along.
+                .setGroupConversation(false)
+                .addMessage(new NotificationCompat.MessagingStyle.Message(
+                    options.body,
+                    options.timestamp > 0 ? options.timestamp : System.currentTimeMillis(),
+                    sender
+                ));
+
+        builder.setStyle(style).setCategory(NotificationCompat.CATEGORY_MESSAGE);
+        return id;
+    }
+
+    /**
+     * The conversation a notification belongs to.
+     *
+     * A site's {@code tag} is the nearest the Notifications API has to naming
+     * one: it is already the site saying "this is the same thing as last
+     * time", which is what a conversation is. An untagged notification joins
+     * the site's single unnamed thread rather than opening one of its own —
+     * shortcuts are a small, rate-limited, evictable resource, and a site
+     * posting untagged notifications would otherwise spend the whole budget in
+     * an afternoon.
+     */
+    private static String shortcutId(String siteId, String tag) {
+        String thread = tag.isEmpty() ? "" : "." + tag.replaceAll("[^A-Za-z0-9._-]", "_");
+        int cap = 64;
+        if (thread.length() > cap) thread = thread.substring(0, cap);
+        return CONVERSATION_PREFIX + NsiteSites.key(siteId) + thread;
+    }
+
+    /**
+     * Publish the long-lived shortcut the conversation layout draws from.
+     *
+     * Best effort, and false when it could not be done — a notification is
+     * worth more than the layout it would have had.
+     *
+     * Two things learned from the app this is imitating. A backgrounded app is
+     * rate-limited to a handful of shortcut pushes a day, so a push that would
+     * change nothing is skipped and none are attempted once the quota is gone;
+     * that way what gets through is the set that changed rather than an
+     * arbitrary prefix of it. And these rank below everything else Tenna
+     * publishes, so when the list fills it is a conversation that is evicted
+     * and not a site's place in the share sheet.
+     */
+    private static boolean publish(
+        Context context,
+        NsiteSites.Record record,
+        String id,
+        String signature,
+        Person sender,
+        Bitmap face,
+        @Nullable String url
+    ) {
+        if (signature.equals(PUBLISHED.get(id))) return true;
+
+        try {
+            ShortcutManager manager = context.getSystemService(ShortcutManager.class);
+            if (manager != null && manager.isRateLimitingActive()) {
+                // Already published once; the layout stands even if the face
+                // has moved on.
+                return PUBLISHED.containsKey(id);
+            }
+
+            // The site, not the notification. In the conversation layout the
+            // system shows this where it would otherwise show the app's name,
+            // so an nsite's notification says the nsite — and the title stays
+            // where it belongs, on the line the sender speaks from. Putting
+            // the title here too printed it twice.
+            ShortcutManagerCompat.pushDynamicShortcut(context, new ShortcutInfoCompat.Builder(context, id)
+                .setShortLabel(record.label)
+                .setLongLabel(record.label)
+                .setPerson(sender)
+                // Plain, not adaptive: an adaptive bitmap is treated as a
+                // layer of a 108dp canvas and cropped to the inner 72 of it,
+                // which zooms into a face that has already been cut to a
+                // circle and shaves its edges off.
+                .setIcon(IconCompat.createWithBitmap(face))
+                .setLongLived(true)
+                .setRank(CONVERSATION_RANK)
+                .setIntent(NsiteAppActivity.notificationIntentFor(context, record.siteId, url, null))
+                .build());
+
+            PUBLISHED.put(id, signature);
+            return true;
+        } catch (RuntimeException e) {
+            Log.i(TAG, "Could not publish a conversation for " + record.label, e);
+            return false;
         }
     }
 
@@ -458,6 +665,8 @@ final class NappNotifications {
         List<String> titles = new java.util.ArrayList<>();
 
         for (NappNotificationStore.Entry entry : NappNotificationStore.list(context, siteId)) {
+            // In the conversation section, and so not in the bundle.
+            if (entry.conversation) continue;
             if (active != null && !active.contains(entry.key) && !entry.key.equals(posted)) continue;
             titles.add(entry.title);
         }

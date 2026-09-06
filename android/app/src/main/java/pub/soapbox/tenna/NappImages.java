@@ -8,6 +8,8 @@ import android.graphics.Color;
 import android.graphics.Paint;
 import android.graphics.PorterDuff;
 import android.graphics.PorterDuffColorFilter;
+import android.graphics.PorterDuffXfermode;
+import android.graphics.Rect;
 import android.net.Uri;
 import android.util.Base64;
 import android.util.Log;
@@ -63,6 +65,9 @@ final class NappImages {
     /** The status bar draws its icons at 24dp. */
     private static final int STENCIL_DP = 24;
 
+    /** Faces are drawn small; anything larger is a waste of a binder. */
+    private static final int AVATAR_PX = 256;
+
     /**
      * As decoded, at the size it was declared for.
      *
@@ -81,6 +86,16 @@ final class NappImages {
      * version — a full-colour bitmap in that slot comes out as a smudge.
      */
     static final int SHAPE_STENCIL = 1;
+
+    /**
+     * A square crop of the middle, cut to a circle.
+     *
+     * For the face on the left of a conversation notification, and the
+     * shortcut icon behind it. The system masks that slot on most builds and
+     * on some it does not, so cutting it here is the only way to be sure a
+     * portrait doesn't arrive with somebody's shoulders squashed into a box.
+     */
+    static final int SHAPE_ROUND = 2;
 
     /** A remote image bigger than this is not a notification icon. */
     private static final int MAX_BYTES = 2 * 1024 * 1024;
@@ -184,12 +199,43 @@ final class NappImages {
         Bitmap decoded = decode(bytes, target(context, shape));
         if (decoded == null) return null;
 
-        return shape == SHAPE_STENCIL ? stencil(decoded) : decoded;
+        switch (shape) {
+            case SHAPE_STENCIL: return stencil(decoded);
+            case SHAPE_ROUND: return circle(decoded);
+            default: return decoded;
+        }
     }
 
     /** The longest edge a shape is worth decoding to. */
     private static int target(Context context, int shape) {
-        return shape == SHAPE_STENCIL ? stencilPx(context) : PICTURE_PX;
+        switch (shape) {
+            case SHAPE_STENCIL: return stencilPx(context);
+            case SHAPE_ROUND: return AVATAR_PX;
+            default: return PICTURE_PX;
+        }
+    }
+
+    /** A square crop of the middle, cut to a circle. */
+    @NonNull
+    private static Bitmap circle(@NonNull Bitmap source) {
+        int size = Math.min(source.getWidth(), source.getHeight());
+        Rect from = new Rect(
+            (source.getWidth() - size) / 2,
+            (source.getHeight() - size) / 2,
+            (source.getWidth() + size) / 2,
+            (source.getHeight() + size) / 2
+        );
+
+        Bitmap out = Bitmap.createBitmap(AVATAR_PX, AVATAR_PX, Bitmap.Config.ARGB_8888);
+        Canvas canvas = new Canvas(out);
+        Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
+
+        canvas.drawCircle(AVATAR_PX / 2f, AVATAR_PX / 2f, AVATAR_PX / 2f, paint);
+        paint.setXfermode(new PorterDuffXfermode(PorterDuff.Mode.SRC_IN));
+        canvas.drawBitmap(source, from, new Rect(0, 0, AVATAR_PX, AVATAR_PX), paint);
+
+        source.recycle();
+        return out;
     }
 
     static int stencilPx(@NonNull Context context) {

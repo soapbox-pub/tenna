@@ -71,6 +71,14 @@ export interface NsiteShortcutsPlugin {
     event: string;
     /** Base64 PNG for the recents card, without a data URL prefix. */
     icon?: string;
+    /**
+     * Base64 PNG of the site's monochrome mark, for its notifications.
+     *
+     * Stored rather than used at once: a notification arrives for a site with
+     * no window open, long after the manifest this was picked out of was read.
+     * Omit it and whatever is already stored is left alone.
+     */
+    badge?: string;
     /** Channel number the site sits on, for the tune-in. */
     channel?: number;
     /** The site's `share_target` as JSON text, or omitted to leave it as-is. */
@@ -93,6 +101,8 @@ export interface NsiteShortcutsPlugin {
     event: string;
     /** Base64 PNG for the adaptive icon, without a data URL prefix. */
     icon?: string;
+    /** Base64 PNG of the site's monochrome mark, for its notifications. */
+    badge?: string;
     /** The site's `share_target` as JSON text, if it declared one. */
     shareTarget?: string;
     /**
@@ -122,11 +132,16 @@ export interface NsiteShortcutsPlugin {
    * only once. So when the drawing changes, or when a site turns out to ship
    * better artwork than was known at the time, this is the way the icon
    * already on the home screen catches up.
+   *
+   * The site's notification mark comes along for the same reason: this is the
+   * one call the wall makes about a site it is not otherwise touching.
    */
   refreshIcon(options: {
     siteId: string;
     /** Base64 PNG for the adaptive icon, without a data URL prefix. */
     icon: string;
+    /** Base64 PNG of the site's monochrome mark, for its notifications. */
+    badge?: string;
     /** Kept on the shortcut, so refreshing does not take it out of the sheet. */
     shareCategories?: string[];
   }): Promise<{ updated: boolean }>;

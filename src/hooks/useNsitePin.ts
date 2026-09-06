@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { useToast } from '@/hooks/useToast';
 import type { NsiteApp } from '@/hooks/useNsiteApp';
+import { renderAppBadgePng } from '@/lib/appBadgeBitmap';
 import { renderAppIconPng } from '@/lib/appIconBitmap';
 import { impactLight, notificationError } from '@/lib/haptics';
 import { NsiteShortcuts, supportsNsiteWindows } from '@/lib/nsiteShortcutsPlugin';
@@ -90,6 +91,9 @@ export function useNsitePin(
       await NsiteShortcuts.refreshIcon({
         siteId,
         icon,
+        // Also how a site pinned before Tenna read monochrome manifest icons
+        // stops wearing Tenna's mark in the status bar.
+        badge: (await renderAppBadgePng(app)) ?? undefined,
         shareCategories: offered && shareTarget ? shareCategories(shareTarget) : undefined,
       }).catch(() => {
         // An older shortcut than this build knows how to update. It keeps the
@@ -150,7 +154,10 @@ export function useNsitePin(
   const pin = useCallback(() => {
     void (async () => {
       try {
-        const icon = await renderAppIconPng(name, app);
+        const [icon, badge] = await Promise.all([
+          renderAppIconPng(name, app),
+          renderAppBadgePng(app),
+        ]);
         await NsiteShortcuts.pin({
           siteId,
           label: name,
@@ -158,6 +165,7 @@ export function useNsitePin(
           // press without a relay.
           event: JSON.stringify(event),
           icon: icon ?? undefined,
+          badge: badge ?? undefined,
           // Stored now, acted on when the pin is confirmed. The share sheet is
           // the one thing about a site that cannot be worked out from its
           // manifest event, and the wall is the only place it is read.

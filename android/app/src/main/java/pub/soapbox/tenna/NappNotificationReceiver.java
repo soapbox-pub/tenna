@@ -54,7 +54,8 @@ public class NappNotificationReceiver extends BroadcastReceiver {
             NappPushService.dispatchNotificationEvent(
                 context, siteId, "notificationclose", key, null, null
             );
-            NappNotificationStore.remove(context, siteId, key);
+            // Which also takes down the header, if that was the last of them.
+            NappNotifications.forget(context, siteId, key);
             return;
         }
 

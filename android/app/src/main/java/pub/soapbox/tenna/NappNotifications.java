@@ -16,11 +16,9 @@ import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.core.app.NotificationCompat;
 import androidx.core.app.NotificationManagerCompat;
-import androidx.core.app.Person;
 import androidx.core.app.RemoteInput;
 import androidx.core.graphics.drawable.IconCompat;
 
-import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 
@@ -31,20 +29,25 @@ import java.util.concurrent.atomic.AtomicInteger;
  * Turns a site's {@code showNotification(title, options)} into one of the
  * OS's.
  *
- * The options a browser understands are honoured as a browser honours them:
- * {@code body}, {@code tag}, {@code silent}, {@code renotify},
- * {@code timestamp}, {@code icon}. What Android can say and the web cannot —
- * a conversation with faces on it, a bundle, a progress bar, a reply box —
- * the site asks for in {@code data.napp}; see {@link NappHints} and
- * {@code NAPP.md}. A site that says nothing there gets exactly what it would
- * get in a browser.
+ * Nothing but the standard options, honoured as far as Android will take them:
+ * {@code body}, {@code tag}, {@code icon}, {@code badge}, {@code image},
+ * {@code actions}, {@code data}, {@code silent}, {@code renotify},
+ * {@code timestamp} and {@code vibrate}. A site written for the web is a site
+ * written for this, and there is nothing to opt into. See {@link NappOptions}.
  *
- * Each site gets a channel group of its own, named after the site, so that the
- * system's notification settings can mute one site without muting the rest —
- * the nearest Android has to a per-origin notification permission. Inside it
- * the site may name channels of its own, so a user can keep the mentions and
- * silence the reactions. The push service's own standing notification sits on
- * a separate, quiet channel outside all of that.
+ * <b>Each site is its own app in the shade.</b> Its notifications carry a
+ * group of their own with a summary above them, so two sites are two bundles
+ * rather than one pile marked Tenna; the small icon is the site's, out of its
+ * own {@code badge} or its own monochrome manifest icon, so the status bar
+ * says which site is talking; and the site's field colour tints both. That is
+ * the whole of what a per-site notification is, and it is what should have
+ * been built before anything richer.
+ *
+ * Each site also gets a channel group of its own in system settings, named
+ * after the site, so a user can mute one site without muting the rest — the
+ * nearest Android has to a per-origin notification permission. The push
+ * service's own standing notification sits on a separate, quiet channel
+ * outside all of that.
  *
  * Pictures never hold a notification up. Whatever is already decoded is used,
  * the notification goes out, and it is posted again — silently, under the same
@@ -61,19 +64,27 @@ final class NappNotifications {
     /**
      * The group a site's channels live in, one group per site.
      *
-     * Sites used to share a single "Sites" group with one channel each, which
-     * left nowhere to put a channel a site named for itself. Both the old
-     * group and the old channel are deleted on the way past; a channel's
-     * group cannot be changed once it exists, and neither can its name, so
-     * moving them is the only way and it costs a site whatever importance the
-     * user had set. Notifications were new enough when this changed that
-     * almost nobody had set one.
+     * Sites once shared a single "Sites" group with one channel each. Both the
+     * old group and the old channel are deleted on the way past; a channel's
+     * group cannot be changed once it exists, so moving them is the only way.
      */
     private static final String SITE_GROUP_PREFIX = "napp.group.";
     private static final String SITE_CHANNEL_PREFIX = "napp.site.";
     private static final String DEFAULT_CHANNEL = "default";
 
     private static final String LEGACY_SITES_GROUP = "napp.sites";
+
+    /**
+     * The tag of a site's group summary.
+     *
+     * A site's own notifications are filed under {@code <site>/<tag>}, so
+     * nothing a site can say produces this — which is what stops a site from
+     * closing or replacing the header its notifications sit under.
+     */
+    private static final String SUMMARY_SUFFIX = "!summary";
+
+    /** Titles listed on the summary before the system's own count takes over. */
+    private static final int SUMMARY_LINES = 6;
 
     /** For notifications the site gave no tag; each gets a slot of its own. */
     private static final AtomicInteger UNTAGGED = new AtomicInteger(1);
@@ -121,13 +132,10 @@ final class NappNotifications {
             return false;
         }
 
-        String title = payload.optString("title", "");
         JSONObject options = payload.optJSONObject("options");
         if (options == null) options = new JSONObject();
 
-        String tag = options.has("tag") && !options.isNull("tag")
-            ? options.optString("tag", "")
-            : "";
+        String tag = NappOptions.parse(options).tag;
 
         // A tagged notification replaces the last one with the same tag, as it
         // does on the web; an untagged one is always another.
@@ -135,20 +143,17 @@ final class NappNotifications {
             ? NsiteSites.key(siteId) + "/#" + UNTAGGED.getAndIncrement()
             : NsiteSites.key(siteId) + "/" + tag;
 
-        NappHints hints = NappHints.parse(options);
-        JSONArray lines = accumulate(context, siteId, key, hints);
-
-        return post(context, siteId, title, options, key, tag, lines, false);
+        return post(context, siteId, payload.optString("title", ""), options, key, tag, false);
     }
 
     /**
      * Show a notification again without alerting, because something it was
      * waiting on has arrived.
      *
-     * Only ever called by {@link NappImages} once a face or a photograph has
-     * been decoded. Everything else about the notification is read back from
-     * the record written when it was first posted, so this cannot append a
-     * line twice or move a conversation on.
+     * Only ever called by {@link NappImages} once a picture has been decoded.
+     * Everything about the notification is read back from the record written
+     * when it was first posted, so this cannot show anything the site did not
+     * already say.
      */
     static void repost(@NonNull Context context, @NonNull String siteId, @NonNull String key) {
         if (!isEnabled(context)) return;
@@ -160,58 +165,10 @@ final class NappNotifications {
         if (!isActive(context, key)) return;
 
         try {
-            post(
-                context,
-                siteId,
-                entry.title,
-                new JSONObject(entry.options),
-                key,
-                entry.tag,
-                entry.lines,
-                true
-            );
+            post(context, siteId, entry.title, new JSONObject(entry.options), key, entry.tag, true);
         } catch (JSONException e) {
             // The record is unreadable; it will be replaced by the next post.
         }
-    }
-
-    /**
-     * The lines this notification is to show, once merging has been settled.
-     *
-     * {@code merge: "append"} means the payload carries only what is new, and
-     * the runtime remembers the rest — which is the whole reason it exists,
-     * because a service worker is started for one event and killed shortly
-     * after and has nowhere of its own to keep a conversation.
-     *
-     * A notification the user has already swiped away starts over. Appending
-     * to it would resurrect lines they dismissed, which is Android's rule for
-     * its own conversations and the right one.
-     */
-    @NonNull
-    private static JSONArray accumulate(
-        Context context,
-        String siteId,
-        String key,
-        @NonNull NappHints hints
-    ) {
-        JSONArray fresh = NappHints.linesOf(hints);
-        if (!hints.append) return fresh;
-
-        NappNotificationStore.Entry previous = NappNotificationStore.get(context, siteId, key);
-        if (previous == null || !isActive(context, key)) return fresh;
-
-        JSONArray merged = new JSONArray();
-        for (int i = 0; i < previous.lines.length(); i++) merged.put(previous.lines.opt(i));
-        for (int i = 0; i < fresh.length(); i++) merged.put(fresh.opt(i));
-
-        // Keep the newest, so a busy conversation stays readable rather than
-        // becoming a wall.
-        int drop = merged.length() - NappHints.MAX_LINES;
-        if (drop <= 0) return merged;
-
-        JSONArray capped = new JSONArray();
-        for (int i = drop; i < merged.length(); i++) capped.put(merged.opt(i));
-        return capped;
     }
 
     // -----------------------------------------------------------------------
@@ -219,56 +176,47 @@ final class NappNotifications {
     private static boolean post(
         Context context,
         String siteId,
-        String title,
-        JSONObject options,
+        String rawTitle,
+        JSONObject json,
         String key,
         String tag,
-        JSONArray lines,
         boolean quiet
     ) {
         NsiteSites.Record record = NsiteSites.load(context, siteId);
         if (record == null) return false;
 
-        NappHints hints = NappHints.parse(options);
-
-        String body = options.optString("body", "");
-        boolean silent = options.optBoolean("silent", false);
-        boolean renotify = options.optBoolean("renotify", false);
-        long timestamp = options.optLong("timestamp", 0);
-        boolean ongoing = hints.ongoing;
-
-        String channelId = ensureChannel(context, siteId, record.label, hints);
+        NappOptions options = NappOptions.parse(json);
+        String title = NappOptions.title(rawTitle, record.label);
 
         // The application's, so a picture still in the air cannot hold a
         // window's context alive behind it.
         Context app = context.getApplicationContext();
         NappImages.OnLoaded again = () -> repost(app, siteId, key);
 
-        NotificationCompat.Builder builder = new NotificationCompat.Builder(context, channelId)
-            .setSmallIcon(R.drawable.ic_stat_napp)
-            .setContentTitle(title.isEmpty() ? record.label : title)
-            // Whose notification this is, whatever the site put in the title.
-            .setSubText(record.label)
-            .setAutoCancel(!ongoing)
-            .setOngoing(ongoing)
-            .setSilent(silent)
-            // Web semantics: replacing a tagged notification is quiet unless
-            // the site asks otherwise. A first post alerts either way.
-            .setOnlyAlertOnce(quiet || !renotify)
-            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
-            .setCategory(category(hints))
-            .setContentIntent(openSite(context, siteId, key, hints.url))
-            .setDeleteIntent(dismissed(context, siteId, key));
+        NotificationCompat.Builder builder =
+            new NotificationCompat.Builder(context, ensureChannel(context, siteId, record.label))
+                .setContentTitle(title)
+                // Whose notification this is, whatever the site put in the title.
+                .setSubText(record.label)
+                .setAutoCancel(true)
+                .setSilent(options.silent)
+                // Web semantics: replacing a tagged notification is quiet unless
+                // the site asks otherwise. A first post alerts either way.
+                .setOnlyAlertOnce(quiet || !options.renotify)
+                .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+                .setGroup(NsiteSites.key(siteId))
+                .setContentIntent(openSite(context, siteId, key, options.url))
+                .setDeleteIntent(dismissed(context, siteId, key));
 
-        if (timestamp > 0) builder.setWhen(timestamp).setShowWhen(true);
-        if (hints.count > 0) builder.setNumber(hints.count);
-        if (hints.group != null) builder.setGroup(NsiteSites.key(siteId) + "/" + hints.group);
-        if (hints.progress) {
-            builder.setProgress(
-                hints.progressMax,
-                Math.max(0, hints.progressValue),
-                hints.progressValue < 0
-            );
+        smallIcon(builder, context, siteId, options.badge, again);
+
+        if (options.timestamp > 0) builder.setWhen(options.timestamp).setShowWhen(true);
+
+        // Above Android 8 the pattern belongs to the channel, and a per-post
+        // one is ignored — which is the platform's answer, not ours to work
+        // around.
+        if (options.vibrate != null && Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
+            builder.setVibrate(options.vibrate);
         }
 
         // The site's field colour, already worked out for the recents card, so
@@ -276,11 +224,13 @@ final class NappNotifications {
         NsiteSites.TaskIcon tile = NsiteSites.taskIcon(context, siteId);
         if (tile != null) builder.setColor(tile.color).setColorized(false);
 
-        Bitmap large = largeIcon(context, siteId, options, hints, again);
+        Bitmap large = options.icon == null
+            ? null
+            : NappImages.cached(context, siteId, options.icon, NappImages.SHAPE_PLAIN, again);
         builder.setLargeIcon(large != null ? large : (tile == null ? null : tile.bitmap));
 
-        style(context, siteId, builder, record.label, title, body, hints, lines, again);
-        actions(context, siteId, builder, key, hints);
+        style(context, siteId, builder, options, again);
+        actions(context, siteId, builder, key, options, again);
 
         try {
             NotificationManagerCompat.from(context).notify(key, 0, builder.build());
@@ -293,162 +243,69 @@ final class NappNotifications {
             key,
             tag,
             title,
-            options.toString(),
-            hints.url,
-            lines,
+            json.toString(),
+            options.url,
             System.currentTimeMillis()
         ));
+
+        summarize(context, siteId, record.label, key);
 
         if (!quiet) Log.i(TAG, "Posted a notification for " + record.label);
         return true;
     }
 
-    private static String category(@NonNull NappHints hints) {
-        if (hints.progress || hints.ongoing) return NotificationCompat.CATEGORY_PROGRESS;
-        if (hints.style == NappHints.STYLE_MESSAGE) return NotificationCompat.CATEGORY_MESSAGE;
-        return NotificationCompat.CATEGORY_SOCIAL;
+    /**
+     * The site's own mark in the status bar, or Tenna's where it has none.
+     *
+     * The notification's {@code badge} first, then the monochrome icon the
+     * site declares in its web app manifest, then the television. A badge
+     * still being fetched shows the next one down and arrives on the repost.
+     */
+    private static void smallIcon(
+        NotificationCompat.Builder builder,
+        Context context,
+        String siteId,
+        @Nullable String badge,
+        NappImages.OnLoaded again
+    ) {
+        IconCompat icon = NappBadges.icon(context, siteId, badge, again);
+        if (icon != null) builder.setSmallIcon(icon);
+        else builder.setSmallIcon(R.drawable.ic_stat_napp);
     }
 
     /**
-     * The picture beside the notification.
+     * How the notification expands: into its photograph, or into its text.
      *
-     * The sender's face where the site named one, then whatever it passed as
-     * the standard {@code icon}, then the site's own tile. A face is cut round
-     * because that is how Android draws both a large icon and a messaging
-     * avatar; a site's icon is left as it is, having already been drawn to the
-     * launcher's shape.
+     * A picture not yet decoded is shown flat and expands when it lands.
      */
-    @Nullable
-    private static Bitmap largeIcon(
-        Context context,
-        String siteId,
-        JSONObject options,
-        @NonNull NappHints hints,
-        NappImages.OnLoaded again
-    ) {
-        if (hints.person != null && hints.person.icon != null) {
-            Bitmap face = NappImages.cached(context, siteId, hints.person.icon, true, again);
-            if (face != null) return face;
-        }
-
-        String icon = options.optString("icon", null);
-        if (icon == null || icon.isEmpty()) return null;
-        return NappImages.cached(context, siteId, NappHints.imageOf(icon), false, again);
-    }
-
     private static void style(
         Context context,
         String siteId,
         NotificationCompat.Builder builder,
-        String label,
-        String title,
-        String body,
-        @NonNull NappHints hints,
-        JSONArray lines,
+        @NonNull NappOptions options,
         NappImages.OnLoaded again
     ) {
-        int style = hints.style;
-
-        if (style == NappHints.STYLE_MESSAGE) {
-            List<NappHints.Message> messages = NappHints.messagesOf(lines);
-            if (!messages.isEmpty()) {
-                messaging(context, siteId, builder, title, hints, messages, again);
-                return;
-            }
-        }
-
-        if (style == NappHints.STYLE_INBOX) {
-            NotificationCompat.InboxStyle inbox = new NotificationCompat.InboxStyle();
-            StringBuilder collapsed = new StringBuilder();
-            for (int i = 0; i < lines.length(); i++) {
-                String line = lines.optString(i, null);
-                if (line == null) continue;
-                inbox.addLine(line);
-                if (collapsed.length() > 0) collapsed.append(" · ");
-                collapsed.append(line);
-            }
-            if (!body.isEmpty()) inbox.setSummaryText(body);
-            builder.setContentText(body.isEmpty() ? collapsed.toString() : body).setStyle(inbox);
-            return;
-        }
-
-        if (style == NappHints.STYLE_PICTURE && hints.image != null) {
-            Bitmap picture = NappImages.cached(context, siteId, hints.image, false, again);
+        if (options.image != null) {
+            Bitmap picture = NappImages.cached(
+                context, siteId, options.image, NappImages.SHAPE_PLAIN, again
+            );
             if (picture != null) {
                 NotificationCompat.BigPictureStyle big = new NotificationCompat.BigPictureStyle()
                     .bigPicture(picture)
                     // The large icon would otherwise be redrawn over the top of
                     // the photograph when the notification is expanded.
                     .bigLargeIcon((Bitmap) null);
-                if (hints.summary != null) big.setSummaryText(hints.summary);
-                if (!body.isEmpty()) builder.setContentText(body);
+                if (!options.body.isEmpty()) builder.setContentText(options.body);
                 builder.setStyle(big);
                 return;
             }
-            // Not decoded yet: show it flat, and expand when it lands.
         }
 
-        if (!body.isEmpty()) {
-            builder.setContentText(body).setStyle(new NotificationCompat.BigTextStyle().bigText(body));
+        if (!options.body.isEmpty()) {
+            builder
+                .setContentText(options.body)
+                .setStyle(new NotificationCompat.BigTextStyle().bigText(options.body));
         }
-    }
-
-    /**
-     * A conversation, drawn the way Android draws its own.
-     *
-     * The title is the conversation's own where the site named one, and the
-     * style is told it is a group; a two-person thread names neither, and the
-     * system lays it out as the 1:1 it is.
-     */
-    private static void messaging(
-        Context context,
-        String siteId,
-        NotificationCompat.Builder builder,
-        String title,
-        @NonNull NappHints hints,
-        List<NappHints.Message> messages,
-        NappImages.OnLoaded again
-    ) {
-        Person self = person(context, siteId, hints.me, "You", again);
-        NotificationCompat.MessagingStyle style = new NotificationCompat.MessagingStyle(self);
-
-        if (hints.conversation != null) {
-            style.setConversationTitle(hints.conversation);
-            style.setGroupConversation(true);
-        } else {
-            style.setGroupConversation(hints.groupConversation);
-        }
-
-        for (NappHints.Message message : messages) {
-            style.addMessage(new NotificationCompat.MessagingStyle.Message(
-                message.text,
-                message.timestamp > 0 ? message.timestamp : System.currentTimeMillis(),
-                // Null is the user's own line, which is what the style wants.
-                message.from == null ? null : person(context, siteId, message.from, title, again)
-            ));
-        }
-
-        builder.setStyle(style);
-    }
-
-    @NonNull
-    private static Person person(
-        Context context,
-        String siteId,
-        @Nullable NappHints.Person from,
-        String fallbackName,
-        NappImages.OnLoaded again
-    ) {
-        String name = from != null ? from.name : fallbackName;
-        Person.Builder builder = new Person.Builder().setName(name.isEmpty() ? "You" : name);
-
-        if (from != null && from.id != null) builder.setKey(from.id);
-        if (from != null && from.icon != null) {
-            Bitmap face = NappImages.cached(context, siteId, from.icon, true, again);
-            if (face != null) builder.setIcon(IconCompat.createWithBitmap(face));
-        }
-
-        return builder.build();
     }
 
     /**
@@ -464,9 +321,10 @@ final class NappNotifications {
         String siteId,
         NotificationCompat.Builder builder,
         String key,
-        @NonNull NappHints hints
+        @NonNull NappOptions options,
+        NappImages.OnLoaded again
     ) {
-        for (NappHints.Action action : hints.actions) {
+        for (NappOptions.Action action : options.actions) {
             Intent intent = new Intent(context, NappNotificationReceiver.class)
                 .setAction(NappNotificationReceiver.ACTION_ACTION)
                 // Extras alone do not tell two PendingIntents apart; the data
@@ -484,8 +342,14 @@ final class NappNotifications {
                     | (action.input ? PendingIntent.FLAG_MUTABLE : PendingIntent.FLAG_IMMUTABLE)
             );
 
+            // An action's icon is a stencil too, drawn the same way as the one
+            // in the status bar.
+            IconCompat glyph = action.icon == null
+                ? null
+                : NappBadges.icon(context, siteId, action.icon, again);
+
             NotificationCompat.Action.Builder button = new NotificationCompat.Action.Builder(
-                IconCompat.createWithResource(context, R.drawable.ic_stat_napp),
+                glyph != null ? glyph : IconCompat.createWithResource(context, R.drawable.ic_stat_napp),
                 action.title,
                 pending
             );
@@ -506,13 +370,141 @@ final class NappNotifications {
     }
 
     // -----------------------------------------------------------------------
+    // The bundle
+    // -----------------------------------------------------------------------
+
+    /**
+     * The header a site's notifications sit under, posted or taken down to
+     * match what the site currently has out.
+     *
+     * Android will bundle several notifications from one app on its own, but
+     * it bundles them as <i>the app</i> — which for Tenna means every site's
+     * notifications in one pile under one name. A summary per site is what
+     * makes the pile per site instead, and it wears the site's own mark so the
+     * pile is recognisable before it is opened.
+     *
+     * Only ever above two or more. A group of one is shown by some versions of
+     * Android as the header alone, which would hide the notification behind a
+     * count of itself; a site with one notification out wants that
+     * notification, which already carries the site's mark and name and colour.
+     *
+     * Never alerts: {@code GROUP_ALERT_CHILDREN} hands the sound to the
+     * notification that actually arrived, so posting the header does not buzz
+     * a second time.
+     */
+    private static void summarize(
+        Context context,
+        String siteId,
+        String label,
+        @Nullable String posted
+    ) {
+        List<String> titles = live(context, siteId, posted);
+        String key = NsiteSites.key(siteId) + SUMMARY_SUFFIX;
+
+        if (titles.size() < 2) {
+            NotificationManagerCompat.from(context).cancel(key, 0);
+            return;
+        }
+
+        NotificationCompat.InboxStyle inbox = new NotificationCompat.InboxStyle()
+            .setSummaryText(label);
+        for (int i = Math.max(0, titles.size() - SUMMARY_LINES); i < titles.size(); i++) {
+            inbox.addLine(titles.get(i));
+        }
+
+        NotificationCompat.Builder builder =
+            new NotificationCompat.Builder(context, ensureChannel(context, siteId, label))
+                .setContentTitle(label)
+                .setContentText(titles.size() + " notifications")
+                .setStyle(inbox)
+                .setGroup(NsiteSites.key(siteId))
+                .setGroupSummary(true)
+                .setGroupAlertBehavior(NotificationCompat.GROUP_ALERT_CHILDREN)
+                .setAutoCancel(true)
+                .setSilent(true)
+                .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+                .setContentIntent(openSite(context, siteId, null, null));
+
+        // The site's, with no notification behind it: a header stands for the
+        // site rather than for anything it said.
+        IconCompat icon = NappBadges.site(context, siteId);
+        if (icon != null) builder.setSmallIcon(icon);
+        else builder.setSmallIcon(R.drawable.ic_stat_napp);
+
+        NsiteSites.TaskIcon tile = NsiteSites.taskIcon(context, siteId);
+        if (tile != null) builder.setColor(tile.color).setColorized(false);
+
+        try {
+            NotificationManagerCompat.from(context).notify(key, 0, builder.build());
+        } catch (SecurityException e) {
+            // The children are up; a missing header is not worth failing over.
+        }
+    }
+
+    /**
+     * The titles of the site's notifications that are actually on screen,
+     * oldest first.
+     *
+     * The store outlives the tray — notifications do not survive a reboot and
+     * their records do — so a header built from the records alone would
+     * announce five where the user can see one. What the system says is on
+     * screen wins, with the one just posted taken on trust: {@code notify()}
+     * is answered by a handler in the notification service, and asking it a
+     * moment later can be asking too early.
+     */
+    @NonNull
+    private static List<String> live(Context context, String siteId, @Nullable String posted) {
+        java.util.Set<String> active = activeKeys(context);
+        List<String> titles = new java.util.ArrayList<>();
+
+        for (NappNotificationStore.Entry entry : NappNotificationStore.list(context, siteId)) {
+            if (active != null && !active.contains(entry.key) && !entry.key.equals(posted)) continue;
+            titles.add(entry.title);
+        }
+
+        return titles;
+    }
+
+    /** Every notification tag the app currently has out, or null if unreadable. */
+    @Nullable
+    private static java.util.Set<String> activeKeys(Context context) {
+        NotificationManager manager = context.getSystemService(NotificationManager.class);
+        if (manager == null) return null;
+
+        try {
+            java.util.Set<String> keys = new java.util.HashSet<>();
+            for (StatusBarNotification notification : manager.getActiveNotifications()) {
+                if (notification.getTag() != null) keys.add(notification.getTag());
+            }
+            return keys;
+        } catch (RuntimeException e) {
+            // Some OEM builds refuse to enumerate. Trust the records rather
+            // than deciding the shade is empty.
+            return null;
+        }
+    }
+
+    // -----------------------------------------------------------------------
     // The tray
     // -----------------------------------------------------------------------
 
     /** Take a notification down, as {@code Notification.close()} does on the web. */
     static void cancel(@NonNull Context context, @NonNull String siteId, @NonNull String key) {
         NotificationManagerCompat.from(context).cancel(key, 0);
+        forget(context, siteId, key);
+    }
+
+    /**
+     * Forget a notification the user has already taken down themselves.
+     *
+     * The system has removed it; all that is left is the record, and the
+     * header above it if it was the last one.
+     */
+    static void forget(@NonNull Context context, @NonNull String siteId, @NonNull String key) {
         NappNotificationStore.remove(context, siteId, key);
+
+        NsiteSites.Record record = NsiteSites.load(context, siteId);
+        summarize(context, siteId, record == null ? siteId : record.label, null);
     }
 
     /**
@@ -527,6 +519,7 @@ final class NappNotifications {
         for (NappNotificationStore.Entry entry : NappNotificationStore.list(context, siteId)) {
             manager.cancel(entry.key, 0);
         }
+        manager.cancel(NsiteSites.key(siteId) + SUMMARY_SUFFIX, 0);
         NappNotificationStore.clear(context, siteId);
     }
 
@@ -543,20 +536,10 @@ final class NappNotifications {
 
     /** Whether a notification we posted is still on screen. */
     private static boolean isActive(Context context, String key) {
-        NotificationManager manager = context.getSystemService(NotificationManager.class);
-        if (manager == null) return true;
-
-        try {
-            for (StatusBarNotification posted : manager.getActiveNotifications()) {
-                if (key.equals(posted.getTag())) return true;
-            }
-        } catch (RuntimeException e) {
-            // Some OEM builds refuse to enumerate. Assume it is there rather
-            // than throwing away a conversation the user can still see.
-            return true;
-        }
-
-        return false;
+        java.util.Set<String> active = activeKeys(context);
+        // Unreadable: assume it is there rather than throwing away a
+        // notification the user can still see.
+        return active == null || active.contains(key);
     }
 
     /** The standing notification the push service runs under. */
@@ -595,13 +578,15 @@ final class NappNotifications {
     private static PendingIntent openSite(
         Context context,
         String siteId,
-        String key,
+        @Nullable String key,
         @Nullable String path
     ) {
+        String slot = key == null ? NsiteSites.key(siteId) + SUMMARY_SUFFIX : key;
+
         return PendingIntent.getActivity(
             context,
             // Distinct per notification, or one would replace another's.
-            key.hashCode(),
+            slot.hashCode(),
             NsiteAppActivity.notificationIntentFor(context, siteId, path, key),
             PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE
         );
@@ -643,24 +628,20 @@ final class NappNotifications {
     }
 
     /**
-     * The channel this notification belongs on, made if it isn't there.
+     * The site's channel, made if it isn't there.
      *
-     * A site's own channel where it named one, so the user can silence its
-     * reactions and keep its mentions; the site's default channel otherwise.
+     * One per site, in a group of its own named after the site. Sites may no
+     * longer name channels of their own — that came in with the extension this
+     * has walked back, and a site naming a channel the user then tunes is a
+     * setting they cannot get rid of short of reinstalling.
+     *
      * Creating a channel that exists is a no-op and does not undo an
-     * importance the user has changed, which is why this can run on every
-     * post.
+     * importance the user has changed, which is why this can run on every post.
      */
     @NonNull
-    private static String ensureChannel(
-        Context context,
-        String siteId,
-        @Nullable String label,
-        @NonNull NappHints hints
-    ) {
+    private static String ensureChannel(Context context, String siteId, @Nullable String label) {
         String site = NsiteSites.key(siteId);
-        NappHints.Channel named = hints.channel;
-        String id = SITE_CHANNEL_PREFIX + site + "." + (named == null ? DEFAULT_CHANNEL : named.id);
+        String id = SITE_CHANNEL_PREFIX + site + "." + DEFAULT_CHANNEL;
 
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return id;
 
@@ -679,8 +660,8 @@ final class NappNotifications {
 
         NotificationChannel channel = new NotificationChannel(
             id,
-            named == null ? "Notifications" : named.name,
-            named == null ? NotificationManager.IMPORTANCE_DEFAULT : named.importance
+            "Notifications",
+            NotificationManager.IMPORTANCE_DEFAULT
         );
         channel.setGroup(group);
         manager.createNotificationChannel(channel);

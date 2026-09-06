@@ -142,29 +142,35 @@ the next event for the site, with a timeout of twenty seconds.
 
 #### `showNotification(title, options)`
 
-The standard options, as a browser honours them:
+Every option the Notifications API defines, honoured as far as Android takes
+it:
 
 | Option        | Effect                                                                 |
 | ------------- | ---------------------------------------------------------------------- |
-| `body`        | The notification text. Expands when the notification does.             |
+| `body`        | The notification text. Expands when the notification does; newlines are kept. |
 | `tag`         | A later notification with the same tag replaces this one.              |
-| `renotify`    | Alert again when it does. Off by default, so an update is quiet.       |
-| `silent`      | Post without sound or vibration.                                       |
-| `timestamp`   | The time shown on it, in milliseconds. Defaults to when it was posted. |
 | `icon`        | The picture beside it. See [Pictures](#pictures).                      |
+| `badge`       | The site's mark in the status bar. See [The badge](#the-badge).        |
+| `image`       | A photograph, shown in full when the notification is expanded.         |
 | `actions`     | Buttons. See [Tapping, buttons and replies](#tapping-buttons-and-replies). |
-| `data`        | Anything the site wants back on `notificationclick`, and where the rest of this document lives. |
+| `data`        | Anything the site wants back on `notificationclick`.                   |
+| `silent`      | Post without sound or vibration.                                       |
+| `renotify`    | Alert again when it replaces. Off by default, so an update is quiet.   |
+| `timestamp`   | The time shown on it, in milliseconds. Defaults to when it was posted. |
+| `vibrate`     | The vibration pattern — below Android 8. Above it a pattern belongs to the channel and a per-notification one is ignored, which is the platform's answer rather than Tenna's. |
 
-`badge`, `image`, `requireInteraction`, `vibrate`, `dir` and `lang` have no
-Android counterpart and are accepted and ignored. `badge` in particular is
-*not* used as the status-bar icon: that is Tenna's, so a notification is
-always attributable, and the site's name sits under the title either way.
+`dir` and `lang` have no Android counterpart. `requireInteraction` is accepted
+and ignored, as it is by Chrome on Android: the nearest the platform has is a
+notification that cannot be dismissed, and that is not a power to hand a site
+for saying one word.
 
-Each site gets a channel group of its own in the system's notification
-settings, named after the site, so a user can silence one site without
-silencing the rest — the nearest Android has to a per-origin notification
-permission. Inside it a site may name channels of its own; see
-[`channel`](#channel-group-count-ongoing-progress).
+**There is nothing Tenna-specific and nothing to opt into.** A site written for
+the web is written for this. An earlier version accepted an `options.data.napp`
+member carrying conversations, faces, bundles, progress bars and channels of
+the site's own; it has been removed. It was reached for before the ordinary
+thing worked — `badge` was being thrown away while a bespoke object was being
+parsed — and a site should not have to know Tenna exists to get the whole of
+what a browser gives it.
 
 `registration.getNotifications()` and `Notification.close()` are real: the
 first returns the site's own live notifications, filtered by `tag` if asked,
@@ -175,152 +181,78 @@ The whole payload — title and options together — travels as a URL, so it is
 capped at **64 KiB** of JSON. That is a great deal of words and not very much
 inlined artwork; see [Pictures](#pictures).
 
-#### `data.napp` — rich notifications
-
-A web notification is a title, a line of text and a tag. Android's is a
-conversation with faces on it, a bundle, a progress bar, a reply box. There is
-nowhere in `showNotification` to ask for the difference, so a site asks for it
-in `options.data.napp` — a member every other browser ignores, which is what
-keeps a site written for Tenna a site that still works anywhere else. It rides
-inside `data` rather than beside it so that it comes back to the worker on
-`notificationclick` along with everything else the site attached.
-
-The canonical types are `src/lib/nappNotifications.ts`; the authority on what
-is actually accepted is `NappHints.java`. Nothing is ever refused outright — a
-hint that makes no sense is dropped and the notification is still shown,
-because a site whose users silently stop hearing from it is the worse failure.
-
-```ts
-interface NappHints {
-  url?: string;
-  merge?: 'replace' | 'append';
-  channel?: { id: string; name: string; importance?: 'min' | 'low' | 'default' | 'high' };
-  group?: string;
-  person?: NappPerson;
-  style?: NappStyle;
-  ongoing?: boolean;
-  progress?: { value?: number; max?: number };
-  count?: number;
-}
-
-interface NappPerson {
-  /** Stable across notifications — a pubkey is ideal. */
-  id?: string;
-  name: string;
-  icon?: NappImage;
-}
-
-type NappStyle =
-  | { type: 'text' }
-  | { type: 'message'; conversation?: string; group?: boolean;
-      messages: NappMessage[]; me?: NappPerson }
-  | { type: 'inbox'; lines: string[] }
-  | { type: 'picture'; image: NappImage; summary?: string };
-
-interface NappMessage {
-  text: string;
-  timestamp?: number;
-  /** Omit for the user's own line. */
-  from?: NappPerson;
-}
-```
-
-##### `merge` — how a second notification joins the first
-
-`replace`, the default, is what the web does: the payload is the whole
-notification, and a later one with the same `tag` takes its place entirely.
-
-`append` means the payload carries only what is new. Tenna keeps the last
-eight `messages` (or `lines`) posted under that tag and adds this one's to
-them. That is the whole reason it exists: a service worker is started for one
-event and killed shortly after, so it has nowhere of its own to keep a
-conversation, and the only way to remember on the web is to read the previous
-notification's `data` back out of `getNotifications()`.
-
-A notification the user has already swiped away starts over. Appending to it
-would resurrect lines they dismissed.
-
-##### `style: 'message'` — a conversation
-
-The one that matters most, and the one Android draws best: a row per line,
-each with its sender's face, laid out as the system lays out its own.
+A worked example, and the whole of what there is to know:
 
 ```js
 await registration.showNotification('Alice', {
   body: 'see you there',
   tag: `dm:${peer}`,
   renotify: true,
-  data: {
-    napp: {
-      url: `/dm/${npub}`,
-      merge: 'append',
-      channel: { id: 'dm', name: 'Direct messages', importance: 'high' },
-      style: {
-        type: 'message',
-        messages: [{
-          text: 'see you there',
-          timestamp: rumor.created_at * 1000,
-          from: { id: peer, name: 'Alice', icon: profile.picture },
-        }],
-      },
-    },
-  },
+  icon: profile.picture,
+  badge: '/mark.svg',
+  data: { url: `/dm/${npub}` },
   actions: [{ action: 'reply', type: 'text', title: 'Reply', placeholder: 'Message' }],
 });
 ```
 
-Name a `conversation` for a channel or a group chat, and it becomes the
-notification's heading. Leave it out for a two-person thread: Android lays an
-untitled conversation out as the 1:1 it is, and a title would make it look
-like a room with two people in it.
+#### One site, one app
 
-A message with no `from` is the user's own — a reply they sent from the shade,
-say — and is drawn as theirs. `me` names them; without it they are "You".
+Each site is its own app as far as the shade is concerned, and none of it is
+declared:
 
-##### `style: 'inbox'` and `style: 'picture'`
+- **Its notifications bundle under a header of their own**, named after the
+  site, rather than into one pile marked Tenna. The header appears once the
+  site has two out; below that the notification stands on its own, which it
+  can, since it already carries everything below.
+- **The status-bar icon is the site's**, out of its `badge` or its manifest.
+  See [The badge](#the-badge).
+- **The colour** tinting both is the site's own — the same one its tile is
+  drawn on, on Tenna's channel wall.
+- **The site's name** sits under the title of every notification, whatever the
+  site put in the title.
+- **A channel group of its own** in the system's notification settings, named
+  after the site, so a user can mute one site without muting the rest. It is
+  the nearest Android has to a per-origin notification permission. Sites do not
+  name channels inside it: that arrived with `data.napp` and left with it,
+  since a channel a site names is a settings entry the user cannot be rid of
+  short of reinstalling.
 
-`inbox` is a list, one row per line: *three people liked your note*, each on
-its own. It takes `merge: 'append'` too.
+##### The badge
 
-`picture` shows a photograph in full when the notification is expanded. The
-large icon is dropped while it is open, so the picture is not drawn over.
+`badge` is the standard's name for the image that stands for a notification
+"when there is not enough space to display the notification itself, such as a
+device's notification bar". That is Android's small icon exactly, so that is
+what it becomes. Three answers, in order:
 
-##### `channel`, `group`, `count`, `ongoing`, `progress`
+1. **The notification's own `badge`**, in any of the shapes under
+   [Pictures](#pictures). A site that draws one per kind of notification gets
+   one per kind.
+2. **The site's monochrome web app manifest icon** — an entry declaring
+   `"purpose": "monochrome"`. Read when the site is opened from the channel
+   wall, and kept, so it is there for a notification that arrives with the site
+   closed.
+3. **Tenna's own television**, for a site that publishes neither.
 
-`channel` puts this notification on a channel of the site's own, inside the
-site's group in system settings. This is how a user keeps a site's mentions
-and silences its reactions. **A channel is created the first time it is named
-and never altered afterwards** — an importance the user has changed is theirs,
-not the site's, and a name a channel was created under cannot be changed at
-all. Choose both once.
-
-`group` is a bundle key. Notifications sharing one are collapsed by the system
-under a single header. Leave it out and each stands alone.
-
-`count` puts a number on the notification and on the launcher's badge.
-
-`ongoing` makes a notification that cannot be swiped away, for something still
-happening. `progress` draws a bar; omit its `value` for a job that has started
-and cannot say how far along it is.
-
-```js
-await registration.showNotification('Building', {
-  body: 'Compiling assets',
-  tag: 'build',
-  data: {
-    napp: {
-      ongoing: true,
-      progress: { value: 70, max: 100 },
-      channel: { id: 'builds', name: 'Builds', importance: 'low' },
-      url: '/builds/current',
-    },
-  },
-});
+```json
+{
+  "icons": [
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/mark.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "monochrome" }
+  ]
+}
 ```
 
-##### Pictures
+Whatever the source, only its shape survives: it is painted white over its own
+alpha, because a small icon is a silhouette and the colour belongs to the
+system. Full-colour artwork in that slot comes out a smudge, which is why the
+site's tile is never used here. A monochrome icon may be drawn in any colour on
+any padding — both are measured off and normalised — but it ends up 24dp
+across, so one flat shape reads and a detailed one does not.
 
-Wherever this document says `NappImage`, three shapes are accepted:
+#### Pictures
+
+`icon`, `badge`, `image` and an action's `icon` all take the same three
+shapes:
 
 | Shape                    | What happens                                                     |
 | ------------------------ | ---------------------------------------------------------------- |
@@ -332,22 +264,25 @@ Wherever this document says `NappImage`, three shapes are accepted:
 used, the notification goes out, and it is posted again — silently, under the
 same tag — when the rest arrives. So the first notification from a sender may
 appear without their face and gain it a moment later, and that is correct
-behaviour rather than a glitch worth working around.
+behaviour rather than a glitch worth working around. The same is true of a
+`badge`: until it lands, the notification wears whatever is next down
+[the chain](#the-badge).
 
-A face is cut to a circle, because that is how Android draws both a large icon
-and a messaging avatar.
-
-The picture beside a notification is `napp.person.icon` if there is one, then
-`options.icon`, then the site's own tile as it appears on Tenna's home screen
-— so a site that names nothing still looks like itself.
+The picture beside a notification is `icon`, and the site's own tile — as it
+appears on Tenna's home screen — where it names none, so a site that declares
+nothing still looks like itself. It is left square; Android clips a large icon
+to its own shape, and cropping it round here would crop it twice.
 
 #### Tapping, buttons and replies
 
-**Tapping the body** opens the site's window at `data.napp.url`, falling back
-to a plain `data.url` — which is what every push service worker on Nostr
-already writes — and to the site's front page. It happens immediately, without
-waiting for anything: a tap has to land at once, and the worker that would
-have routed it may not be running.
+**Tapping the body** opens the site's window at `data.url`, falling back to the
+site's front page. It happens immediately, without waiting for anything: a tap
+has to land at once, and the worker that would have routed it may not be
+running.
+
+`data.url` is a convention rather than anything the standard says — but it is
+what every push service worker on Nostr already writes, and it is the only
+thing that can route a tap with no worker alive to route it. So it is read.
 
 `notificationclick` is then raised in the worker anyway, so a site that does
 its routing there, as a site written for a browser does, still gets its say:
@@ -371,16 +306,20 @@ declares `url` **and** navigates somewhere else in `notificationclick` will
 visibly go to one and then the other. Declare `url` and let it route, or
 declare neither and route in the worker; doing both is doing it twice.
 
-**Buttons** are the standard `options.actions`, because the Notifications API
-already has exactly this — including `type: 'text'` for an inline reply, and
-`event.reply` for what was typed. Three are shown. Pressing one raises
-`notificationclick` with `event.action` set; it does not open a window, so a
-reply typed into the shade is answered without leaving the shade.
+**Buttons** are the standard `options.actions`: `action`, `title` and `icon`,
+the last drawn as a stencil the way the badge is. Three are shown. Pressing one
+raises `notificationclick` with `event.action` set; it does not open a window,
+so a reply typed into the shade is answered without leaving the shade.
+
+`type: 'text'` and `placeholder` give the button a reply box, and what was
+typed arrives as `event.reply`. Those two are Chromium's addition rather than
+the standard's, and they are honoured for the same reason `data.url` is: it is
+the spelling that already exists, and there is nothing better to invent.
 
 ```js
 self.addEventListener('notificationclick', (event) => {
   if (event.action !== 'reply') return;
-  event.waitUntil(send(event.notification.data.napp.url, event.reply));
+  event.waitUntil(send(event.notification.data.url, event.reply));
 });
 ```
 
@@ -391,21 +330,24 @@ moving on to the next event for the site, with a timeout of twenty seconds.
 
 #### What is not there yet
 
-- **Conversation shortcuts.** Android 11's conversation section — the one that
-  puts a chat above everything else in the shade with its own avatar — needs a
-  long-lived dynamic shortcut per conversation. `style: 'message'` does not
-  publish one yet, so a conversation is drawn as a rich notification rather
-  than as a conversation proper.
+- **Anything past the standard.** There is no way for a site to ask for a
+  `MessagingStyle` conversation with faces on it, an inbox of lines, a progress
+  bar, a bundle key of its own or a channel of its own. There briefly was, in
+  `options.data.napp`, and it was withdrawn — those are worth having, but not
+  before the per-site basics are right on a device, and not in a shape settled
+  in the abstract. Anything that comes back will come back as the standard
+  spelling of it wherever one exists.
+- **Conversation shortcuts.** Android 11's conversation section, the one that
+  puts a chat above everything else in the shade, needs a long-lived dynamic
+  shortcut per conversation. Nothing publishes one.
 - **Calls.** No `CallStyle`, no full-screen intent, no ringtone channel.
-- **The status-bar icon** is always Tenna's. A site's monochrome manifest icon
-  is not read.
 - **`Notification` and `showNotification` in the page** are not shimmed;
   only the worker's are.
 - **NIP-42.** The service holds no keys, so it cannot answer an `AUTH`
   challenge. A relay that requires authentication to serve a filter, as many
   do for gift wraps addressed to a user, will not deliver it.
 - **Web push on the web.** The iframe path used on the web and on iOS does
-  not define `window.napp`, and reads none of `data.napp`.
+  not define `window.napp`.
 
 ## `share_target` — a place in the OS share menu
 

@@ -105,6 +105,7 @@ public class NsiteShortcutsPlugin extends Plugin {
         String label = call.getString("label");
         String event = call.getString("event");
         String icon = call.getString("icon");
+        String badge = call.getString("badge");
         String shareTarget = call.getString("shareTarget");
         final String shareToken = call.getString("shareToken");
         final int channel = call.getInt("channel", 0);
@@ -117,7 +118,7 @@ public class NsiteShortcutsPlugin extends Plugin {
         Context context = getContext();
 
         try {
-            NsiteSites.save(context, siteId, label, event, decode(icon), shareTarget);
+            NsiteSites.save(context, siteId, label, event, decode(icon), decode(badge), shareTarget);
         } catch (IOException e) {
             call.reject("Could not save the site for launch", e);
             return;
@@ -207,6 +208,7 @@ public class NsiteShortcutsPlugin extends Plugin {
         String label = call.getString("label");
         String event = call.getString("event");
         String icon = call.getString("icon");
+        String badge = call.getString("badge");
         String shareTarget = call.getString("shareTarget");
 
         if (siteId == null || label == null || label.isEmpty() || event == null) {
@@ -226,7 +228,7 @@ public class NsiteShortcutsPlugin extends Plugin {
             // Written before the request, not after it: the launcher may pin
             // silently and the user may press the shortcut before any callback
             // would have run, and a site with no record cannot be served.
-            NsiteSites.save(context, siteId, label, event, bitmap, shareTarget);
+            NsiteSites.save(context, siteId, label, event, bitmap, decode(badge), shareTarget);
         } catch (IOException e) {
             call.reject("Could not save the site for offline launch", e);
             return;
@@ -420,11 +422,17 @@ public class NsiteShortcutsPlugin extends Plugin {
      * anything, which is the point: nothing about the site has changed, only
      * how well Tenna draws it. It is a no-op for a site that isn't pinned, and
      * a site with no record is left alone rather than given one.
+     *
+     * The site's notification badge rides along, since this is the one call
+     * the wall makes about a site it is not otherwise touching — and a site
+     * pinned before Tenna read monochrome manifest icons would otherwise keep
+     * showing Tenna's mark in the status bar forever.
      */
     @PluginMethod
     public void refreshIcon(PluginCall call) {
         String siteId = call.getString("siteId");
         String icon = call.getString("icon");
+        String badge = call.getString("badge");
 
         if (siteId == null || icon == null) {
             call.reject("siteId and icon are required");
@@ -446,7 +454,7 @@ public class NsiteShortcutsPlugin extends Plugin {
         try {
             // Same call the pin makes, so the recents card and the share picker
             // are redrawn along with the launcher.
-            NsiteSites.save(context, siteId, record.label, record.event, bitmap, null);
+            NsiteSites.save(context, siteId, record.label, record.event, bitmap, decode(badge), null);
         } catch (IOException e) {
             call.reject("Could not store the site's icon", e);
             return;

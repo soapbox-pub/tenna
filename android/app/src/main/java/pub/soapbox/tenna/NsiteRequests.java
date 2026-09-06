@@ -275,7 +275,7 @@ final class NsiteRequests {
      * for.
      */
     private static WebResourceResponse open(Context context, String siteId, Uri url) {
-        String path = NappHints.path(query(url, URL_PARAM));
+        String path = NappOptions.path(query(url, URL_PARAM));
 
         if (NsiteSites.load(context, siteId) == null) {
             return NsiteFileServer.Response.empty(404, "Not Found").toWebResource();

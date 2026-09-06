@@ -3,6 +3,7 @@ import { useCallback } from 'react';
 
 import type { NsiteApp } from '@/hooks/useNsiteApp';
 import { useToast } from '@/hooks/useToast';
+import { renderAppBadgePng } from '@/lib/appBadgeBitmap';
 import { renderAppIconPng } from '@/lib/appIconBitmap';
 import { NsiteShortcuts, supportsNsiteWindows } from '@/lib/nsiteShortcutsPlugin';
 import { getNsiteSubdomain } from '@/lib/nsiteSubdomain';
@@ -22,10 +23,12 @@ interface UseNsiteWindowResult {
  * Tenna's over it — which is what a site opened from the home screen has
  * always got, and there was never a good reason for the two to differ.
  *
- * The manifest and the tile go with it. The window may be started cold, from
- * nothing but its intent, so what it needs to serve the site has to be on disk
- * before it opens; the tile is redrawn here for the same reason it is for the
- * launcher, so that the recents card is the site rather than Tenna again.
+ * The manifest, the tile and the site's monochrome mark all go with it. The
+ * window may be started cold, from nothing but its intent, so what it needs to
+ * serve the site has to be on disk before it opens; the tile is redrawn here
+ * for the same reason it is for the launcher, so that the recents card is the
+ * site rather than Tenna again, and the mark for the same reason again, so
+ * that its notifications are its own.
  */
 export function useNsiteWindow(
   event: NostrEvent,
@@ -37,12 +40,19 @@ export function useNsiteWindow(
   const open = useCallback((channel?: number) => {
     void (async () => {
       try {
-        const icon = await renderAppIconPng(name, app);
+        const [icon, badge] = await Promise.all([
+          renderAppIconPng(name, app),
+          renderAppBadgePng(app),
+        ]);
         await NsiteShortcuts.open({
           siteId: getNsiteSubdomain(event),
           label: name,
           event: JSON.stringify(event),
           icon: icon ?? undefined,
+          // The wall is also the only place a site's monochrome mark is read,
+          // and a notification can arrive for this site with nothing of the
+          // wall's in memory — so it is written down while it is known.
+          badge: badge ?? undefined,
           channel,
           // The wall is the only place a site's manifest is read, so it is the
           // only place its share_target can be kept current. A window opened

@@ -4,10 +4,10 @@ import android.content.Context;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Canvas;
+import android.graphics.Color;
 import android.graphics.Paint;
 import android.graphics.PorterDuff;
-import android.graphics.PorterDuffXfermode;
-import android.graphics.Rect;
+import android.graphics.PorterDuffColorFilter;
 import android.net.Uri;
 import android.util.Base64;
 import android.util.Log;
@@ -25,8 +25,8 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 /**
- * Pictures for a notification: the icon beside it, a sender's face, the
- * photograph it expands into.
+ * Pictures for a notification: the icon beside it, the stencil in the status
+ * bar, the photograph it expands into.
  *
  * Three kinds of reference, in the order a site should reach for them:
  *
@@ -57,11 +57,30 @@ final class NappImages {
 
     private static final String TAG = "NappImages";
 
-    /** Faces are drawn small; anything larger is a waste of a binder. */
-    private static final int AVATAR_PX = 128;
-
     /** A big picture is drawn wide. Android's own ceiling is around this. */
     private static final int PICTURE_PX = 1024;
+
+    /** The status bar draws its icons at 24dp. */
+    private static final int STENCIL_DP = 24;
+
+    /**
+     * As decoded, at the size it was declared for.
+     *
+     * Left square. Android clips a large icon to its own shape in the shade,
+     * and a picture cropped round here would be cropped twice.
+     */
+    static final int SHAPE_PLAIN = 0;
+
+    /**
+     * Flattened to white over its own alpha, for the status bar.
+     *
+     * A small icon is a stencil: the shape is what carries, and the colour is
+     * the system's to choose. Painting the artwork white here rather than
+     * hoping the framework masks it is what Chrome does with a web
+     * notification's badge, and it is the only thing that looks right on every
+     * version — a full-colour bitmap in that slot comes out as a smudge.
+     */
+    static final int SHAPE_STENCIL = 1;
 
     /** A remote image bigger than this is not a notification icon. */
     private static final int MAX_BYTES = 2 * 1024 * 1024;
@@ -104,12 +123,12 @@ final class NappImages {
         @NonNull Context context,
         @NonNull String siteId,
         @Nullable String reference,
-        boolean round,
+        int shape,
         @Nullable OnLoaded onLoaded
     ) {
         if (reference == null) return null;
 
-        String key = key(siteId, reference, round);
+        String key = key(siteId, reference, shape);
         Bitmap hit;
         synchronized (CACHE) {
             hit = CACHE.get(key);
@@ -122,7 +141,7 @@ final class NappImages {
         WORKERS.execute(() -> {
             Bitmap bitmap = null;
             try {
-                bitmap = load(app, siteId, reference, round);
+                bitmap = load(app, siteId, reference, shape);
             } catch (RuntimeException e) {
                 Log.w(TAG, "Could not decode an image for " + siteId, e);
             } finally {
@@ -139,17 +158,17 @@ final class NappImages {
         return null;
     }
 
-    private static String key(String siteId, String reference, boolean round) {
+    private static String key(String siteId, String reference, int shape) {
         // Only a path is scoped to the site; two sites naming the same URL are
         // naming the same bytes.
         String scope = reference.startsWith("/") ? NsiteSites.key(siteId) : "";
-        return scope + "|" + (round ? "r" : "s") + "|" + reference;
+        return scope + "|" + shape + "|" + reference;
     }
 
     // -----------------------------------------------------------------------
 
     @Nullable
-    private static Bitmap load(Context context, String siteId, String reference, boolean round) {
+    private static Bitmap load(Context context, String siteId, String reference, int shape) {
         byte[] bytes;
 
         if (reference.startsWith("data:")) {
@@ -162,10 +181,44 @@ final class NappImages {
 
         if (bytes == null) return null;
 
-        Bitmap decoded = decode(bytes, round ? AVATAR_PX : PICTURE_PX);
+        Bitmap decoded = decode(bytes, target(context, shape));
         if (decoded == null) return null;
 
-        return round ? circle(decoded) : decoded;
+        return shape == SHAPE_STENCIL ? stencil(decoded) : decoded;
+    }
+
+    /** The longest edge a shape is worth decoding to. */
+    private static int target(Context context, int shape) {
+        return shape == SHAPE_STENCIL ? stencilPx(context) : PICTURE_PX;
+    }
+
+    static int stencilPx(@NonNull Context context) {
+        float density = context.getResources().getDisplayMetrics().density;
+        return Math.max(STENCIL_DP, Math.round(STENCIL_DP * density));
+    }
+
+    /**
+     * The artwork painted white, with its own alpha kept.
+     *
+     * Everything opaque becomes white and everything transparent stays
+     * transparent, so whatever the site drew arrives in the status bar as its
+     * silhouette. A badge that is already a white-on-transparent stencil — the
+     * shape the standard asks for — passes through unchanged.
+     */
+    @NonNull
+    static Bitmap stencil(@NonNull Bitmap source) {
+        Bitmap out = Bitmap.createBitmap(
+            source.getWidth(),
+            source.getHeight(),
+            Bitmap.Config.ARGB_8888
+        );
+
+        Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
+        paint.setColorFilter(new PorterDuffColorFilter(Color.WHITE, PorterDuff.Mode.SRC_ATOP));
+        new Canvas(out).drawBitmap(source, 0, 0, paint);
+
+        source.recycle();
+        return out;
     }
 
     /** The bytes of one of the site's own files, straight out of the blob cache. */
@@ -280,35 +333,6 @@ final class NappImages {
         );
         if (scaled != decoded) decoded.recycle();
         return scaled;
-    }
-
-    /**
-     * A square crop of the middle, cut to a circle.
-     *
-     * Android draws a large icon and a messaging face round on most launchers
-     * and square on some, so cutting it here is the only way to be sure a
-     * portrait doesn't arrive with somebody's shoulders squashed into a box.
-     */
-    @NonNull
-    private static Bitmap circle(@NonNull Bitmap source) {
-        int size = Math.min(source.getWidth(), source.getHeight());
-        Rect from = new Rect(
-            (source.getWidth() - size) / 2,
-            (source.getHeight() - size) / 2,
-            (source.getWidth() + size) / 2,
-            (source.getHeight() + size) / 2
-        );
-
-        Bitmap out = Bitmap.createBitmap(AVATAR_PX, AVATAR_PX, Bitmap.Config.ARGB_8888);
-        Canvas canvas = new Canvas(out);
-        Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
-
-        canvas.drawCircle(AVATAR_PX / 2f, AVATAR_PX / 2f, AVATAR_PX / 2f, paint);
-        paint.setXfermode(new PorterDuffXfermode(PorterDuff.Mode.SRC_IN));
-        canvas.drawBitmap(source, from, new Rect(0, 0, AVATAR_PX, AVATAR_PX), paint);
-
-        source.recycle();
-        return out;
     }
 
     @NonNull

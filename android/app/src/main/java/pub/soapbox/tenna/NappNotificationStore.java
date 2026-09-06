@@ -5,7 +5,6 @@ import android.content.Context;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 
-import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 
@@ -23,21 +22,16 @@ import java.util.Iterator;
 import java.util.List;
 
 /**
- * What a site's notifications currently say, for the two questions Android
- * asks that a web notification never has to answer.
- *
- * <b>What did the last one say?</b> A {@code MessagingStyle} notification is
- * rendered whole every time: to add a line to a conversation, Android wants
- * all of it back. A service worker is the wrong place to keep that — it is
- * started for one event and killed shortly after, so on the web the only way
- * to remember is to read the previous notification's own {@code data} back out
- * of {@code getNotifications()}, which is what Armada's worker does and what
- * {@code merge: "append"} exists to make unnecessary. The lines are kept here
- * instead.
+ * What a site's notifications currently say, for the questions the shade asks
+ * that a web notification never has to answer.
  *
  * <b>Where does a tap go?</b> A notification outlives the process that posted
  * it. The tap may arrive days later, cold, with nothing in memory, so the
- * route and the site's {@code data} are written down beside the lines.
+ * route and everything the site attached are written down.
+ *
+ * <b>What does the site have out?</b> {@code getNotifications()} is a real
+ * method and has to answer with the site's own live notifications, and the
+ * header their bundle sits under has to know when the last of them is gone.
  *
  * One file per site, replaced whole. These are small, there are at most
  * {@link #MAX_PER_SITE} of them, and they are read on the path to showing a
@@ -66,13 +60,6 @@ final class NappNotificationStore {
         @NonNull final String options;
         /** Where a tap goes, as a site-absolute path, or null for the front page. */
         @Nullable final String url;
-        /**
-         * The accumulated lines, for {@code merge: "append"}.
-         *
-         * Messages as objects, inbox rows as strings — whichever style the
-         * notification was posted in. Empty for a notification that replaces.
-         */
-        @NonNull final JSONArray lines;
         final long postedAt;
 
         Entry(
@@ -81,7 +68,6 @@ final class NappNotificationStore {
             @NonNull String title,
             @NonNull String options,
             @Nullable String url,
-            @NonNull JSONArray lines,
             long postedAt
         ) {
             this.key = key;
@@ -89,7 +75,6 @@ final class NappNotificationStore {
             this.title = title;
             this.options = options;
             this.url = url;
-            this.lines = lines;
             this.postedAt = postedAt;
         }
 
@@ -101,7 +86,6 @@ final class NappNotificationStore {
             json.put("title", title);
             json.put("options", options);
             if (url != null) json.put("url", url);
-            json.put("lines", lines);
             json.put("postedAt", postedAt);
             return json;
         }
@@ -115,14 +99,12 @@ final class NappNotificationStore {
             String options = json.optString("options", null);
             if (key == null || title == null || options == null) return null;
 
-            JSONArray lines = json.optJSONArray("lines");
             return new Entry(
                 key,
                 json.optString("tag", ""),
                 title,
                 options,
                 json.optString("url", null),
-                lines == null ? new JSONArray() : lines,
                 json.optLong("postedAt", 0)
             );
         }

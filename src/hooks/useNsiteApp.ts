@@ -27,6 +27,16 @@ export interface NsiteApp {
    * on nothing.
    */
   icons: IconCandidate[];
+  /**
+   * The icons the site declares `purpose: "monochrome"`, best first.
+   *
+   * A stencil rather than a picture — one flat shape meant to be tinted by
+   * whoever draws it. Android's status bar wants exactly that, so this is
+   * where a site's notifications get its mark instead of Tenna's; see
+   * `appBadgeBitmap.ts`. Kept apart from {@link NsiteApp.icons} because it is
+   * the one thing on this list that must never be drawn as artwork.
+   */
+  monochrome: IconCandidate[];
   /** What {@link resolveIcon} needs to fetch one of them. */
   source: IconSource;
 }
@@ -44,6 +54,7 @@ const NOTHING: NsiteApp = {
   background: null,
   shareTarget: null,
   icons: [],
+  monochrome: [],
   source: { files: new Map(), servers: [] },
 };
 
@@ -182,38 +193,55 @@ function collectFromDocument(doc: Document): IconCandidate[] {
   return candidates;
 }
 
-/** Icons named by a web app manifest, resolved relative to the manifest itself. */
-function collectFromWebManifest(json: unknown, base: string): IconCandidate[] {
-  if (typeof json !== 'object' || json === null) return [];
-  const { icons } = json as { icons?: unknown };
-  if (!Array.isArray(icons)) return [];
+/**
+ * Icons named by a web app manifest, resolved relative to the manifest itself.
+ *
+ * Two lists, because a manifest declares two different kinds of thing.
+ * `monochrome` is a silhouette drawn to be tinted by whatever shows it, which
+ * is useless as a tile and exactly right in a status bar.
+ */
+function collectFromWebManifest(
+  json: unknown,
+  base: string,
+): { icons: IconCandidate[]; monochrome: IconCandidate[] } {
+  const icons: IconCandidate[] = [];
+  const monochrome: IconCandidate[] = [];
 
-  const candidates: IconCandidate[] = [];
+  if (typeof json !== 'object' || json === null) return { icons, monochrome };
+  const { icons: declared } = json as { icons?: unknown };
+  if (!Array.isArray(declared)) return { icons, monochrome };
 
-  for (const icon of icons) {
+  for (const icon of declared) {
     if (typeof icon !== 'object' || icon === null) continue;
     const { src, sizes, purpose } = icon as Record<string, unknown>;
     if (typeof src !== 'string' || !src.trim()) continue;
 
-    // Monochrome icons are a stencil for the launcher to tint, not a picture.
     const purposes = typeof purpose === 'string' ? purpose.toLowerCase().split(/\s+/) : [];
-    if (purposes.length > 0 && purposes.every((p) => p === 'monochrome')) continue;
-
     const size = parseSizes(typeof sizes === 'string' ? sizes : null, src);
 
-    candidates.push({
+    if (purposes.includes('monochrome')) {
+      // Ranked by size alone: there is no better or worse silhouette, only a
+      // bigger or smaller one to rasterize from.
+      monochrome.push({ href: src.trim(), base, score: size, fit: 'contain', size, maskable: false });
+    }
+
+    // A site may declare one asset for several purposes. Only an icon that is
+    // *nothing but* a stencil is kept off the tile.
+    if (purposes.length > 0 && purposes.every((p) => p === 'monochrome')) continue;
+
+    icons.push({
       href: src.trim(),
       base,
       score: score(RANK.manifest, size),
       fit: 'cover',
       size,
-      // A site may declare one asset for several purposes; what matters is
-      // whether it was drawn to survive a mask, and saying so once is enough.
+      // What matters is whether it was drawn to survive a mask, and saying so
+      // once is enough.
       maskable: purposes.includes('maskable'),
     });
   }
 
-  return candidates;
+  return { icons, monochrome };
 }
 
 /**
@@ -342,6 +370,7 @@ export function useNsiteApp(event: NostrEvent, options?: { enabled?: boolean }) 
       const doc = new DOMParser().parseFromString(await indexRes.text(), 'text/html');
 
       const candidates = collectFromDocument(doc);
+      const monochrome: IconCandidate[] = [];
       const themeColor = pickThemeColor(doc);
       let background = themeColor;
       let webManifest: unknown = null;
@@ -359,7 +388,9 @@ export function useNsiteApp(event: NostrEvent, options?: { enabled?: boolean }) 
           const res = await fetchFromBlossom(manifestSha, servers);
           webManifest = await res.json();
           const base = manifestPath.replace(/[^/]*$/, '');
-          candidates.push(...collectFromWebManifest(webManifest, base));
+          const declared = collectFromWebManifest(webManifest, base);
+          candidates.push(...declared.icons);
+          monochrome.push(...declared.monochrome);
           // Resolved against the manifest rather than the document, which is
           // what the spec says of every URL a manifest contains.
           shareTarget = parseShareTarget(webManifest, base);
@@ -393,6 +424,7 @@ export function useNsiteApp(event: NostrEvent, options?: { enabled?: boolean }) 
       }
 
       candidates.sort((a, b) => b.score - a.score);
+      monochrome.sort((a, b) => b.score - a.score);
 
       const source: IconSource = { files, servers };
 
@@ -402,7 +434,16 @@ export function useNsiteApp(event: NostrEvent, options?: { enabled?: boolean }) 
 
         const glyph = await looksLikeGlyph(url);
         const fit: IconFit = glyph === null ? candidate.fit : glyph ? 'contain' : 'cover';
-        return { label, iconUrl: url, fit, background, shareTarget, icons: candidates, source };
+        return {
+          label,
+          iconUrl: url,
+          fit,
+          background,
+          shareTarget,
+          icons: candidates,
+          monochrome,
+          source,
+        };
       }
 
       return {
@@ -412,6 +453,7 @@ export function useNsiteApp(event: NostrEvent, options?: { enabled?: boolean }) 
         background,
         shareTarget,
         icons: candidates,
+        monochrome,
         source,
       };
     },

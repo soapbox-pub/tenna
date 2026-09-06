@@ -132,6 +132,7 @@ final class NsiteSites {
         @NonNull String label,
         @NonNull String event,
         @Nullable Bitmap icon,
+        @Nullable Bitmap badge,
         @Nullable String shareTarget
     ) throws IOException {
         File dir = directory(context);
@@ -165,6 +166,16 @@ final class NsiteSites {
                 icon.compress(Bitmap.CompressFormat.PNG, 100, out);
             }
         }
+
+        // The site's monochrome manifest icon, for the status bar. Written
+        // here for the same reason the tile is: a notification can arrive for
+        // a site with no window open and nothing of the wall's in memory, and
+        // the manifest it was picked out of is only ever read on the wall.
+        if (badge != null) {
+            try (OutputStream out = new FileOutputStream(new File(dir, key + ".badge.png"))) {
+                badge.compress(Bitmap.CompressFormat.PNG, 100, out);
+            }
+        }
     }
 
     /**
@@ -181,7 +192,7 @@ final class NsiteSites {
         @NonNull String event
     ) throws IOException {
         if (load(context, siteId) == null) return false;
-        save(context, siteId, label, event, null, null);
+        save(context, siteId, label, event, null, null, null);
         return true;
     }
 
@@ -234,8 +245,22 @@ final class NsiteSites {
         String next = shareTarget.isEmpty() ? null : shareTarget;
         if (current == null ? next == null : current.equals(next)) return false;
 
-        save(context, siteId, record.label, record.event, null, shareTarget);
+        save(context, siteId, record.label, record.event, null, null, shareTarget);
         return true;
+    }
+
+    /**
+     * The site's monochrome mark, as it was stored, or null if it has none.
+     *
+     * Raw artwork rather than a finished stencil: what the status bar wants
+     * depends on the density of the screen it is on, and the wall that drew
+     * this never asked. {@link NappBadges} sizes and paints it.
+     */
+    @Nullable
+    static Bitmap badge(Context context, @NonNull String siteId) {
+        File file = new File(directory(context), key(siteId) + ".badge.png");
+        if (!file.exists()) return null;
+        return BitmapFactory.decodeFile(file.getAbsolutePath());
     }
 
     @Nullable
@@ -275,6 +300,8 @@ final class NsiteSites {
         new File(dir, key + ".json").delete();
         //noinspection ResultOfMethodCallIgnored
         new File(dir, key + ".png").delete();
+        //noinspection ResultOfMethodCallIgnored
+        new File(dir, key + ".badge.png").delete();
         NsiteFileServers.invalidate(siteId);
     }
 

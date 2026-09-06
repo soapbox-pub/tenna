@@ -6,6 +6,7 @@ import { WhiteNoise } from '@/components/WhiteNoise';
 import { useNsiteOpenPath, useNsiteRefresh, type NsiteLaunch } from '@/hooks/useNsiteLaunch';
 import { useNsiteShareDelivery, useShareToken } from '@/hooks/useNsiteShare';
 import { NsiteShortcuts } from '@/lib/nsiteShortcutsPlugin';
+import { getNsiteName } from '@/lib/nsiteSubdomain';
 
 interface NsiteAppProps {
   launch: NsiteLaunch;
@@ -57,7 +58,7 @@ export function NsiteApp({ launch }: NsiteAppProps) {
   // where it goes would be worse than the wait it saves.
   const tuning = share.status === 'pending' && shareToken === launch.shareToken;
 
-  const name = event?.tags.find(([n]) => n === 'd')?.[1] ?? launch.label;
+  const name = (event && getNsiteName(event)) ?? launch.label;
 
   useSeoMeta({ title: name });
 
@@ -73,7 +74,7 @@ export function NsiteApp({ launch }: NsiteAppProps) {
         <WhiteNoise className="h-full w-full" />
         <div className="crt-scanlines absolute inset-0 opacity-40" />
         <div className="crt-rollbar absolute inset-0" />
-        <span className="crt-osd absolute bottom-safe-offset-8 left-1/2 -translate-x-1/2 font-crt text-3xl uppercase tracking-widest text-[#7CFC9B]">
+        <span className="crt-osd absolute bottom-safe-offset-8 left-1/2 max-w-[80vw] -translate-x-1/2 truncate font-crt text-3xl uppercase tracking-widest text-[#7CFC9B]">
           {name}
         </span>
       </div>

@@ -15,6 +15,7 @@ import { useNsitePin } from '@/hooks/useNsitePin';
 import { useNsiteWindow } from '@/hooks/useNsiteWindow';
 import { impactMedium } from '@/lib/haptics';
 import { getTileGradient, getTileInitial } from '@/lib/iconTile';
+import { getNsiteName } from '@/lib/nsiteSubdomain';
 import { cn } from '@/lib/utils';
 
 /**
@@ -155,8 +156,8 @@ export function AddAppTile({ onSelect }: { onSelect: () => void }) {
 export function AppIcon({ event, channel, onSelect, onRemove }: AppIconProps) {
   const { data: app, isPending } = useNsiteApp(event);
 
-  // The nsite's own name until the site says what it calls itself.
-  const name = app?.label ?? event.tags.find(([n]) => n === 'd')?.[1] ?? '???';
+  // The manifest's name for the site until the site itself says what it goes by.
+  const name = app?.label ?? getNsiteName(event) ?? '???';
 
   const pinning = useNsitePin(event, name, app);
   const ownWindow = useNsiteWindow(event, name, app);

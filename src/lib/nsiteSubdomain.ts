@@ -127,6 +127,37 @@ export function getNsiteSubdomain(event: NostrEvent): string {
   return nip19.npubEncode(event.pubkey);
 }
 
+/**
+ * The longest name that still fits everywhere one is drawn — under a tile, in
+ * the bar over a site, across the tuning display.
+ */
+const NSITE_NAME_LIMIT = 48;
+
+/**
+ * What the manifest calls the site: its `title` tag, or failing that the `d`
+ * tag it is addressed by.
+ *
+ * NIP-5A's optional `title` is the author saying what the site is named, in
+ * characters the `d` tag doesn't have. That one is a DNS label — lowercase,
+ * hyphens, thirteen characters at the outside — so `my-blog` is the most it
+ * can ever say, and a root site has no `d` tag at all to say it with.
+ *
+ * This is not the served document's `<title>`, which is deliberately not
+ * consulted anywhere (see `pickLabel` in `useNsiteApp`). That one is written
+ * for a tab strip; this one is a tag whose whole purpose is the name.
+ *
+ * Whitespace is collapsed and an overlong title refused, since a manifest can
+ * put anything in the tag and every caller draws it somewhere with a fixed
+ * amount of room. Returns null when the event offers neither, leaving the
+ * fallback to the caller — only it knows what to call a site it can't name.
+ */
+export function getNsiteName(event: NostrEvent): string | null {
+  const title = event.tags.find(([n]) => n === 'title')?.[1]?.replace(/\s+/g, ' ').trim();
+  if (title && title.length <= NSITE_NAME_LIMIT) return title;
+
+  return event.tags.find(([n]) => n === 'd')?.[1] || null;
+}
+
 /** An addressable/replaceable pointer to the site a snapshot was taken from. */
 export interface NsiteParentAddr {
   kind: number;

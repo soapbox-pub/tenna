@@ -9,7 +9,7 @@ import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useNsiteApp } from '@/hooks/useNsiteApp';
 import { useNsiteSignerRpc } from '@/hooks/useNsiteSignerRpc';
 import type { NsiteShareDelivery } from '@/lib/nsiteShareTarget';
-import { getNsiteSubdomain } from '@/lib/nsiteSubdomain';
+import { getNsiteName, getNsiteSubdomain } from '@/lib/nsiteSubdomain';
 import { cn } from '@/lib/utils';
 
 interface NsiteViewerProps {
@@ -76,7 +76,7 @@ export function NsiteViewer({
   const [loaded, setLoaded] = useState(false);
   const [noiseGone, setNoiseGone] = useState(false);
 
-  const name = event.tags.find(([n]) => n === 'd')?.[1] ?? 'nsite';
+  const name = getNsiteName(event) ?? 'nsite';
   const siteId = useMemo(() => getNsiteSubdomain(event), [event]);
 
   const signerRpc = useNsiteSignerRpc({ siteId, siteName: name });
@@ -179,7 +179,9 @@ export function NsiteViewer({
                   CH {ch}
                 </span>
               )}
-              <span className="crt-osd absolute bottom-safe-offset-8 left-1/2 -translate-x-1/2 font-crt text-3xl uppercase tracking-widest text-[#7CFC9B]">
+              {/* A `d` tag could never be longer than the screen; a `title`
+                  tag can, so the name is cut rather than run off both edges. */}
+              <span className="crt-osd absolute bottom-safe-offset-8 left-1/2 max-w-[80vw] -translate-x-1/2 truncate font-crt text-3xl uppercase tracking-widest text-[#7CFC9B]">
                 {name}
               </span>
             </div>

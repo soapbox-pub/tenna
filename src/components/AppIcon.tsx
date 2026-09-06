@@ -1,7 +1,8 @@
 import type { NostrEvent } from '@nostrify/nostrify';
-import { Check, Plus, SquarePlus, Trash2 } from 'lucide-react';
-import { useCallback, useRef, type ReactNode } from 'react';
+import { Check, Plus, SlidersHorizontal, SquarePlus, Trash2 } from 'lucide-react';
+import { useCallback, useRef, useState, type ReactNode } from 'react';
 
+import { NsiteAppSettings } from '@/components/NsiteAppSettings';
 import {
   ContextMenu,
   ContextMenuContent,
@@ -136,6 +137,8 @@ export function AppIcon({ event, channel, onSelect, onRemove }: AppIconProps) {
   const pinning = useNsitePin(event, name, app);
   const ownWindow = useNsiteWindow(event, name, app);
 
+  const [settingsOpen, setSettingsOpen] = useState(false);
+
   // A long press is a press. The menu opens on pointerdown and the pointerup
   // that follows still lands on the tile, so without this the site would tune
   // in behind the menu that was opened to avoid tuning it in. Held until just
@@ -206,29 +209,41 @@ export function AppIcon({ event, channel, onSelect, onRemove }: AppIconProps) {
     </button>
   );
 
-  // No menu where there is nothing to put in it. A site off the curator's
-  // lineup on a platform without launcher shortcuts can neither be pinned nor
-  // removed, and a long press on its tile should do what it has always done,
-  // which is nothing.
-  if (!pinning.available && !onRemove) return tile;
-
+  // Every tile has a menu, because every app has settings — a site the user
+  // can neither pin nor take off the wall has still been granted things, and
+  // this is the only place to see what.
   return (
-    <ContextMenu onOpenChange={handleOpenChange}>
-      <ContextMenuTrigger asChild>{tile}</ContextMenuTrigger>
-      <ContextMenuContent className="w-56">
-        {pinning.available && (
-          <ContextMenuItem onSelect={pinning.pin} disabled={pinning.pinned}>
-            {pinning.pinned ? <Check /> : <SquarePlus />}
-            {pinning.pinned ? 'On your home screen' : 'Add to home screen'}
+    <>
+      <ContextMenu onOpenChange={handleOpenChange}>
+        <ContextMenuTrigger asChild>{tile}</ContextMenuTrigger>
+        <ContextMenuContent className="w-56">
+          <ContextMenuItem onSelect={() => setSettingsOpen(true)}>
+            <SlidersHorizontal />
+            App settings
           </ContextMenuItem>
-        )}
-        {onRemove && (
-          <ContextMenuItem onSelect={onRemove} variant="destructive">
-            <Trash2 />
-            Remove from Tenna
-          </ContextMenuItem>
-        )}
-      </ContextMenuContent>
-    </ContextMenu>
+          {pinning.available && (
+            <ContextMenuItem onSelect={pinning.pin} disabled={pinning.pinned}>
+              {pinning.pinned ? <Check /> : <SquarePlus />}
+              {pinning.pinned ? 'On your home screen' : 'Add to home screen'}
+            </ContextMenuItem>
+          )}
+          {onRemove && (
+            <ContextMenuItem onSelect={onRemove} variant="destructive">
+              <Trash2 />
+              Remove from Tenna
+            </ContextMenuItem>
+          )}
+        </ContextMenuContent>
+      </ContextMenu>
+
+      {/* Outside the menu, which is gone by the time this opens. */}
+      <NsiteAppSettings
+        event={event}
+        name={name}
+        app={app}
+        open={settingsOpen}
+        onOpenChange={setSettingsOpen}
+      />
+    </>
   );
 }

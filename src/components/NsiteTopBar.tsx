@@ -1,5 +1,4 @@
 import { ChevronLeft } from 'lucide-react';
-import type { ReactNode } from 'react';
 
 import type { NsiteApp } from '@/hooks/useNsiteApp';
 import { getTileGradient, getTileInitial } from '@/lib/iconTile';
@@ -12,8 +11,6 @@ interface NsiteTopBarProps {
   app?: NsiteApp;
   /** Leave the site. */
   onBack: () => void;
-  /** The trailing slot — the permissions shield, when there is a signer. */
-  children?: ReactNode;
 }
 
 /**
@@ -26,7 +23,7 @@ interface NsiteTopBarProps {
  * It also stands in for the status bar inset. The bar is what runs under the
  * clock, so the site below it starts inside the safe area with nothing to pad.
  */
-export function NsiteTopBar({ title, app, onBack, children }: NsiteTopBarProps) {
+export function NsiteTopBar({ title, app, onBack }: NsiteTopBarProps) {
   return (
     <div className="shrink-0 border-b border-white/10 bg-black px-safe pt-safe">
       <div className="flex h-12 items-center gap-1 px-1">
@@ -67,7 +64,9 @@ export function NsiteTopBar({ title, app, onBack, children }: NsiteTopBarProps) 
           <span className="truncate text-sm font-medium text-white">{title}</span>
         </div>
 
-        <div className="flex size-10 shrink-0 items-center justify-center">{children}</div>
+        {/* Empty, and the same size as the way out, so that the identity is
+            centred on the bar rather than on what is left of it. */}
+        <div aria-hidden="true" className="size-10 shrink-0" />
       </div>
     </div>
   );

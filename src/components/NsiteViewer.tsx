@@ -2,7 +2,6 @@ import type { NostrEvent } from '@nostrify/nostrify';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { Nsite } from '@/components/Nsite';
-import { NsitePermissionManager } from '@/components/NsitePermissionManager';
 import { NsitePermissionPrompt } from '@/components/NsitePermissionPrompt';
 import { NsiteTopBar } from '@/components/NsiteTopBar';
 import { WhiteNoise } from '@/components/WhiteNoise';
@@ -77,13 +76,6 @@ export function NsiteViewer({
   const [loaded, setLoaded] = useState(false);
   const [noiseGone, setNoiseGone] = useState(false);
 
-  // The permissions panel, and whether it was opened from a frame's own
-  // controls rather than from the trigger here. Only in that case is the
-  // frame painting over the viewer, and only then does it have to be
-  // concealed for the panel to be visible at all.
-  const [permissionsOpen, setPermissionsOpen] = useState(false);
-  const [permissionsOverFrame, setPermissionsOverFrame] = useState(false);
-
   const name = event.tags.find(([n]) => n === 'd')?.[1] ?? 'nsite';
   const siteId = useMemo(() => getNsiteSubdomain(event), [event]);
 
@@ -105,16 +97,6 @@ export function NsiteViewer({
     if (shutoff) setClosing(true);
     else onClose();
   }, [shutoff, onClose]);
-
-  const handleRequestPermissions = useCallback(() => {
-    setPermissionsOverFrame(true);
-    setPermissionsOpen(true);
-  }, []);
-
-  const handlePermissionsOpenChange = useCallback((open: boolean) => {
-    setPermissionsOpen(open);
-    if (!open) setPermissionsOverFrame(false);
-  }, []);
 
   // The document is on its way; give the site a beat to paint before lifting
   // the static.
@@ -141,14 +123,6 @@ export function NsiteViewer({
   // A pinned site is not on the wall, so it has no number to tune to.
   const ch = channel === undefined ? null : String(channel).padStart(2, '0');
 
-  const permissions = user ? (
-    <NsitePermissionManager
-      siteId={siteId}
-      open={permissionsOpen}
-      onOpenChange={handlePermissionsOpenChange}
-    />
-  ) : null;
-
   return (
     <div className="fixed inset-0 z-50 bg-black">
       <div
@@ -160,11 +134,7 @@ export function NsiteViewer({
           if (closing && e.target === e.currentTarget) onClose();
         }}
       >
-        {topBar && (
-          <NsiteTopBar title={topBar.title} app={app} onBack={handleClose}>
-            {permissions}
-          </NsiteTopBar>
-        )}
+        {topBar && <NsiteTopBar title={topBar.title} app={app} onBack={handleClose} />}
 
         {/* The picture: everything below the bar, and everything there is
             without one. */}
@@ -176,11 +146,10 @@ export function NsiteViewer({
             onRpc={user ? signerRpc.onRpc : undefined}
             onLoad={handleLoad}
             // A frame that owns its own pixels has to get out of the way of
-            // anything the viewer draws over it, panels included.
-            concealed={!!signerRpc.pendingPrompt || permissionsOverFrame}
+            // the prompt, which the viewer draws over it.
+            concealed={!!signerRpc.pendingPrompt}
             closing={closing}
             onRequestClose={handleClose}
-            onRequestPermissions={handleRequestPermissions}
             topBar={topBar}
             share={share}
             openPath={openPath}
@@ -225,16 +194,6 @@ export function NsiteViewer({
           />
         )}
       </div>
-
-      {/* A pinned site has no bar to hang the shield off, but a site with a
-          signer still needs somewhere to show what it has been granted. So it
-          keeps the floating pill, clear of the status bar — which would
-          otherwise both hide it and swallow taps meant for it. */}
-      {standalone && !closing && permissions && (
-        <div className="absolute right-safe-offset-3 top-safe-offset-3 z-10 flex items-center rounded-full border border-white/10 bg-black/60 p-1 backdrop-blur-sm">
-          {permissions}
-        </div>
-      )}
     </div>
   );
 }

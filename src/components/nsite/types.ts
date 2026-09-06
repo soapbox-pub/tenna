@@ -58,13 +58,6 @@ export interface NsiteFrameProps {
    */
   onRequestClose?: () => void;
   /**
-   * Ask the viewer to open the permissions panel.
-   *
-   * Only raised by an implementation whose pixels cover the viewer's own
-   * controls, and so has to provide its own. The panel itself stays in React.
-   */
-  onRequestPermissions?: () => void;
-  /**
    * The navigation bar above the site, or omitted when there is none.
    *
    * What follows from a bar being there is the safe area: the bar covers the

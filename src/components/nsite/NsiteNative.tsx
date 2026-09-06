@@ -31,7 +31,6 @@ export function NsiteNative({
   concealed,
   closing,
   onRequestClose,
-  onRequestPermissions,
   share,
   openPath,
 }: NsiteFrameProps) {
@@ -40,7 +39,6 @@ export function NsiteNative({
   const onRpcRef = useRef(onRpc);
   const onLoadRef = useRef(onLoad);
   const onCloseRef = useRef(onRequestClose);
-  const onPermissionsRef = useRef(onRequestPermissions);
   // A notification's path is the same thing to the native side as a GET
   // share: the URL the site opens on. Only the reason for it differs.
   //
@@ -59,7 +57,6 @@ export function NsiteNative({
   useEffect(() => { onRpcRef.current = onRpc; }, [onRpc]);
   useEffect(() => { onLoadRef.current = onLoad; }, [onLoad]);
   useEffect(() => { onCloseRef.current = onRequestClose; }, [onRequestClose]);
-  useEffect(() => { onPermissionsRef.current = onRequestPermissions; }, [onRequestPermissions]);
   useEffect(() => { shareRef.current = entry; }, [entry]);
 
   useEffect(() => {
@@ -84,9 +81,6 @@ export function NsiteNative({
       listeners.push(
         await NsiteWebView.addListener('nsiteLoad', () => onLoadRef.current?.()),
         await NsiteWebView.addListener('nsiteRpc', (e) => { void handleRpc(e); }),
-        // The site's WebView covers the viewer's own chrome, so the plugin
-        // draws the shield natively over it and reports presses back here.
-        await NsiteWebView.addListener('nsitePermissions', () => onPermissionsRef.current?.()),
       );
 
       // A late unmount would otherwise leave a WebView with no owner.

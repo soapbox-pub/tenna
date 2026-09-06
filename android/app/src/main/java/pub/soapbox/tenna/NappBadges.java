@@ -45,21 +45,23 @@ final class NappBadges {
      * The small icon for one of a site's notifications, or null to use
      * Tenna's.
      *
-     * Never waits. A badge still being fetched returns whatever is further
-     * down the chain, and {@code again} fires when it lands so the
-     * notification can be posted a second time wearing it — the same bargain
-     * every other picture makes here.
+     * Waits no longer than the notification's own deadline. A badge that
+     * misses it falls to whatever is further down the chain, and {@code again}
+     * fires when it lands so the notification can be posted a second time
+     * wearing it — the status bar, unlike a conversation's faces, does pick
+     * one up late.
      */
     @Nullable
     static IconCompat icon(
         @NonNull Context context,
         @NonNull String siteId,
         @Nullable String reference,
+        long deadline,
         @Nullable NappImages.OnLoaded again
     ) {
         if (reference != null) {
-            Bitmap badge = NappImages.cached(
-                context, siteId, reference, NappImages.SHAPE_STENCIL, again
+            Bitmap badge = NappImages.awaited(
+                context, siteId, reference, NappImages.SHAPE_STENCIL, deadline, again
             );
             if (badge != null) return IconCompat.createWithBitmap(badge);
         }

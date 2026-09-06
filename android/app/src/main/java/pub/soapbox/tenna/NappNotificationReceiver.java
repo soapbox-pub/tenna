@@ -32,6 +32,10 @@ public class NappNotificationReceiver extends BroadcastReceiver {
     static final String ACTION_ACTION = "pub.soapbox.tenna.napp.NOTIFICATION_ACTION";
     static final String ACTION_DISMISSED = "pub.soapbox.tenna.napp.NOTIFICATION_DISMISSED";
 
+    /** A site's whole conversation swiped away, and every notification in it. */
+    static final String ACTION_CONVERSATION_DISMISSED =
+        "pub.soapbox.tenna.napp.CONVERSATION_DISMISSED";
+
     static final String EXTRA_SITE_ID = "pub.soapbox.tenna.napp.SITE_ID";
     static final String EXTRA_KEY = "pub.soapbox.tenna.napp.KEY";
     static final String EXTRA_ACTION = "pub.soapbox.tenna.napp.ACTION";
@@ -44,8 +48,25 @@ public class NappNotificationReceiver extends BroadcastReceiver {
         if (intent == null) return;
 
         String siteId = intent.getStringExtra(EXTRA_SITE_ID);
+        if (siteId == null) return;
+
+        if (ACTION_CONVERSATION_DISMISSED.equals(intent.getAction())) {
+            // One swipe, several notifications: the row is a site's
+            // conversation and every line of it has just been taken down.
+            // Dispatched before they are forgotten: each event carries the
+            // notification the site is being told about, read out of the same
+            // record that is about to be deleted.
+            for (String dismissed : NappNotifications.conversationKeys(context, siteId)) {
+                NappPushService.dispatchNotificationEvent(
+                    context, siteId, "notificationclose", dismissed, null, null
+                );
+            }
+            NappNotifications.forgetConversation(context, siteId);
+            return;
+        }
+
         String key = intent.getStringExtra(EXTRA_KEY);
-        if (siteId == null || key == null) return;
+        if (key == null) return;
 
         if (ACTION_DISMISSED.equals(intent.getAction())) {
             // Dispatched before it is forgotten: the event carries the

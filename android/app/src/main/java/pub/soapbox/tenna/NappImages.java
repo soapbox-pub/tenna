@@ -49,11 +49,12 @@ import java.util.concurrent.Executors;
  *       64 KiB the notification's words come from.
  * </ul>
  *
- * Nothing here blocks a notification. {@link #cached} is what the builder
- * calls on the way to posting; a miss returns null and starts the work, and
- * the notification is posted again, silently, when the picture lands. That
- * ordering is the whole trick — a face is worth having, and never worth
- * waiting for.
+ * Nothing here waits long. {@link #awaited} gives a notification on its way
+ * out a short, shared deadline to collect its pictures, because Android's
+ * conversation layout binds a face when it first draws the message and never
+ * goes back for it. Whatever misses the deadline is posted without and
+ * arrives on the silent repost {@link #cached} arranges, which is still the
+ * right bargain for the pictures the shade <i>will</i> pick up late.
  */
 final class NappImages {
 
@@ -66,7 +67,7 @@ final class NappImages {
     private static final int STENCIL_DP = 24;
 
     /** Faces are drawn small; anything larger is a waste of a binder. */
-    private static final int AVATAR_PX = 256;
+    private static final int AVATAR_PX = 128;
 
     /**
      * As decoded, at the size it was declared for.
@@ -118,6 +119,9 @@ final class NappImages {
     private static final java.util.Set<String> IN_FLIGHT =
         java.util.Collections.synchronizedSet(new java.util.HashSet<>());
 
+    /** Signalled whenever a fetch finishes, however it finished. See {@link #awaited}. */
+    private static final Object FINISHED = new Object();
+
     interface OnLoaded {
         void onLoaded();
     }
@@ -157,20 +161,75 @@ final class NappImages {
             Bitmap bitmap = null;
             try {
                 bitmap = load(app, siteId, reference, shape);
+                // Cached before the flag comes down, so a caller woken by it
+                // finds the picture rather than a race.
+                if (bitmap != null) {
+                    synchronized (CACHE) {
+                        CACHE.put(key, bitmap);
+                    }
+                }
             } catch (RuntimeException e) {
                 Log.w(TAG, "Could not decode an image for " + siteId, e);
             } finally {
                 IN_FLIGHT.remove(key);
+                synchronized (FINISHED) {
+                    FINISHED.notifyAll();
+                }
             }
 
-            if (bitmap == null) return;
-            synchronized (CACHE) {
-                CACHE.put(key, bitmap);
-            }
-            if (onLoaded != null) onLoaded.onLoaded();
+            if (bitmap != null && onLoaded != null) onLoaded.onLoaded();
         });
 
         return null;
+    }
+
+    /**
+     * The picture for a reference, waited for until {@code deadline}.
+     *
+     * A face has to be on the notification the <i>first</i> time it is posted.
+     * Android's conversation layout binds a message's avatar when it first
+     * draws that message and does not go back for it, so a picture that lands
+     * a second later is a picture the user never sees, however many times the
+     * notification is posted again. That is the whole reason this exists: the
+     * repost is still worth having for everything else, but it cannot be what
+     * a face depends on.
+     *
+     * The deadline is shared across every picture on one notification, so a
+     * message from four strangers waits once rather than four times, and it is
+     * a deadline rather than a timeout so a notification cannot be held up
+     * indefinitely by a slow host. Passing a deadline already in the past is
+     * exactly {@link #cached} — which is what a repost passes, since waiting
+     * on the thread that resolves pictures would be waiting on itself.
+     */
+    @Nullable
+    static Bitmap awaited(
+        @NonNull Context context,
+        @NonNull String siteId,
+        @Nullable String reference,
+        int shape,
+        long deadline,
+        @Nullable OnLoaded onLoaded
+    ) {
+        Bitmap hit = cached(context, siteId, reference, shape, onLoaded);
+        if (hit != null || reference == null) return hit;
+
+        String key = key(siteId, reference, shape);
+        synchronized (FINISHED) {
+            while (IN_FLIGHT.contains(key)) {
+                long left = deadline - System.currentTimeMillis();
+                if (left <= 0) break;
+                try {
+                    FINISHED.wait(left);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    break;
+                }
+            }
+        }
+
+        synchronized (CACHE) {
+            return CACHE.get(key);
+        }
     }
 
     private static String key(String siteId, String reference, int shape) {

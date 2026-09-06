@@ -44,6 +44,14 @@ interface NsiteViewerProps {
    * different first URL.
    */
   share?: NsiteShareDelivery;
+  /**
+   * A path inside the site to open at, from a notification the user tapped.
+   *
+   * Passed straight through, like `share`, and for the same reason: where the
+   * site opens is the frame's business, and the tune-in plays the same either
+   * way.
+   */
+  openPath?: string;
   /** Called after the shutoff animation completes, or at once without one. */
   onClose: () => void;
 }
@@ -61,6 +69,7 @@ export function NsiteViewer({
   standalone,
   shutoff = true,
   share,
+  openPath,
   onClose,
 }: NsiteViewerProps) {
   const { user } = useCurrentUser();
@@ -174,6 +183,7 @@ export function NsiteViewer({
             onRequestPermissions={handleRequestPermissions}
             topBar={topBar}
             share={share}
+            openPath={openPath}
             className="absolute inset-0"
           />
 

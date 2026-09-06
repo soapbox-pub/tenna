@@ -1,12 +1,13 @@
 import { App } from '@capacitor/app';
 import type { PluginListenerHandle } from '@capacitor/core';
-import { useEffect, useRef } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 
 import type { NsiteFrameProps } from '@/components/nsite/types';
 import { supportsNappPush } from '@/lib/nappPushPlugin';
 import { buildManifest, resolveServers } from '@/lib/nsiteFiles';
 import { NsiteWebView, type NsiteRpcEvent } from '@/lib/nsiteNativePlugin';
 import { getNsiteNostrProviderScript } from '@/lib/nsiteNostrProvider';
+import type { NsiteShareDelivery } from '@/lib/nsiteShareTarget';
 import { getNsiteSubdomain } from '@/lib/nsiteSubdomain';
 
 /**
@@ -32,6 +33,7 @@ export function NsiteNative({
   onRequestClose,
   onRequestPermissions,
   share,
+  openPath,
 }: NsiteFrameProps) {
   // Kept in refs so the open/close effect depends on the site alone. A
   // re-render must never tear down a loaded site and start it over.
@@ -39,15 +41,26 @@ export function NsiteNative({
   const onLoadRef = useRef(onLoad);
   const onCloseRef = useRef(onRequestClose);
   const onPermissionsRef = useRef(onRequestPermissions);
-  const shareRef = useRef(share);
-  // The share the WebView was opened on, so that a later one is told apart
+  // A notification's path is the same thing to the native side as a GET
+  // share: the URL the site opens on. Only the reason for it differs.
+  //
+  // Memoised because identity is what tells "another one arrived" from "the
+  // component re-rendered", and a fresh object every render would reload the
+  // site under whoever was using it.
+  const entry = useMemo<NsiteShareDelivery | undefined>(
+    () => share ?? (openPath ? { kind: 'get', path: openPath } : undefined),
+    [share, openPath],
+  );
+
+  const shareRef = useRef(entry);
+  // The entry the WebView was opened on, so that a later one is told apart
   // from the one already delivered.
-  const openedShare = useRef(share);
+  const openedShare = useRef(entry);
   useEffect(() => { onRpcRef.current = onRpc; }, [onRpc]);
   useEffect(() => { onLoadRef.current = onLoad; }, [onLoad]);
   useEffect(() => { onCloseRef.current = onRequestClose; }, [onRequestClose]);
   useEffect(() => { onPermissionsRef.current = onRequestPermissions; }, [onRequestPermissions]);
-  useEffect(() => { shareRef.current = share; }, [share]);
+  useEffect(() => { shareRef.current = entry; }, [entry]);
 
   useEffect(() => {
     let disposed = false;
@@ -107,17 +120,17 @@ export function NsiteNative({
     };
   }, [event, pubkey]);
 
-  // A share that turns up after the site is loaded. The window never closed,
-  // so there is nothing to reopen — the site is simply pointed at it, the way
-  // any other navigation would be.
+  // A share, or a notification's path, turning up after the site is loaded.
+  // The window never closed, so there is nothing to reopen — the site is
+  // simply pointed at it, the way any other navigation would be.
   useEffect(() => {
-    if (!share || share === openedShare.current) return;
-    openedShare.current = share;
+    if (!entry || entry === openedShare.current) return;
+    openedShare.current = entry;
 
-    void NsiteWebView.navigate({ siteId: getNsiteSubdomain(event), share }).catch((err) => {
-      console.error('[NsiteNative] failed to deliver a share:', err);
+    void NsiteWebView.navigate({ siteId: getNsiteSubdomain(event), share: entry }).catch((err) => {
+      console.error('[NsiteNative] failed to deliver an entry point:', err);
     });
-  }, [share, event]);
+  }, [entry, event]);
 
   useEffect(() => {
     void NsiteWebView.setConcealed({ concealed: !!concealed });

@@ -3,7 +3,7 @@ import { useCallback, useState } from 'react';
 
 import { NsiteViewer } from '@/components/NsiteViewer';
 import { WhiteNoise } from '@/components/WhiteNoise';
-import { useNsiteRefresh, type NsiteLaunch } from '@/hooks/useNsiteLaunch';
+import { useNsiteOpenPath, useNsiteRefresh, type NsiteLaunch } from '@/hooks/useNsiteLaunch';
 import { useNsiteShareDelivery, useShareToken } from '@/hooks/useNsiteShare';
 import { NsiteShortcuts } from '@/lib/nsiteShortcutsPlugin';
 
@@ -47,6 +47,11 @@ export function NsiteApp({ launch }: NsiteAppProps) {
   const shareToken = useShareToken(launch.shareToken);
   const share = useNsiteShareDelivery({ ...launch, shareToken });
 
+  // A window opened by a notification opens where the notification pointed.
+  // Nothing has to be resolved for it — the path was settled when the
+  // notification was posted — so unlike a share it never holds the tune-in up.
+  const openPath = useNsiteOpenPath(launch.path);
+
   // Only the share the window opened with can hold up the tune-in. A later one
   // arrives at a site already on screen, and taking that back down to work out
   // where it goes would be worse than the wait it saves.
@@ -82,6 +87,7 @@ export function NsiteApp({ launch }: NsiteAppProps) {
       standalone
       shutoff={launch.fromWall}
       share={share.status === 'ready' ? share.delivery ?? undefined : undefined}
+      openPath={openPath}
       onClose={handleClose}
     />
   );

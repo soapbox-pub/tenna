@@ -84,6 +84,17 @@ export interface NsiteFrameProps {
    * comes up as normal, which is what happens on every other platform anyway.
    */
   share?: NsiteShareDelivery;
+  /**
+   * Open the site at this path rather than on its front page.
+   *
+   * Site-absolute, and only ever set on Android: it is where a notification
+   * the user tapped said to go. A path arriving after the site is loaded is a
+   * navigation, not a reload — the window never closed, and taking it down to
+   * land on a different URL of the same site would throw away everything it
+   * had. Takes second place to {@link NsiteFrameProps.share}, since a window
+   * opened to receive a share was opened for that.
+   */
+  openPath?: string;
   /** Applied to the frame's outermost element. */
   className?: string;
 }

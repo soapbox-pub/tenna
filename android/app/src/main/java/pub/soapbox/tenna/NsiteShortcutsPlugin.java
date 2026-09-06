@@ -361,6 +361,10 @@ public class NsiteShortcutsPlugin extends Plugin {
         String shareToken = intent.getStringExtra(NsiteAppActivity.EXTRA_SHARE_TOKEN);
         if (shareToken != null) result.put("shareToken", shareToken);
 
+        // Where inside the site to open, when a notification named a place.
+        String path = intent.getStringExtra(NsiteAppActivity.EXTRA_PATH);
+        if (path != null) result.put("path", path);
+
         NsiteSites.Record record = NsiteSites.load(getContext(), siteId);
         if (record != null) {
             // JSON text, for the same reason the signer's params are: a
@@ -493,11 +497,13 @@ public class NsiteShortcutsPlugin extends Plugin {
             && !NappSubscriptions.has(getContext(), siteId)) {
             NsiteSites.forget(getContext(), siteId);
             // A site with no record cannot be served, so it must not go on
-            // being offered a share it would have nowhere to put.
+            // being offered a share it would have nowhere to put, nor leave a
+            // notification in the shade whose tap would open nothing.
             ShortcutManagerCompat.removeDynamicShortcuts(
                 getContext(),
                 Collections.singletonList(NsiteSites.key(siteId))
             );
+            NappNotifications.cancelAll(getContext(), siteId);
         }
 
         getActivity().runOnUiThread(() -> {
@@ -654,27 +660,43 @@ public class NsiteShortcutsPlugin extends Plugin {
     }
 
     /**
-     * Tell the web layer that a share arrived at a window already up.
+     * Tell the web layer that something arrived at a window already up.
      *
-     * Static, and reached through the bridge, because the caller is an activity
-     * rather than the plugin: {@code onNewIntent} is where a share lands when
-     * nothing had to restart to receive it.
+     * Two things can: a share out of the OS sheet, and a notification whose
+     * tap named a place inside the site. Both mean the same to the window —
+     * a different URL for a site that is already loaded — and both would
+     * otherwise be missed entirely, since nothing restarted to receive them.
+     *
+     * Static, and reached through the bridge, because the caller is an
+     * activity rather than the plugin.
      */
     static void deliver(@Nullable Bridge bridge, @Nullable Intent intent) {
         if (bridge == null || intent == null) return;
-        if (intent.getStringExtra(NsiteShareActivity.EXTRA_SHARE_TOKEN) == null) return;
+
+        String token = intent.getStringExtra(NsiteShareActivity.EXTRA_SHARE_TOKEN);
+        String path = intent.getStringExtra(NsiteAppActivity.EXTRA_PATH);
+        if (token == null && path == null) return;
 
         PluginHandle handle = bridge.getPlugin("NsiteShortcuts");
         if (handle == null) return;
 
         Plugin plugin = handle.getInstance();
-        if (plugin instanceof NsiteShortcutsPlugin) {
-            NsiteShortcutsPlugin shortcuts = (NsiteShortcutsPlugin) plugin;
-            shortcuts.notifyListeners(
-                "nsiteShare",
-                shortcuts.pending(intent.getStringExtra(NsiteShareActivity.EXTRA_SHARE_TOKEN))
-            );
+        if (!(plugin instanceof NsiteShortcutsPlugin)) return;
+
+        NsiteShortcutsPlugin shortcuts = (NsiteShortcutsPlugin) plugin;
+
+        if (token != null) {
+            shortcuts.notifyListeners("nsiteShare", shortcuts.pending(token));
+            return;
         }
+
+        // Spent on the way out. A site pointed at a notification's path once
+        // must not be pointed there again by a task the system rebuilt.
+        intent.removeExtra(NsiteAppActivity.EXTRA_PATH);
+
+        JSObject open = new JSObject();
+        open.put("path", path);
+        shortcuts.notifyListeners("nsiteOpenPath", open);
     }
 
     /** A pending share as the web layer wants it: the token, and what's in it. */

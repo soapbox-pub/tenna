@@ -127,6 +127,15 @@
             </intent-filter>
         </receiver>
 
+        <!--
+            A button pressed under a site's notification, or one swiped away.
+            Not exported: the only things that fire it are the PendingIntents
+            this app puts on its own notifications. See NappNotificationReceiver.
+        -->
+        <receiver
+            android:name=".NappNotificationReceiver"
+            android:exported="false" />
+
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.fileprovider"

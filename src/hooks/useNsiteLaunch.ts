@@ -43,6 +43,13 @@ export interface NsiteLaunch {
   shareToken?: string;
   /** The site's `share_target` as JSON text, as of when it was last read. */
   shareTarget?: string;
+  /**
+   * Where inside the site to open, when a notification named a place.
+   *
+   * Site-absolute. The site opens there rather than on its front page, the
+   * same way it opens on a share — see `NsiteApp`.
+   */
+  path?: string;
 }
 
 /**
@@ -60,7 +67,7 @@ function askLauncher(): Promise<NsiteLaunch | null> {
   if (!supportsNsiteWindows()) return Promise.resolve(null);
 
   return NsiteShortcuts.getLaunchSite()
-    .then(({ siteId, event, label, channel, fromWall, shareToken, shareTarget }) => {
+    .then(({ siteId, event, label, channel, fromWall, shareToken, shareTarget, path }) => {
       if (!siteId) return null;
       return {
         siteId,
@@ -70,6 +77,7 @@ function askLauncher(): Promise<NsiteLaunch | null> {
         fromWall: !!fromWall,
         shareToken,
         shareTarget,
+        path,
       };
     })
     .catch(() => null);
@@ -120,6 +128,40 @@ export function useNsiteLaunch(): { pending: boolean; launch: NsiteLaunch | null
   }, [state.pending]);
 
   return state;
+}
+
+/**
+ * Where inside the site to open, as of now.
+ *
+ * Starts as whatever the window was opened with, and is replaced when another
+ * notification is tapped for a window that never closed — which is the
+ * ordinary case for an app the user is already in, not the exception.
+ */
+export function useNsiteOpenPath(initial: string | undefined): string | undefined {
+  const [live, setLive] = useState<string | undefined>(undefined);
+
+  useEffect(() => {
+    if (!supportsNsiteWindows()) return;
+
+    let disposed = false;
+    let listener: { remove: () => Promise<void> } | undefined;
+
+    void (async () => {
+      listener = await NsiteShortcuts.addListener('nsiteOpenPath', ({ path }) => {
+        if (!disposed && path) setLive(path);
+      });
+      if (disposed) void listener.remove();
+    })().catch(() => {
+      // Nothing to listen to on this build.
+    });
+
+    return () => {
+      disposed = true;
+      void listener?.remove();
+    };
+  }, []);
+
+  return live ?? initial;
 }
 
 /**

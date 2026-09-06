@@ -57,6 +57,12 @@ public class NsiteAppActivity extends BridgeActivity {
     /** A share staged for this site, if the window was opened to receive one. */
     static final String EXTRA_SHARE_TOKEN = NsiteShareActivity.EXTRA_SHARE_TOKEN;
 
+    /** A site-absolute path to open the site at, instead of its front page. */
+    static final String EXTRA_PATH = "pub.soapbox.tenna.PATH";
+
+    /** The notification this window was opened from, for the worker's event. */
+    static final String EXTRA_NOTIFICATION = "pub.soapbox.tenna.NOTIFICATION";
+
     /** Scheme for the per-site data URI that separates one task from another. */
     private static final String TASK_SCHEME = "tenna-nsite";
 
@@ -81,6 +87,30 @@ public class NsiteAppActivity extends BridgeActivity {
     ) {
         Intent intent = intentFor(context, siteId, 0, false);
         intent.putExtra(EXTRA_SHARE_TOKEN, token);
+        return intent;
+    }
+
+    /**
+     * The intent a notification's body fires, and the one a worker's
+     * {@code clients.openWindow()} comes back out to.
+     *
+     * The same window as every other way in, keyed on the same data URI, so a
+     * tap lands in the site the user already has open rather than beside it.
+     * {@code path} is where inside the site it lands; null is its front page.
+     *
+     * {@code notification} is the key of the notification that was pressed, or
+     * null when nothing was — a worker opening a window of its own accord has
+     * no event to raise afterwards.
+     */
+    static Intent notificationIntentFor(
+        @NonNull Context context,
+        @NonNull String siteId,
+        @Nullable String path,
+        @Nullable String notification
+    ) {
+        Intent intent = intentFor(context, siteId, 0, false);
+        if (path != null) intent.putExtra(EXTRA_PATH, path);
+        if (notification != null) intent.putExtra(EXTRA_NOTIFICATION, notification);
         return intent;
     }
 
@@ -120,7 +150,37 @@ public class NsiteAppActivity extends BridgeActivity {
         describeTask();
         reportUsed();
         // See MainActivity: whichever window comes up first brings it back.
+        // Before the notification is announced, and not after: `sync` stops
+        // the service outright when no site has subscriptions, and would
+        // stop the one the announcement had just started.
         NappPushService.sync(this);
+        announceNotification();
+    }
+
+    /**
+     * Tell the site's worker that its notification was pressed.
+     *
+     * The window is already on its way — a tap has to land at once, and the
+     * worker that would have routed it may not even be running — so this is
+     * not what opens it. It is what makes {@code notificationclick} happen at
+     * all, so a site that does its routing there, as a site written for a
+     * browser does, still gets its say. Its {@code clients.openWindow()} and
+     * {@code WindowClient.navigate()} then move the window that just opened
+     * rather than making a second one.
+     *
+     * The extra is consumed, so a rotation or a task the system rebuilt from
+     * its base intent doesn't raise the event a second time.
+     */
+    private void announceNotification() {
+        Intent intent = getIntent();
+        if (intent == null) return;
+
+        String siteId = intent.getStringExtra(EXTRA_SITE_ID);
+        String key = intent.getStringExtra(EXTRA_NOTIFICATION);
+        if (siteId == null || key == null) return;
+
+        intent.removeExtra(EXTRA_NOTIFICATION);
+        NappPushService.dispatchNotificationEvent(this, siteId, "notificationclick", key, "", null);
     }
 
     /**
@@ -171,6 +231,7 @@ public class NsiteAppActivity extends BridgeActivity {
         super.onNewIntent(intent);
         setIntent(intent);
         reportUsed();
+        announceNotification();
         NsiteShortcutsPlugin.deliver(getBridge(), intent);
     }
 

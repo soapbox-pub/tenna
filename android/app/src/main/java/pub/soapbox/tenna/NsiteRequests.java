@@ -43,7 +43,11 @@ import java.util.Map;
  *       answers this itself, from the shim; otherwise it is served here.
  *   <li>{@value #NOTIFICATION_PATH} — where the shim sends a
  *       {@code showNotification}. A GET, with the payload in the query, because
- *       {@code shouldInterceptRequest} is never given a request body.
+ *       {@code shouldInterceptRequest} is never given a request body. Its
+ *       neighbours {@value #NOTIFICATIONS_PATH}, {@value #CLOSE_PATH} and
+ *       {@value #OPEN_PATH} are the rest of what a worker can do to a
+ *       notification: read the tray back, take one down, and open the window
+ *       a tap on one leads to.
  *   <li>{@value #SHARE_PATH} — the page that turns a staged share into a real
  *       form POST at the site's own origin, for a {@code share_target} that
  *       asked for one. Only a document there can make that navigation.
@@ -70,8 +74,26 @@ final class NsiteRequests {
     /** Where a worker's {@code showNotification} lands. */
     static final String NOTIFICATION_PATH = "/.napp/notification";
 
+    /** Where a worker's {@code getNotifications} lands. */
+    static final String NOTIFICATIONS_PATH = "/.napp/notifications";
+
+    /** Where a worker's {@code Notification.close} lands. */
+    static final String CLOSE_PATH = "/.napp/close";
+
+    /** Where a worker's {@code clients.openWindow} and {@code focus} land. */
+    static final String OPEN_PATH = "/.napp/open";
+
     /** Query parameter carrying the base64url notification payload. */
     static final String PAYLOAD_PARAM = "p";
+
+    /** Query parameter naming one notification, by the key the host gave it. */
+    static final String KEY_PARAM = "k";
+
+    /** Query parameter naming a site-absolute path to open the site at. */
+    static final String URL_PARAM = "u";
+
+    /** Query parameter narrowing {@link #NOTIFICATIONS_PATH} to one tag. */
+    static final String TAG_PARAM = "tag";
 
     /** The page that submits a staged share as a form, for a POST target. */
     static final String SHARE_PATH = "/.tenna/share";
@@ -124,6 +146,18 @@ final class NsiteRequests {
 
         if (NOTIFICATION_PATH.equals(path)) {
             return notification(context, siteId, url);
+        }
+
+        if (NOTIFICATIONS_PATH.equals(path)) {
+            return notifications(context, siteId, url);
+        }
+
+        if (CLOSE_PATH.equals(path)) {
+            return close(context, siteId, url);
+        }
+
+        if (OPEN_PATH.equals(path)) {
+            return open(context, siteId, url);
         }
 
         if (WAKE_PATH.equals(path)) {
@@ -185,6 +219,88 @@ final class NsiteRequests {
         return NsiteFileServer.Response
             .empty(shown ? 200 : 403, shown ? "OK" : "Forbidden")
             .toWebResource();
+    }
+
+    /**
+     * The site's notifications as they currently stand, for
+     * {@code registration.getNotifications()}.
+     *
+     * Only its own — the site id comes off the request's host, so a site can
+     * no more read another's tray than it can post to it.
+     */
+    private static WebResourceResponse notifications(Context context, String siteId, Uri url) {
+        String tag = query(url, TAG_PARAM);
+        JSONArray out = new JSONArray();
+
+        for (NappNotificationStore.Entry entry : NappNotificationStore.list(context, siteId)) {
+            if (tag != null && !tag.equals(entry.tag)) continue;
+            try {
+                JSONObject json = new JSONObject();
+                json.put("key", entry.key);
+                json.put("tag", entry.tag);
+                json.put("title", entry.title);
+                json.put("options", new JSONObject(entry.options));
+                out.put(json);
+            } catch (JSONException e) {
+                // An unreadable record is one the site never hears about.
+            }
+        }
+
+        return json(out.toString());
+    }
+
+    /** Take one of the site's notifications down. */
+    private static WebResourceResponse close(Context context, String siteId, Uri url) {
+        String key = query(url, KEY_PARAM);
+        if (key == null || !key.startsWith(NsiteSites.key(siteId) + "/")) {
+            return NsiteFileServer.Response.empty(400, "Bad Request").toWebResource();
+        }
+
+        NappNotifications.cancel(context, siteId, key);
+        return NsiteFileServer.Response.empty(200, "OK").toWebResource();
+    }
+
+    /**
+     * Open or resume the site's own window, at a path of its choosing.
+     *
+     * What {@code clients.openWindow()} and {@code WindowClient.focus()} mean
+     * here. Neither works in a WebView on its own — a worker has no way to
+     * make a browsing context, and focusing one is a window-manager act rather
+     * than a web one — so both come back out to the host, which starts the
+     * same activity a notification's tap does.
+     *
+     * A site can only open itself: the id is the request's host, and the path
+     * is refused unless it is one inside the site. And only just after the
+     * user acted on one of its notifications, which is the case the API is
+     * for.
+     */
+    private static WebResourceResponse open(Context context, String siteId, Uri url) {
+        String path = NappHints.path(query(url, URL_PARAM));
+
+        if (NsiteSites.load(context, siteId) == null) {
+            return NsiteFileServer.Response.empty(404, "Not Found").toWebResource();
+        }
+
+        // Only in answer to something the user did. A worker that puts its
+        // site on screen off the back of a relay event is not answering
+        // anybody; see NappNotifications.
+        if (!NappNotifications.recentlyInteracted(siteId)) {
+            return NsiteFileServer.Response.empty(403, "Forbidden").toWebResource();
+        }
+
+        try {
+            context.startActivity(
+                NsiteAppActivity.notificationIntentFor(context, siteId, path, null)
+            );
+        } catch (RuntimeException e) {
+            // Background activity launch restrictions. A worker woken by a tap
+            // is inside the exemption window; one woken by a relay is not, and
+            // has no business opening a window unasked anyway.
+            Log.i(TAG, "Refused to open a window for " + siteId, e);
+            return NsiteFileServer.Response.empty(403, "Forbidden").toWebResource();
+        }
+
+        return NsiteFileServer.Response.empty(200, "OK").toWebResource();
     }
 
     // -----------------------------------------------------------------------
@@ -378,6 +494,15 @@ final class NsiteRequests {
     }
 
     // -----------------------------------------------------------------------
+
+    private static WebResourceResponse json(String source) {
+        byte[] bytes = source.getBytes(StandardCharsets.UTF_8);
+        Map<String, String> headers = new HashMap<>();
+        headers.put("Cache-Control", "no-store");
+        return new NsiteFileServer.Response(
+            200, "OK", "application/json", "UTF-8", headers, new ByteArrayInputStream(bytes), bytes.length
+        ).toWebResource();
+    }
 
     private static WebResourceResponse html(String source) {
         byte[] bytes = source.getBytes(StandardCharsets.UTF_8);

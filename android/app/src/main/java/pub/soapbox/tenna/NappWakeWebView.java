@@ -38,10 +38,11 @@ import java.util.Deque;
  * site's worker is what answers the navigation when it has a fetch handler,
  * which is why the shim knows the page too.
  *
- * The page relays in both directions: a push from here goes to the worker as
- * a message the shim turns into a {@code push} event, and the shim's reply,
- * once every {@code waitUntil} has settled, comes back the same way. One
- * delivery at a time; a site with a burst of events gets them in order.
+ * The page relays in both directions: an event from here goes to the worker as
+ * a message the shim turns into a real one — a {@code push}, or the
+ * {@code notificationclick} the user just caused — and the shim's reply, once
+ * every {@code waitUntil} has settled, comes back the same way. One delivery
+ * at a time; a site with a burst of events gets them in order.
  */
 final class NappWakeWebView {
 
@@ -59,10 +60,13 @@ final class NappWakeWebView {
     }
 
     private static final class Delivery {
+        /** {@code push}, {@code notificationclick} or {@code notificationclose}. */
+        final String kind;
         final String payload;
         final Runnable onDone;
 
-        Delivery(String payload, Runnable onDone) {
+        Delivery(String kind, String payload, Runnable onDone) {
+            this.kind = kind;
             this.payload = payload;
             this.onDone = onDone;
         }
@@ -97,13 +101,13 @@ final class NappWakeWebView {
 
     /** Queue an event for the worker. {@code onDone} runs on the main thread, delivered or not. */
     @MainThread
-    void deliver(@NonNull String payload, @NonNull Runnable onDone) {
+    void deliver(@NonNull String kind, @NonNull String payload, @NonNull Runnable onDone) {
         if (destroyed) {
             onDone.run();
             return;
         }
         main.removeCallbacks(idle);
-        queue.add(new Delivery(payload, onDone));
+        queue.add(new Delivery(kind, payload, onDone));
         pump();
     }
 
@@ -140,7 +144,8 @@ final class NappWakeWebView {
         int id = nextId++;
         try {
             JSONObject message = new JSONObject();
-            message.put("type", "push");
+            message.put("type", "deliver");
+            message.put("kind", next.kind);
             message.put("id", id);
             message.put("data", next.payload);
             proxy.postMessage(message.toString());

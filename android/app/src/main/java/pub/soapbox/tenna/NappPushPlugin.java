@@ -78,6 +78,13 @@ public class NappPushPlugin extends Plugin {
             return;
         }
 
+        // Clearing is how the shield revokes the permission, and a revoked
+        // permission that left the site's notifications sitting in the shade
+        // would not have revoked much.
+        if (normalized.length() == 0) {
+            NappNotifications.cancelAll(getContext(), siteId);
+        }
+
         NappPushService.sync(getContext());
 
         JSObject result = new JSObject();

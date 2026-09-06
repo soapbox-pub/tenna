@@ -51,6 +51,13 @@ public class NappPushService extends Service {
 
     static final String ACTION_SYNC = "pub.soapbox.tenna.napp.SYNC";
 
+    /** Raise an event in a site's worker that did not come off a relay. */
+    static final String ACTION_DELIVER = "pub.soapbox.tenna.napp.DELIVER";
+
+    private static final String EXTRA_SITE_ID = "pub.soapbox.tenna.napp.SITE_ID";
+    private static final String EXTRA_KIND = "pub.soapbox.tenna.napp.KIND";
+    private static final String EXTRA_DATA = "pub.soapbox.tenna.napp.DATA";
+
     /** Events remembered for dedupe, across every site. */
     private static final int SEEN_EVENTS = 4000;
 
@@ -79,6 +86,9 @@ public class NappPushService extends Service {
 
     /** One wake page per site with something in flight. Main thread only. */
     private final Map<String, NappWakeWebView> wakers = new HashMap<>();
+
+    /** Whether the last plan had anything to listen for. */
+    private boolean subscribed;
 
     @Nullable private ConnectivityManager.NetworkCallback networkCallback;
 
@@ -112,6 +122,67 @@ public class NappPushService extends Service {
 
     static boolean isRunning() {
         return running;
+    }
+
+    /**
+     * Raise a notification event in a site's service worker.
+     *
+     * The worker is where the web puts these, and where a site's own routing
+     * and reply-sending already live — so a tap on a notification, a press on
+     * one of its buttons, and a swipe to dismiss all end up as the same events
+     * the site would get in a browser. Nothing on a relay is involved; this
+     * borrows the service only because the service is what owns the machinery
+     * for reaching a worker with no window open.
+     *
+     * Safe to call cold. If the service was not running it is started, does
+     * this, and stops itself again once the worker has answered.
+     */
+    static void dispatchNotificationEvent(
+        @NonNull Context context,
+        @NonNull String siteId,
+        @NonNull String kind,
+        @NonNull String key,
+        @Nullable String action,
+        @Nullable String reply
+    ) {
+        Context app = context.getApplicationContext();
+
+        NappNotificationStore.Entry entry = NappNotificationStore.get(app, siteId, key);
+        if (entry == null) return;
+
+        // The user just asked for something, so for the next minute the site's
+        // worker may open its window in answer. Dismissing is not asking for
+        // anything, and grants nothing. See NappNotifications.
+        if ("notificationclick".equals(kind)) NappNotifications.interacted(siteId);
+
+        String data;
+        try {
+            JSONObject json = new JSONObject();
+            json.put("key", entry.key);
+            json.put("tag", entry.tag);
+            json.put("title", entry.title);
+            json.put("options", new JSONObject(entry.options));
+            json.put("action", action == null ? "" : action);
+            if (reply != null) json.put("reply", reply);
+            data = json.toString();
+        } catch (JSONException e) {
+            return;
+        }
+
+        Intent intent = new Intent(app, NappPushService.class)
+            .setAction(ACTION_DELIVER)
+            .putExtra(EXTRA_SITE_ID, siteId)
+            .putExtra(EXTRA_KIND, kind)
+            .putExtra(EXTRA_DATA, data);
+
+        try {
+            ContextCompat.startForegroundService(app, intent);
+        } catch (RuntimeException e) {
+            // Background start restrictions. Acting on a notification is one
+            // of the exemptions, so this should not happen — and if it does,
+            // the site simply doesn't hear about the tap.
+            Log.w(TAG, "Could not deliver a notification event", e);
+        }
     }
 
     // -----------------------------------------------------------------------
@@ -151,9 +222,26 @@ public class NappPushService extends Service {
             type
         );
 
-        if (plan.byRelay.isEmpty()) {
-            Log.i(TAG, "Nothing to listen for; stopping");
-            stopSelf();
+        subscribed = !plan.byRelay.isEmpty();
+
+        if (intent != null && ACTION_DELIVER.equals(intent.getAction())) {
+            String siteId = intent.getStringExtra(EXTRA_SITE_ID);
+            String kind = intent.getStringExtra(EXTRA_KIND);
+            String data = intent.getStringExtra(EXTRA_DATA);
+            if (siteId != null && kind != null && data != null) {
+                deliver(siteId, kind, data);
+            }
+        }
+
+        if (!subscribed) {
+            // A site with no subscriptions can still have a notification the
+            // user just pressed, so the wake page it is being delivered to
+            // has to outlive this. It stops itself when it goes idle.
+            if (wakers.isEmpty()) {
+                Log.i(TAG, "Nothing to listen for; stopping");
+                stopSelf();
+                return START_NOT_STICKY;
+            }
             return START_NOT_STICKY;
         }
 
@@ -216,22 +304,31 @@ public class NappPushService extends Service {
             return;
         }
 
-        main.post(() -> deliver(subscription.siteId, payload));
+        main.post(() -> deliver(subscription.siteId, "push", payload));
     }
 
-    private void deliver(String siteId, String payload) {
+    private void deliver(String siteId, String kind, String payload) {
         if (!running) return;
+
+        if (Looper.myLooper() != Looper.getMainLooper()) {
+            main.post(() -> deliver(siteId, kind, payload));
+            return;
+        }
 
         NappWakeWebView waker = wakers.get(siteId);
         if (waker == null) {
             waker = new NappWakeWebView(this, siteId, this::onWakerIdle);
             wakers.put(siteId, waker);
         }
-        waker.deliver(payload, () -> {});
+        waker.deliver(kind, payload, () -> {});
     }
 
     private void onWakerIdle(NappWakeWebView waker) {
         if (wakers.remove(waker.siteId()) == waker) waker.destroy();
+
+        // Started only to hand a worker a tap, with no relay to keep open
+        // afterwards. Nothing else will come to stop it.
+        if (!subscribed && wakers.isEmpty()) stopSelf();
     }
 
     // -----------------------------------------------------------------------

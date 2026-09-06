@@ -10,11 +10,12 @@
  * Tenna's wake page, loaded at a site's origin in a WebView with no window.
  *
  * Nothing native can start a service worker; only a document at its origin
- * can, by posting to it. This page relays in both directions: a push from the
- * host goes to the worker as the message the shim turns into a `push` event,
- * and the shim's reply, once every waitUntil has settled, comes back the same
- * way. The host object `nappHost` exists only in the WebView the push service
- * made; anywhere else this page does nothing.
+ * can, by posting to it. This page relays in both directions: an event from
+ * the host goes to the worker as the message the shim turns into a real one —
+ * a `push`, or a `notificationclick` the user just caused — and the shim's
+ * reply, once every waitUntil has settled, comes back the same way. The host
+ * object `nappHost` exists only in the WebView the push service made;
+ * anywhere else this page does nothing.
  */
 (function () {
   'use strict';
@@ -45,10 +46,13 @@
   host.onmessage = function (e) {
     var m;
     try { m = JSON.parse(e.data); } catch (err) { return; }
-    if (!m || m.type !== 'push') return;
+    if (!m || m.type !== 'deliver') return;
     worker().then(function (w) {
       if (!w) { send({ type: 'done', id: m.id, delivered: false }); return; }
-      w.postMessage({ __napp: 'push', id: m.id, data: m.data });
+      // `__napp` names the event. A worker still running an older shim knows
+      // only 'push' and ignores the rest, which costs it a tap and nothing
+      // more; the host's own timeout is what moves that one along.
+      w.postMessage({ __napp: m.kind, id: m.id, data: m.data });
     });
   };
 

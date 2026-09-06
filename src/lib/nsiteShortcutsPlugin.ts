@@ -24,6 +24,14 @@ export interface NsiteLaunchSite {
   shareToken?: string;
   /** The site's `share_target`, as JSON text, as it stood when it was pinned. */
   shareTarget?: string;
+  /**
+   * A site-absolute path to open the site at, instead of its front page.
+   *
+   * Set when the window was opened by a notification that named a place
+   * inside the site — `data.napp.url`, or the `data.url` every push service
+   * worker on Nostr already writes.
+   */
+  path?: string;
 }
 
 /** A pinned site that will take something from the share sheet. */
@@ -177,6 +185,19 @@ export interface NsiteShortcutsPlugin {
   addListener(
     event: 'nsiteShare',
     handler: (share: NsitePendingShare) => void,
+  ): Promise<PluginListenerHandle>;
+
+  /**
+   * A notification was tapped for a site whose window was already up.
+   *
+   * The cold-start case is the `path` on
+   * {@link NsiteShortcutsPlugin.getLaunchSite}; this is the same thing landing
+   * in a window that never restarted, where the site would otherwise never
+   * learn there was anywhere to go.
+   */
+  addListener(
+    event: 'nsiteOpenPath',
+    handler: (open: { path: string }) => void,
   ): Promise<PluginListenerHandle>;
 }
 

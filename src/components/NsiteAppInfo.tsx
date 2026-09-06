@@ -1,18 +1,18 @@
 import type { NostrEvent } from '@nostrify/nostrify';
 import { Shield, X } from 'lucide-react';
-import { useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
   DialogContent,
-  DialogDescription,
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useNsiteAllowance } from '@/hooks/useNsiteAllowance';
 import type { NsiteApp } from '@/hooks/useNsiteApp';
+import { impactLight } from '@/lib/haptics';
 import { getTileGradient, getTileInitial } from '@/lib/iconTile';
 import { NappPush, supportsNappPush } from '@/lib/nappPushPlugin';
 import {
@@ -24,8 +24,8 @@ import {
 import { getNsiteSubdomain } from '@/lib/nsiteSubdomain';
 import { cn } from '@/lib/utils';
 
-interface NsiteAppSettingsProps {
-  /** The NIP-5A manifest event for the site being configured. */
+interface NsiteAppInfoProps {
+  /** The NIP-5A manifest event for the site being described. */
   event: NostrEvent;
   /** What the site is called on the wall. */
   name: string;
@@ -33,6 +33,20 @@ interface NsiteAppSettingsProps {
   app?: NsiteApp;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+}
+
+/**
+ * Take the middle out of a string too long to show whole.
+ *
+ * The middle, because both ends of an nsite id carry meaning — the front is
+ * what tells two sites apart at a glance, and the tail is the site's own name.
+ * A trailing ellipsis would throw away the half that reads.
+ */
+function middleEllipsis(text: string, max: number): string {
+  if (text.length <= max) return text;
+  const head = Math.ceil((max - 1) / 2);
+  const tail = Math.floor((max - 1) / 2);
+  return `${text.slice(0, head)}…${text.slice(-tail)}`;
 }
 
 /**
@@ -47,14 +61,15 @@ interface NsiteAppSettingsProps {
  * The prompt is what appears in the site itself, and only when the site asks
  * for something.
  */
-export function NsiteAppSettings({
+export function NsiteAppInfo({
   event,
   name,
   app,
   open,
   onOpenChange,
-}: NsiteAppSettingsProps) {
+}: NsiteAppInfoProps) {
   const { user } = useCurrentUser();
+  const [copied, setCopied] = useState(false);
 
   const siteId = useMemo(() => getNsiteSubdomain(event), [event]);
   const allowance = useNsiteAllowance(siteId, user?.pubkey);
@@ -84,9 +99,40 @@ export function NsiteAppSettings({
     if (hadPush) forgetSubscriptions();
   };
 
+  const handleCopyId = () => {
+    void navigator.clipboard?.writeText(siteId).then(
+      () => {
+        impactLight();
+        setCopied(true);
+      },
+      () => {
+        // No clipboard to write to. The id is on screen either way.
+      },
+    );
+  };
+
+  // Back to the address after a moment, so the next press has something to
+  // confirm again.
+  useEffect(() => {
+    if (!copied) return;
+    const timer = setTimeout(() => setCopied(false), 1600);
+    return () => clearTimeout(timer);
+  }, [copied]);
+
+  // Reopening should not still be showing the last press's confirmation.
+  const handleOpenChange = (next: boolean) => {
+    if (!next) setCopied(false);
+    onOpenChange(next);
+  };
+
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="border-white/10 bg-[#1B080C] text-white sm:max-w-md">
+    <Dialog open={open} onOpenChange={handleOpenChange}>
+      <DialogContent
+        // Nothing here describes the app in a sentence; the title is the name
+        // and everything under it is a control.
+        aria-describedby={undefined}
+        className="border-white/10 bg-[#1B080C] text-white sm:max-w-md"
+      >
         <DialogHeader>
           <div className="flex items-center gap-3">
             <span
@@ -110,12 +156,7 @@ export function NsiteAppSettings({
               )}
             </span>
 
-            <div className="min-w-0 flex-1 text-left">
-              <DialogTitle className="truncate">{name}</DialogTitle>
-              <DialogDescription className="truncate font-mono text-xs text-white/50">
-                {siteId}
-              </DialogDescription>
-            </div>
+            <DialogTitle className="min-w-0 flex-1 truncate text-left">{name}</DialogTitle>
           </div>
         </DialogHeader>
 
@@ -173,6 +214,20 @@ export function NsiteAppSettings({
             </ul>
           )}
         </section>
+
+        {/* The site's address, the way a bundle id sits at the foot of an app's
+            info: there to identify the thing, and not to be read. Cut through
+            the middle rather than wrapped, because the whole of it would be
+            four lines of base32 and the ends are the parts that mean
+            anything. */}
+        <button
+          type="button"
+          onClick={handleCopyId}
+          aria-label={`Copy the address ${siteId}`}
+          className="mx-auto block max-w-full truncate rounded-lg px-3 py-1.5 font-mono text-[11px] text-white/40 outline-none transition-colors hover:bg-white/5 hover:text-white/60 focus-visible:ring-2 focus-visible:ring-[#FEF960]"
+        >
+          {copied ? 'Copied' : middleEllipsis(siteId, 32)}
+        </button>
       </DialogContent>
     </Dialog>
   );

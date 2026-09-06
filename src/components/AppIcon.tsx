@@ -1,8 +1,8 @@
 import type { NostrEvent } from '@nostrify/nostrify';
-import { Check, Plus, SlidersHorizontal, SquarePlus, Trash2 } from 'lucide-react';
+import { Check, Info, Plus, SquarePlus, Trash2 } from 'lucide-react';
 import { useCallback, useRef, useState, type ReactNode } from 'react';
 
-import { NsiteAppSettings } from '@/components/NsiteAppSettings';
+import { NsiteAppInfo } from '@/components/NsiteAppInfo';
 import {
   ContextMenu,
   ContextMenuContent,
@@ -16,6 +16,30 @@ import { useNsiteWindow } from '@/hooks/useNsiteWindow';
 import { impactMedium } from '@/lib/haptics';
 import { getTileGradient, getTileInitial } from '@/lib/iconTile';
 import { cn } from '@/lib/utils';
+
+/**
+ * The long-press menu, sized for the thumb that opened it.
+ *
+ * A pointer menu is a list of small targets because a mouse can hit them. This
+ * one is opened by holding a finger on an icon, and what comes up under that
+ * finger has to be hit by the same finger without moving the phone — so the
+ * rows are a comfortable tap tall, the type is body-sized rather than caption-
+ * sized, and the surface is a rounded sheet rather than a bordered box, the
+ * way a launcher's own is.
+ */
+const MENU = 'w-60 rounded-3xl border-white/10 bg-[#241014]/95 p-2 text-white shadow-2xl backdrop-blur-xl';
+
+const MENU_ITEM = [
+  'h-14 gap-4 rounded-2xl px-4 text-base font-medium text-white/95',
+  'focus:bg-white/10 focus:text-white',
+  "[&_svg:not([class*='size-'])]:size-5 [&_svg:not([class*='text-'])]:text-white/60",
+].join(' ');
+
+const MENU_ITEM_DESTRUCTIVE = [
+  MENU_ITEM,
+  'data-[variant=destructive]:text-[#F96C91] data-[variant=destructive]:focus:bg-[#F96C91]/15',
+  'data-[variant=destructive]:focus:text-[#F96C91] data-[variant=destructive]:*:[svg]:text-[#F96C91]!',
+].join(' ');
 
 interface AppIconProps {
   event: NostrEvent;
@@ -137,7 +161,7 @@ export function AppIcon({ event, channel, onSelect, onRemove }: AppIconProps) {
   const pinning = useNsitePin(event, name, app);
   const ownWindow = useNsiteWindow(event, name, app);
 
-  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [infoOpen, setInfoOpen] = useState(false);
 
   // A long press is a press. The menu opens on pointerdown and the pointerup
   // that follows still lands on the tile, so without this the site would tune
@@ -209,26 +233,36 @@ export function AppIcon({ event, channel, onSelect, onRemove }: AppIconProps) {
     </button>
   );
 
-  // Every tile has a menu, because every app has settings — a site the user
-  // can neither pin nor take off the wall has still been granted things, and
-  // this is the only place to see what.
+  // Every tile has a menu, because every app has an info panel — a site the
+  // user can neither pin nor take off the wall has still been granted things,
+  // and this is the only place to see what.
   return (
     <>
       <ContextMenu onOpenChange={handleOpenChange}>
         <ContextMenuTrigger asChild>{tile}</ContextMenuTrigger>
-        <ContextMenuContent className="w-56">
-          <ContextMenuItem onSelect={() => setSettingsOpen(true)}>
-            <SlidersHorizontal />
-            App settings
+        {/* Kept off the edges of the screen: the menu opens where the finger
+            is, and a finger on the last tile in a row is at the edge. */}
+        <ContextMenuContent className={MENU} collisionPadding={16}>
+          <ContextMenuItem className={MENU_ITEM} onSelect={() => setInfoOpen(true)}>
+            <Info />
+            App info
           </ContextMenuItem>
           {pinning.available && (
-            <ContextMenuItem onSelect={pinning.pin} disabled={pinning.pinned}>
+            <ContextMenuItem
+              className={MENU_ITEM}
+              onSelect={pinning.pin}
+              disabled={pinning.pinned}
+            >
               {pinning.pinned ? <Check /> : <SquarePlus />}
               {pinning.pinned ? 'On your home screen' : 'Add to home screen'}
             </ContextMenuItem>
           )}
           {onRemove && (
-            <ContextMenuItem onSelect={onRemove} variant="destructive">
+            <ContextMenuItem
+              className={MENU_ITEM_DESTRUCTIVE}
+              onSelect={onRemove}
+              variant="destructive"
+            >
               <Trash2 />
               Remove from Tenna
             </ContextMenuItem>
@@ -237,12 +271,12 @@ export function AppIcon({ event, channel, onSelect, onRemove }: AppIconProps) {
       </ContextMenu>
 
       {/* Outside the menu, which is gone by the time this opens. */}
-      <NsiteAppSettings
+      <NsiteAppInfo
         event={event}
         name={name}
         app={app}
-        open={settingsOpen}
-        onOpenChange={setSettingsOpen}
+        open={infoOpen}
+        onOpenChange={setInfoOpen}
       />
     </>
   );

@@ -470,7 +470,10 @@ export function NsiteAppInfo({
             <Publisher pubkey={event.pubkey} />
           </div>
 
-          <div className="flex flex-wrap items-start justify-center gap-6 pt-2">
+          {/* Set well below the publisher: the icon, the name and whose it is
+              are one block to be read, and the buttons are the answer to it.
+              The gap is what separates the two. */}
+          <div className="flex flex-wrap items-start justify-center gap-6 pt-6">
             {onOpen && (
               <InfoAction icon={ExternalLink} label="Open" onClick={leaveAnd(onOpen)} />
             )}

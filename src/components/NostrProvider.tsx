@@ -1,10 +1,24 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { type NostrSigner, NostrEvent, NostrFilter, NPool, NRelay1 } from '@nostrify/nostrify';
+import { NIndexedDB } from '@nostrify/indexeddb';
 import { getEventHash, verifyEvent } from 'nostr-tools';
 import { NostrContext } from '@nostrify/react';
 import { NUser, useNostrLogin } from '@nostrify/react/login';
 import { useQueryClient } from '@tanstack/react-query';
+import { NostrStorageContext } from '@/contexts/NostrStorageContext';
 import { useAppContext } from '@/hooks/useAppContext';
+import { CachingPool } from '@/lib/CachingPool';
+
+/**
+ * IndexedDB database holding every event worth keeping between launches.
+ *
+ * The store is a cache and nothing else: everything in it came off a relay and
+ * can come off one again, so it is safe to lose and never migrated. On a
+ * platform that won't give us IndexedDB at all — iOS Lockdown Mode, some
+ * private-browsing contexts — `NIndexedDB` degrades to a silent no-op and the
+ * app simply behaves as it did before there was a cache.
+ */
+const EVENTS_DB_NAME = 'nostr';
 
 interface NostrProviderProps {
   children: React.ReactNode;
@@ -93,6 +107,16 @@ const NostrProvider: React.FC<NostrProviderProps> = (props) => {
     eoseTimeout: 200,
   }));
 
+  // The event cache, opened once alongside the pool. Construction is
+  // synchronous and the connection opens in the background; every method
+  // awaits it, so there is nothing here to wait for.
+  const [store] = useState(() => new NIndexedDB(EVENTS_DB_NAME));
+
+  // What the rest of the app talks to. Same interface as the pool, and it
+  // writes what it reads into the store on the way past — including through
+  // `relay()` and `group()`, which is how every nsite manifest arrives.
+  const [nostr] = useState(() => new CachingPool(pool, store));
+
   // Derive the current signer from the active login. This mirrors the
   // logic in useCurrentUser but avoids a circular dependency (useCurrentUser
   // depends on NostrContext which we are providing here).
@@ -127,11 +151,19 @@ const NostrProvider: React.FC<NostrProviderProps> = (props) => {
     queryClient.invalidateQueries({ queryKey: ['nostr'] });
   }, [config.relayMetadata, queryClient]);
 
-  const contextValue = useMemo(() => ({ nostr: pool }), [pool]);
+  // `CachingPool` exposes every method a hook reaches for through `useNostr`
+  // — query, event, req, relay, group, close — so the cast is a formality;
+  // `NostrContext` is typed to the concrete `NPool` rather than to `NRelay`.
+  const contextValue = useMemo(
+    () => ({ nostr: nostr as unknown as NPool }),
+    [nostr],
+  );
 
   return (
     <NostrContext.Provider value={contextValue}>
-      {children}
+      <NostrStorageContext.Provider value={store}>
+        {children}
+      </NostrStorageContext.Provider>
     </NostrContext.Provider>
   );
 };

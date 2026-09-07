@@ -1,6 +1,8 @@
+import type { NostrEvent } from '@nostrify/nostrify';
 import { useNostr } from '@nostrify/react';
 import { useQuery } from '@tanstack/react-query';
 
+import { useCacheFirstSeedMany } from '@/hooks/useCacheFirstSeed';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 
 /**
@@ -24,10 +26,32 @@ const MAX_FOLLOWS = 1000;
  * Nobody logged in is not an error, it's an empty list — the query simply
  * stays idle, and so reports neither loading nor failure.
  */
+/** The pubkeys a contact list follows, capped at {@link MAX_FOLLOWS}. */
+function followsFrom(event: NostrEvent): string[] {
+  const follows = new Set<string>();
+  for (const [name, value] of event.tags) {
+    // Tags come off an event unchecked, and each one here becomes a filter
+    // term; anything that isn't a pubkey is not a follow.
+    if (name === 'p' && /^[0-9a-f]{64}$/.test(value ?? '')) follows.add(value);
+    if (follows.size >= MAX_FOLLOWS) break;
+  }
+  return [...follows];
+}
+
 export function useFollows() {
   const { nostr } = useNostr();
   const { user } = useCurrentUser();
   const pubkey = user?.pubkey;
+
+  // The catalog waits on this list before it will ask for anything, so a cold
+  // start spends a relay round trip here before it can spend another one
+  // there. Last launch's contact list is a good enough answer to get moving
+  // on, and the query below corrects it.
+  useCacheFirstSeedMany<string[]>({
+    queryKey: pubkey ? ['follows', pubkey] : undefined,
+    filters: [{ kinds: [3], authors: pubkey ? [pubkey] : [], limit: 1 }],
+    toData: ([event]) => followsFrom(event),
+  });
 
   return useQuery({
     queryKey: ['follows', pubkey ?? ''],
@@ -37,15 +61,7 @@ export function useFollows() {
       const [event] = await nostr.query([{ kinds: [3], authors: [pubkey!], limit: 1 }], { signal });
       if (!event) return [];
 
-      const follows = new Set<string>();
-      for (const [name, value] of event.tags) {
-        // Tags come off an event unchecked, and each one here becomes a filter
-        // term; anything that isn't a pubkey is not a follow.
-        if (name === 'p' && /^[0-9a-f]{64}$/.test(value ?? '')) follows.add(value);
-        if (follows.size >= MAX_FOLLOWS) break;
-      }
-
-      return [...follows];
+      return followsFrom(event);
     },
     staleTime: 5 * 60_000,
   });

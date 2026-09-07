@@ -17,7 +17,8 @@
     "@capacitor/share": "^8.0.1",
     "@fontsource/vt323": "^5.3.0",
     "@noble/hashes": "^2.4.0",
-    "@nostrify/nostrify": "^0.55.0",
+    "@nostrify/indexeddb": "^0.2.3",
+    "@nostrify/nostrify": "^0.55.1",
     "@nostrify/react": "^0.6.7",
     "@radix-ui/react-toast": "^1.2.1",
     "@tanstack/react-query": "^5.100.5",
@@ -64,6 +65,7 @@
     "eslint": "^10.2.1",
     "eslint-plugin-react-hooks": "^7.1.1",
     "eslint-plugin-react-refresh": "^0.5.2",
+    "fake-indexeddb": "^6.2.5",
     "globals": "^17.5.0",
     "jsdom": "^29.1.0",
     "tailwindcss": "^4.2.4",
@@ -72,5 +74,14 @@
     "typescript-eslint": "^8.59.0",
     "vite": "^8.0.10",
     "vitest": "^4.1.5"
+  },
+  "//overrides": "@nostrify/react and @nostrify/indexeddb each pin an exact @nostrify/nostrify, and they disagree, so without this one of them gets a nested copy of its own. Two copies of NPool and NUser in one bundle is a subtle hazard wherever an object crosses between them — which is exactly what `NUser.fromBunkerLogin(login, pool)` does. Both are pointed at the one version this app depends on instead.",
+  "overrides": {
+    "@nostrify/react": {
+      "@nostrify/nostrify": "$@nostrify/nostrify"
+    },
+    "@nostrify/indexeddb": {
+      "@nostrify/nostrify": "$@nostrify/nostrify"
+    }
   }
 }

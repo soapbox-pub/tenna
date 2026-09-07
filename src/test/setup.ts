@@ -1,4 +1,8 @@
 import '@testing-library/jest-dom';
+// jsdom has no IndexedDB. Without one, the event store degrades to a silent
+// no-op and every cache-first path in the app is untested; with this it is
+// the real store, backed by memory.
+import 'fake-indexeddb/auto';
 import { vi } from 'vitest';
 
 // Mock window.matchMedia

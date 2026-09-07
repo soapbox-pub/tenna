@@ -3,6 +3,7 @@ import { useNostr } from '@nostrify/react';
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { useCallback, useMemo } from 'react';
 
+import { useCacheFirstSeedMany } from '@/hooks/useCacheFirstSeed';
 import { useLocalStorage } from '@/hooks/useLocalStorage';
 import { useInstalledApps } from '@/hooks/useNativeApps';
 import type { NativeApp } from '@/lib/nativeAppsPlugin';
@@ -148,12 +149,39 @@ export function useWall() {
   const sites = useMemo(() => nsiteAddresses(uris), [uris]);
   const installed = useInstalledApps();
 
+  // Sorted, so the key is the *set* of sites on the wall and not the order
+  // they sit in. Dragging one tile past another asks for exactly the same
+  // manifests; a key that moved with them would be a cache entry nobody had
+  // filled yet, and the whole wall would drop back to static on every drop.
+  const queryKey = useMemo(
+    () => ['wall-nsites', [...sites.map(({ uri }) => uri)].sort()],
+    [sites],
+  );
+
+  const filters = useMemo(
+    () =>
+      sites
+        .map(({ id }) => parseNsiteSubdomain(id))
+        .filter((pointer) => pointer !== null)
+        .map(nsitePointerFilter),
+    [sites],
+  );
+
+  // The wall is what the app opens on, and a site whose manifest hasn't come
+  // back draws nothing at all — so without this the first thing anyone sees on
+  // a cold start is an empty screen, held for as long as a relay takes. The
+  // manifests are the same ones as last time; they are already on disk.
+  useCacheFirstSeedMany<NostrEvent[]>({
+    queryKey: sites.length > 0 ? queryKey : undefined,
+    filters,
+    toData: (events) => {
+      const servable = events.filter(isServableNsite);
+      return servable.length > 0 ? servable : undefined;
+    },
+  });
+
   const manifests = useQuery({
-    // Sorted, so the key is the *set* of sites on the wall and not the order
-    // they sit in. Dragging one tile past another asks for exactly the same
-    // manifests; a key that moved with them would be a cache entry nobody had
-    // filled yet, and the whole wall would drop back to static on every drop.
-    queryKey: ['wall-nsites', [...sites.map(({ uri }) => uri)].sort()],
+    queryKey,
     // And when the set really does change, the manifests already in hand are
     // still the right ones for the sites that didn't. Adding a tile should
     // add a tile, not blank the wall while a relay answers.
@@ -161,11 +189,6 @@ export function useWall() {
     enabled: sites.length > 0,
     queryFn: async (c): Promise<NostrEvent[]> => {
       const signal = AbortSignal.any([c.signal, AbortSignal.timeout(8000)]);
-
-      const filters = sites
-        .map(({ id }) => parseNsiteSubdomain(id))
-        .filter((pointer) => pointer !== null)
-        .map(nsitePointerFilter);
 
       // Whatever relays the addresses came with, alongside the one the rest of
       // the wall is served from: a site added by an naddr from elsewhere lives

@@ -10,7 +10,7 @@ import { NsiteShortcuts, supportsNsiteWindows } from '@/lib/nsiteShortcutsPlugin
 import { shareCategories } from '@/lib/nsiteShareTarget';
 import { getNsiteSubdomain } from '@/lib/nsiteSubdomain';
 
-interface UseNsitePinResult {
+export interface UseNsitePinResult {
   /**
    * Whether putting this site on the home screen is on offer at all.
    *

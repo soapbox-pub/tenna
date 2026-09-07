@@ -110,11 +110,15 @@ export function AppIcon({ event, channel, onSelect, onRemove }: AppIconProps) {
   // Where a site can have a window of its own, it gets one — pressing the tile
   // launches the site rather than tuning it in over the wall. Everywhere else
   // the wall is the only screen there is, so the viewer opens on top of it.
-  const handleSelect = useCallback(() => {
-    if (suppressTap.current) return;
+  const launch = useCallback(() => {
     if (ownWindow.available) ownWindow.open(channel);
     else onSelect();
   }, [ownWindow, channel, onSelect]);
+
+  const handleSelect = useCallback(() => {
+    if (suppressTap.current) return;
+    launch();
+  }, [launch]);
 
   const tile = (
     <TileButton name={name} onSelect={handleSelect}>
@@ -168,13 +172,19 @@ export function AppIcon({ event, channel, onSelect, onRemove }: AppIconProps) {
         </ContextMenuContent>
       </ContextMenu>
 
-      {/* Outside the menu, which is gone by the time this opens. */}
+      {/* Outside the menu, which is gone by the time this opens. It is handed
+          the same verbs the menu offers, because it stands in for the screen
+          the device shows for its own apps, and that screen is where they all
+          are. */}
       <NsiteAppInfo
         event={event}
         name={name}
         app={app}
         open={infoOpen}
         onOpenChange={setInfoOpen}
+        onOpen={launch}
+        pinning={pinning}
+        onRemove={onRemove}
       />
     </>
   );

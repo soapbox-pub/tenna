@@ -1,46 +1,27 @@
 import type { NostrEvent } from '@nostrify/nostrify';
 import { Check, Info, Plus, SquarePlus, Trash2 } from 'lucide-react';
-import { useCallback, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useRef, useState } from 'react';
 
 import { NsiteAppInfo } from '@/components/NsiteAppInfo';
+import {
+  TileArtwork,
+  TileButton,
+  TileFace,
+  TileFrame,
+  TileStatic,
+} from '@/components/Tile';
+import { MENU, MENU_ITEM, MENU_ITEM_DESTRUCTIVE } from '@/components/tile-variants';
 import {
   ContextMenu,
   ContextMenuContent,
   ContextMenuItem,
   ContextMenuTrigger,
 } from '@/components/ui/context-menu';
-import { WhiteNoise } from '@/components/WhiteNoise';
 import { useNsiteApp } from '@/hooks/useNsiteApp';
 import { useNsitePin } from '@/hooks/useNsitePin';
 import { useNsiteWindow } from '@/hooks/useNsiteWindow';
 import { impactMedium } from '@/lib/haptics';
-import { getTileGradient, getTileInitial } from '@/lib/iconTile';
 import { getNsiteName } from '@/lib/nsiteSubdomain';
-import { cn } from '@/lib/utils';
-
-/**
- * The long-press menu, sized for the thumb that opened it.
- *
- * A pointer menu is a list of small targets because a mouse can hit them. This
- * one is opened by holding a finger on an icon, and what comes up under that
- * finger has to be hit by the same finger without moving the phone — so the
- * rows are a comfortable tap tall, the type is body-sized rather than caption-
- * sized, and the surface is a rounded sheet rather than a bordered box, the
- * way a launcher's own is.
- */
-const MENU = 'w-60 rounded-3xl border-white/10 bg-[#241014]/95 p-2 text-white shadow-2xl backdrop-blur-xl';
-
-const MENU_ITEM = [
-  'h-14 gap-4 rounded-2xl px-4 text-base font-medium text-white/95',
-  'focus:bg-white/10 focus:text-white',
-  "[&_svg:not([class*='size-'])]:size-5 [&_svg:not([class*='text-'])]:text-white/60",
-].join(' ');
-
-const MENU_ITEM_DESTRUCTIVE = [
-  MENU_ITEM,
-  'data-[variant=destructive]:text-[#F96C91] data-[variant=destructive]:focus:bg-[#F96C91]/15',
-  'data-[variant=destructive]:focus:text-[#F96C91] data-[variant=destructive]:*:[svg]:text-[#F96C91]!',
-].join(' ');
 
 interface AppIconProps {
   event: NostrEvent;
@@ -53,36 +34,6 @@ interface AppIconProps {
 }
 
 /**
- * The face of a tile: the squircle, whatever is on it, and the sheen of light
- * across the glass.
- */
-function TileFace({ background, children }: { background: string; children: ReactNode }) {
-  return (
-    <span className="app-squircle absolute inset-0 overflow-hidden" style={{ background }}>
-      {children}
-      <span
-        aria-hidden="true"
-        className="absolute inset-0 bg-[linear-gradient(160deg,rgba(255,255,255,0.22),transparent_45%)]"
-      />
-    </span>
-  );
-}
-
-/** The tile, its shadow, and the halo that marks focus. */
-function TileFrame({ children, className }: { children: ReactNode; className?: string }) {
-  return (
-    <span
-      className={cn(
-        'relative block aspect-square w-full drop-shadow-[0_6px_12px_rgba(0,0,0,0.55)]',
-        className,
-      )}
-    >
-      {children}
-    </span>
-  );
-}
-
-/**
  * A tile with nothing tuned into it yet, for the wait before the lineup itself
  * arrives — there is no site to name, so the label is a bar.
  */
@@ -90,9 +41,7 @@ export function AppIconSkeleton() {
   return (
     <div className="flex w-full flex-col items-center gap-2">
       <TileFrame>
-        <TileFace background="#0A0A0A">
-          <WhiteNoise className="absolute inset-0 opacity-90" />
-        </TileFace>
+        <TileStatic />
       </TileFrame>
       <span className="h-3 w-3/4 rounded-full bg-white/15 motion-safe:animate-pulse" />
     </div>
@@ -100,7 +49,7 @@ export function AppIconSkeleton() {
 }
 
 /**
- * The tile at the end of the lineup, which is not a site but the way to add
+ * The tile at the end of the lineup, which is not an app but the way to add
  * one.
  *
  * It sits in the grid as a tile because that is where a person looks for it,
@@ -109,49 +58,28 @@ export function AppIconSkeleton() {
  */
 export function AddAppTile({ onSelect }: { onSelect: () => void }) {
   return (
-    <button
-      type="button"
-      onClick={onSelect}
-      title="Add an app"
-      className="group flex w-full flex-col items-center gap-2 outline-none"
-    >
-      <TileFrame className="motion-safe:transition-transform motion-safe:duration-200 group-hover:-translate-y-1 group-active:scale-95 group-focus-visible:-translate-y-1">
-        <span
-          aria-hidden="true"
-          className="app-squircle absolute -inset-[3px] bg-[#FEF960] opacity-0 transition-opacity group-focus-visible:opacity-100"
-        />
-        <TileFace background="rgba(255,255,255,0.09)">
-          <span className="absolute inset-0 flex items-center justify-center">
-            <Plus
-              aria-hidden="true"
-              strokeWidth={1.5}
-              className="h-1/2 w-1/2 text-white/70 transition-colors group-hover:text-white group-focus-visible:text-white"
-            />
-          </span>
-        </TileFace>
-      </TileFrame>
-
-      <span className="w-full truncate px-0.5 text-center text-xs text-white/90 drop-shadow-[0_1px_3px_rgba(0,0,0,0.9)] sm:text-sm">
-        Add app
-      </span>
-    </button>
+    <TileButton name="Add app" title="Add an app" onSelect={onSelect}>
+      <TileFace background="rgba(255,255,255,0.09)">
+        <span className="absolute inset-0 flex items-center justify-center">
+          <Plus
+            aria-hidden="true"
+            strokeWidth={1.5}
+            className="h-1/2 w-1/2 text-white/70 transition-colors group-hover:text-white group-focus-visible:text-white"
+          />
+        </span>
+      </TileFace>
+    </TileButton>
   );
 }
 
 /**
- * One app on the home screen: a rounded tile with the site's own icon on it
+ * One nsite on the home screen: a rounded tile with the site's own icon on it
  * and its name underneath.
  *
  * The tile is never empty. Static plays on it while the icon is being resolved
  * — the site is known by then, so its name is already under the tile — and a
  * site that turns out to have no icon at all keeps a tile in its own color
  * with its initial on it.
- *
- * The shadow and the focus halo are both cast outside the tile, so neither can
- * live on the tile itself: the mask that cuts its corners would cut them off
- * with them. The shadow is a `drop-shadow` filter on the frame, which reads
- * the alpha of what it wraps and so follows the squircle, and the halo is a
- * second squircle sitting a few pixels proud behind it.
  */
 export function AppIcon({ event, channel, onSelect, onRemove }: AppIconProps) {
   const { data: app, isPending } = useNsiteApp(event);
@@ -189,49 +117,18 @@ export function AppIcon({ event, channel, onSelect, onRemove }: AppIconProps) {
   }, [ownWindow, channel, onSelect]);
 
   const tile = (
-    <button
-      type="button"
-      onClick={handleSelect}
-      title={name}
-      className="group flex w-full flex-col items-center gap-2 outline-none"
-    >
-      <TileFrame className="motion-safe:transition-transform motion-safe:duration-200 group-hover:-translate-y-1 group-active:scale-95 group-focus-visible:-translate-y-1">
-        <span
-          aria-hidden="true"
-          className="app-squircle absolute -inset-[3px] bg-[#FEF960] opacity-0 transition-opacity group-focus-visible:opacity-100"
+    <TileButton name={name} onSelect={handleSelect}>
+      {isPending ? (
+        <TileStatic />
+      ) : (
+        <TileArtwork
+          name={name}
+          iconUrl={app?.iconUrl}
+          fit={app?.fit}
+          background={app?.background}
         />
-        {isPending ? (
-          <TileFace background="#0A0A0A">
-            <WhiteNoise className="absolute inset-0 opacity-90" />
-          </TileFace>
-        ) : (
-          <TileFace background={app?.background ?? getTileGradient(name)}>
-            {app?.iconUrl ? (
-              <img
-                src={app.iconUrl}
-                alt=""
-                decoding="async"
-                loading="lazy"
-                className={cn(
-                  'absolute',
-                  app.fit === 'cover'
-                    ? 'inset-0 h-full w-full object-cover'
-                    : 'inset-[18%] h-[64%] w-[64%] object-contain drop-shadow-[0_1px_2px_rgba(0,0,0,0.35)]',
-                )}
-              />
-            ) : (
-              <span className="absolute inset-0 flex items-center justify-center text-3xl font-semibold leading-none text-white/95 sm:text-4xl">
-                {getTileInitial(name)}
-              </span>
-            )}
-          </TileFace>
-        )}
-      </TileFrame>
-
-      <span className="w-full truncate px-0.5 text-center text-xs text-white/90 drop-shadow-[0_1px_3px_rgba(0,0,0,0.9)] sm:text-sm">
-        {name}
-      </span>
-    </button>
+      )}
+    </TileButton>
   );
 
   // Every tile has a menu, because every app has an info panel — a site the

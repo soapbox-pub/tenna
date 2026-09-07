@@ -147,6 +147,27 @@
         </provider>
     </application>
 
+    <!--
+        What Tenna is allowed to see of the rest of the device.
+
+        Since Android 11 an app is shown only the packages it declares an
+        interest in, and the interest is declared as the intents it would send.
+        This one is the signature of a launchable app — the thing every home
+        screen resolves — so it matches exactly the apps that already have an
+        icon on the launcher, and nothing that doesn't.
+
+        Deliberately not QUERY_ALL_PACKAGES. Everything on the wall is
+        launchable by definition, so the narrow filter answers the whole
+        question, and the broad permission is a restricted one that would have
+        to be justified to Google Play besides.
+    -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
+    </queries>
+
     <!-- Permissions -->
 
     <uses-permission android:name="android.permission.INTERNET" />

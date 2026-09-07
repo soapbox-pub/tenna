@@ -2,11 +2,13 @@ import type { NostrEvent } from '@nostrify/nostrify';
 import { useSeoMeta } from '@unhead/react';
 import { useState } from 'react';
 
-import { AddNsiteDialog } from '@/components/AddNsiteDialog';
+import { AddAppDialog } from '@/components/AddAppDialog';
 import { AddAppTile, AppIcon, AppIconSkeleton } from '@/components/AppIcon';
 import { LoginArea } from '@/components/auth/LoginArea';
+import { NativeAppIcon } from '@/components/NativeAppIcon';
 import { NsiteSharePicker } from '@/components/NsiteSharePicker';
 import { NsiteViewer } from '@/components/NsiteViewer';
+import { useAddedNativeApps, nativeAppId } from '@/hooks/useAddedNativeApps';
 import { useAddedNsites } from '@/hooks/useAddedNsites';
 import { useNsites } from '@/hooks/useNsites';
 import { usePendingShare } from '@/hooks/useNsiteShare';
@@ -32,6 +34,7 @@ const Index = () => {
 
   const { data: nsites, isLoading } = useNsites();
   const added = useAddedNsites();
+  const nativeApps = useAddedNativeApps();
 
   // The site tuned in over the wall, where a site can't be given a window of
   // its own. On Android pressing a tile launches one instead and nothing here
@@ -51,8 +54,14 @@ const Index = () => {
   const own = (added.events ?? []).filter((event) => !curatedIds.has(getNsiteSubdomain(event)));
 
   const lineup = [...curated, ...own];
+
+  // The device's own apps come after the sites, so that adding one doesn't
+  // renumber the channels: a channel is a site's place in the lineup, and a
+  // native app has no channel to take.
+  const devices = nativeApps.apps;
+
   const loading = isLoading || added.isLoading;
-  const empty = !loading && lineup.length === 0;
+  const empty = !loading && lineup.length === 0 && devices.length === 0;
 
   return (
     <main className="relative min-h-screen overflow-hidden bg-[#150609] text-white">
@@ -107,6 +116,14 @@ const Index = () => {
             />
           ))}
 
+          {devices.map((app) => (
+            <NativeAppIcon
+              key={app.id}
+              app={app}
+              onRemove={() => nativeApps.remove(app.id)}
+            />
+          ))}
+
           {!loading && <AddAppTile onSelect={() => setAdding(true)} />}
         </div>
 
@@ -119,11 +136,13 @@ const Index = () => {
         )}
       </div>
 
-      <AddNsiteDialog
+      <AddAppDialog
         open={adding}
         onOpenChange={setAdding}
         addedIds={[...curatedIds, ...added.stored.map((site) => site.id)]}
         onAdd={added.add}
+        addedNativeIds={nativeApps.stored.map(nativeAppId)}
+        onAddNativeApp={nativeApps.add}
       />
 
       <NsiteSharePicker share={share} onDismiss={dismiss} onHandOff={handOff} />

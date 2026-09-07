@@ -2,7 +2,8 @@ import { App } from '@capacitor/app';
 import type { PluginListenerHandle } from '@capacitor/core';
 import type { NostrEvent } from '@nostrify/nostrify';
 import { ArrowLeft, Check, ExternalLink, SquarePlus, Trash2, X } from 'lucide-react';
-import { useEffect, useMemo, useState, type ComponentType } from 'react';
+import { nip19 } from 'nostr-tools';
+import { useEffect, useMemo, useRef, useState, type ComponentType } from 'react';
 
 import { TileArtwork, TileFrame } from '@/components/Tile';
 import { Button } from '@/components/ui/button';
@@ -16,15 +17,17 @@ import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useNsiteAllowance } from '@/hooks/useNsiteAllowance';
 import type { NsiteApp } from '@/hooks/useNsiteApp';
 import type { UseNsitePinResult } from '@/hooks/useNsitePin';
-import { impactLight } from '@/lib/haptics';
+import { useToast } from '@/hooks/useToast';
+import { impactMedium, notificationError } from '@/lib/haptics';
 import { NappPush, supportsNappPush } from '@/lib/nappPushPlugin';
+import { NativeApps, supportsNativeApps } from '@/lib/nativeAppsPlugin';
 import {
   clearNsitePermissions,
   getPermissionLabel,
   removeNsitePermission,
   type NsitePermission,
 } from '@/lib/nsitePermissions';
-import { getNsiteSubdomain } from '@/lib/nsiteSubdomain';
+import { getNsiteSubdomain, NSITE_SNAPSHOT_KIND } from '@/lib/nsiteSubdomain';
 import { cn } from '@/lib/utils';
 
 interface NsiteAppInfoProps {
@@ -113,6 +116,93 @@ function InfoAction({
   );
 }
 
+/** How long a finger has to rest on an address before it is taken. */
+const LONG_PRESS_MS = 500;
+
+/**
+ * One of the site's addresses, with the two things anybody wants from one.
+ *
+ * Holding it copies it, which is what a long press on a value means on this
+ * device — the system's own screens have offered it for years, and it is the
+ * gesture a person already makes at a string too long to read. The press is
+ * timed here rather than left to the WebView's selection bar, since a page
+ * imitating a system screen should not answer with the browser's furniture.
+ * A tap copies too: a long press is not a gesture a keyboard can make, and a
+ * row that only answers to one is a row some people cannot use.
+ *
+ * The button beside it hands the address to the device, where another app may
+ * claim the scheme.
+ */
+function AddressRow({
+  uri,
+  onOpen,
+}: {
+  uri: string;
+  onOpen: (uri: string) => void;
+}) {
+  const [copied, setCopied] = useState(false);
+  const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
+
+  const copy = () => {
+    void navigator.clipboard?.writeText(uri).then(
+      () => setCopied(true),
+      () => {
+        // No clipboard to write to. The address is on screen either way.
+      },
+    );
+  };
+
+  // Back to the address after a moment, so the next press has something to
+  // confirm again.
+  useEffect(() => {
+    if (!copied) return;
+    const t = setTimeout(() => setCopied(false), 1600);
+    return () => clearTimeout(t);
+  }, [copied]);
+
+  useEffect(() => () => clearTimeout(timer.current), []);
+
+  const hold = () => {
+    clearTimeout(timer.current);
+    timer.current = setTimeout(() => {
+      impactMedium();
+      copy();
+    }, LONG_PRESS_MS);
+  };
+
+  const release = () => clearTimeout(timer.current);
+
+  return (
+    <li className="flex items-center gap-2">
+      <button
+        type="button"
+        onClick={copy}
+        onPointerDown={hold}
+        onPointerUp={release}
+        onPointerLeave={release}
+        onPointerCancel={release}
+        // A finger that has started to scroll the page is no longer holding
+        // this.
+        onPointerMove={release}
+        aria-label={`Copy ${uri}`}
+        className="min-w-0 flex-1 truncate rounded-lg px-2 py-3 text-left font-mono text-xs text-white/70 outline-none transition-colors hover:bg-white/5 hover:text-white/90 focus-visible:ring-2 focus-visible:ring-[#FEF960]"
+      >
+        {copied ? 'Copied' : middleEllipsis(uri, 34)}
+      </button>
+
+      <button
+        type="button"
+        onClick={() => onOpen(uri)}
+        aria-label={`Open ${uri}`}
+        title="Open"
+        className="flex size-9 shrink-0 items-center justify-center rounded-full text-white/50 outline-none transition-colors hover:bg-white/10 hover:text-white focus-visible:ring-2 focus-visible:ring-[#FEF960]"
+      >
+        <ExternalLink aria-hidden="true" className="size-5" />
+      </button>
+    </li>
+  );
+}
+
 /**
  * What an app on the wall has been given, and how to take it back.
  *
@@ -143,9 +233,34 @@ export function NsiteAppInfo({
   onRemove,
 }: NsiteAppInfoProps) {
   const { user } = useCurrentUser();
-  const [copied, setCopied] = useState(false);
+  const { toast } = useToast();
 
   const siteId = useMemo(() => getNsiteSubdomain(event), [event]);
+
+  /**
+   * The site's two addresses: the event that describes it, and the site.
+   *
+   * A snapshot is a regular event and is pointed at by its id; a root or named
+   * site is replaceable and is pointed at by what addresses it, so that the
+   * link keeps meaning the site rather than one version of it.
+   */
+  const addresses = useMemo(() => {
+    const list: string[] = [];
+
+    try {
+      if (event.kind === NSITE_SNAPSHOT_KIND) {
+        list.push(`nostr:${nip19.neventEncode({ id: event.id, author: event.pubkey, kind: event.kind })}`);
+      } else {
+        const identifier = event.tags.find(([n]) => n === 'd')?.[1] ?? '';
+        list.push(`nostr:${nip19.naddrEncode({ kind: event.kind, pubkey: event.pubkey, identifier })}`);
+      }
+    } catch {
+      // A manifest that cannot be addressed still has a site behind it.
+    }
+
+    list.push(`nsite://${siteId}`);
+    return list;
+  }, [event, siteId]);
   const allowance = useNsiteAllowance(siteId, user?.pubkey);
   const permissions = allowance?.permissions ?? [];
   const hasPermissions = permissions.length > 0;
@@ -173,30 +288,37 @@ export function NsiteAppInfo({
     if (hadPush) forgetSubscriptions();
   };
 
-  const handleCopyId = () => {
-    void navigator.clipboard?.writeText(siteId).then(
-      () => {
-        impactLight();
-        setCopied(true);
-      },
-      () => {
-        // No clipboard to write to. The id is on screen either way.
-      },
-    );
-  };
+  /**
+   * Hand an address to the device.
+   *
+   * Nothing here registers `nostr:` or `nsite://` itself, so this is a
+   * question for whatever else is installed — and one that often has no
+   * answer, which is why the answer is waited for and said out loud.
+   */
+  const handleOpenUri = (uri: string) => {
+    const scheme = uri.split(':')[0];
 
-  // Back to the address after a moment, so the next press has something to
-  // confirm again.
-  useEffect(() => {
-    if (!copied) return;
-    const timer = setTimeout(() => setCopied(false), 1600);
-    return () => clearTimeout(timer);
-  }, [copied]);
+    if (!supportsNativeApps()) {
+      // No plugin to ask. The WebView hands an unknown scheme to the OS on
+      // navigation, and says nothing either way.
+      window.location.href = uri;
+      return;
+    }
 
-  // Reopening should not still be showing the last press's confirmation.
-  const handleOpenChange = (next: boolean) => {
-    if (!next) setCopied(false);
-    onOpenChange(next);
+    void NativeApps.openUri({ uri })
+      .then(({ opened }) => {
+        if (opened) return;
+        notificationError();
+        toast({
+          title: `Nothing here opens ${scheme}: links`,
+          description: 'Install an app that handles them and try again.',
+          variant: 'destructive',
+        });
+      })
+      .catch(() => {
+        notificationError();
+        toast({ title: 'Could not open that address', variant: 'destructive' });
+      });
   };
 
   // Back is how a screen like this one is left. Nothing on the wall behind it
@@ -209,10 +331,7 @@ export function NsiteAppInfo({
     let handle: PluginListenerHandle | undefined;
     let disposed = false;
 
-    App.addListener('backButton', () => {
-      setCopied(false);
-      onOpenChange(false);
-    })
+    App.addListener('backButton', () => onOpenChange(false))
       .then((listener) => {
         if (disposed) void listener.remove();
         else handle = listener;
@@ -231,12 +350,12 @@ export function NsiteAppInfo({
   // looking at, so the screen goes with them. Pinning does not: the system
   // puts its own question up, and the answer comes back to this screen.
   const leaveAnd = (act: () => void) => () => {
-    handleOpenChange(false);
+    onOpenChange(false);
     act();
   };
 
   return (
-    <Dialog open={open} onOpenChange={handleOpenChange}>
+    <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
         // Nothing here describes the app in a sentence; the screen is its name
         // and a set of controls.
@@ -317,7 +436,7 @@ export function NsiteAppInfo({
           </div>
         </div>
 
-        <div className="flex flex-col gap-2 px-4">
+        <div className="flex flex-col gap-2 px-4 pb-safe-offset-8">
           <section className="rounded-2xl bg-white/[0.06] px-5 py-4">
             <div className="flex min-h-9 items-center justify-between gap-3">
               <h3 className="text-lg font-medium text-white">Permissions</h3>
@@ -368,25 +487,25 @@ export function NsiteAppInfo({
               </ul>
             )}
           </section>
-        </div>
 
-        {/* The site's address, where the version string sits at the foot of an
-            app's info: there to identify the thing, and not to be read. Cut
-            through the middle rather than wrapped, because the whole of it
-            would be four lines of base32 and the ends are the parts that mean
-            anything. */}
-        <button
-          type="button"
-          onClick={handleCopyId}
-          aria-label={`Copy the address ${siteId}`}
-          // `mt-auto` puts it at the foot of the page rather than trailing the
-          // last card, which on a site with one line of permissions would
-          // leave it stranded in the middle of the screen. A long list pushes
-          // it back into the flow.
-          className="mx-auto mt-auto block max-w-full truncate rounded-lg px-3 pb-1.5 pt-8 font-mono text-xs text-white/40 outline-none transition-colors hover:bg-white/5 hover:text-white/60 focus-visible:ring-2 focus-visible:ring-[#FEF960] mb-safe-offset-8"
-        >
-          {copied ? 'Copied' : middleEllipsis(siteId, 32)}
-        </button>
+          {/* Where a system screen keeps the package name and version: what
+              the thing is called by everything that is not a person. Cut
+              through the middle rather than wrapped, because whole they would
+              be four lines of base32 and the ends are the parts that mean
+              anything — the scheme at the front, and at the back the tail that
+              names the site. */}
+          <section className="rounded-2xl bg-white/[0.06] px-5 py-4">
+            <h3 className="flex min-h-9 items-center text-lg font-medium text-white">
+              Addresses
+            </h3>
+
+            <ul className="-mx-2 mt-1 divide-y divide-white/10">
+              {addresses.map((uri) => (
+                <AddressRow key={uri} uri={uri} onOpen={handleOpenUri} />
+              ))}
+            </ul>
+          </section>
+        </div>
       </DialogContent>
     </Dialog>
   );

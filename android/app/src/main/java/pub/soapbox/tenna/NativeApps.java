@@ -206,6 +206,31 @@ final class NativeApps {
     }
 
     /**
+     * Hand a URI to whatever on the device answers for its scheme.
+     *
+     * The WebView would do this itself for a link it cannot navigate to, but
+     * silently: an unhandled scheme is swallowed there, and a button that does
+     * nothing is worse than one that says nothing happened. The answer comes
+     * back so the caller can say so.
+     *
+     * The whole URI is the caller's to build. This starts a view intent for
+     * whatever string it is given, which is only safe because the plugin is
+     * registered on the wall's activity alone — a site's own window has no
+     * route to it.
+     */
+    static boolean openUri(@NonNull Context context, @NonNull String uri) {
+        Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(uri))
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+
+        try {
+            context.startActivity(intent);
+            return true;
+        } catch (android.content.ActivityNotFoundException | SecurityException e) {
+            return false;
+        }
+    }
+
+    /**
      * Whatever the drawable is, as a bitmap of a known size, in the shape the
      * device would draw it.
      *

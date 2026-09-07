@@ -100,4 +100,18 @@ public class NativeAppsPlugin extends Plugin {
         result.put("opened", NativeApps.settings(getContext(), packageName));
         call.resolve(result);
     }
+
+    /** Hand a URI to whatever on the device answers for its scheme. */
+    @PluginMethod
+    public void openUri(PluginCall call) {
+        String uri = call.getString("uri");
+        if (uri == null) {
+            call.reject("uri is required");
+            return;
+        }
+
+        JSObject result = new JSObject();
+        result.put("opened", NativeApps.openUri(getContext(), uri));
+        call.resolve(result);
+    }
 }

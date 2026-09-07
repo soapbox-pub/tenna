@@ -40,6 +40,15 @@ export interface NativeAppsPlugin {
 
   /** Open the system's own settings page for an app. */
   settings(options: { packageName: string }): Promise<{ opened: boolean }>;
+
+  /**
+   * Hand a URI to whatever on the device answers for its scheme.
+   *
+   * `opened: false` means nothing on the device claims it — an ordinary
+   * answer, not an error, and the one thing a caller needs in order to say so
+   * rather than appear to do nothing.
+   */
+  openUri(options: { uri: string }): Promise<{ opened: boolean }>;
 }
 
 export const NativeApps = registerPlugin<NativeAppsPlugin>('NativeApps');

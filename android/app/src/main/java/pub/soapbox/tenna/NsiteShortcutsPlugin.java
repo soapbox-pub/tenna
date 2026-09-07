@@ -234,11 +234,13 @@ public class NsiteShortcutsPlugin extends Plugin {
             return;
         }
 
-        // Deliberately not a sharing shortcut yet, whatever the site declared.
-        // Pinning is a request the system answers behind its own dialog, and a
-        // site the user turned down has no business in their share menu; the
-        // web layer calls `setShareTarget` once it has seen the shortcut land.
-        ShortcutInfoCompat shortcut = shortcutFor(context, siteId, label, bitmap, null);
+        // Deliberately not a sharing shortcut, whatever the site declared.
+        // Pinning is a request the system answers behind its own dialog, so
+        // this is a launcher icon and nothing more; a site's place in the share
+        // sheet is `syncSite`'s business, and it is earned by being on the wall
+        // rather than by being here. Rank likewise: it is only consulted among
+        // dynamic shortcuts, which this one is not.
+        ShortcutInfoCompat shortcut = shortcutFor(context, siteId, label, bitmap, null, 0);
 
         JSObject result = new JSObject();
         result.put("requested", ShortcutManagerCompat.requestPinShortcut(context, shortcut, null));
@@ -258,13 +260,21 @@ public class NsiteShortcutsPlugin extends Plugin {
      * launcher icon; one carrying the categories declared in
      * {@code res/xml/shortcuts.xml} is also offered for the MIME types those
      * entries match. Long-lived, because the sheet may hold on to it.
+     *
+     * {@code rank} is the site's place on the wall. Android caps how many
+     * dynamic shortcuts an app may publish and drops the worst-ranked one to
+     * make room, and every site the user has now publishes one — so past the
+     * cap this is what decides which site loses its place in the sheet. The
+     * wall is a list the user arranged; the bottom of it is the right end to
+     * cut from, and cutting from an arbitrary end is the alternative.
      */
     private static ShortcutInfoCompat shortcutFor(
         @NonNull Context context,
         @NonNull String siteId,
         @NonNull String label,
         @Nullable Bitmap bitmap,
-        @Nullable Set<String> categories
+        @Nullable Set<String> categories,
+        int rank
     ) {
         ShortcutInfoCompat.Builder builder = new ShortcutInfoCompat.Builder(
             context,
@@ -272,6 +282,7 @@ public class NsiteShortcutsPlugin extends Plugin {
         )
             .setShortLabel(label)
             .setLongLabel(label)
+            .setRank(Math.max(rank, 0))
             // Adaptive, so the launcher masks it to whatever shape the rest of
             // the home screen is and lights it the same way. A plain bitmap
             // would sit on the wallpaper as a square among circles.
@@ -460,14 +471,16 @@ public class NsiteShortcutsPlugin extends Plugin {
             return;
         }
 
-        // Carried through, because updating a shortcut replaces it: a site that
-        // is in the share sheet would otherwise quietly drop out of it.
+        // Both carried through, because updating a shortcut replaces it: a
+        // site that is in the share sheet would otherwise quietly drop out of
+        // it, or fall to the bottom of the ranking and be the next one evicted.
         Set<String> categories = categories(call.getArray("shareCategories", null));
+        int rank = call.getInt("rank", 0);
 
         ShortcutManagerCompat.updateShortcuts(
             context,
             Collections.singletonList(
-                shortcutFor(context, siteId, record.label, bitmap, categories)
+                shortcutFor(context, siteId, record.label, bitmap, categories, rank)
             )
         );
 
@@ -482,12 +495,12 @@ public class NsiteShortcutsPlugin extends Plugin {
      * site, so a back gesture off its first page should take the recents card
      * with it the way closing an app does, not leave an empty one behind.
      *
-     * The record goes with it, unless the site is on the home screen or has
-     * asked for notifications. A window opened from the wall is resumed from
-     * its record for as long as it exists, and once it doesn't the wall is how
-     * the site gets opened again — but a pinned shortcut has no wall behind it
-     * and must keep its manifest, so a launcher that won't say whether a site
-     * is pinned is taken at its worst.
+     * The record only goes with it for a site the user doesn't actually have —
+     * one opened once from a search result and closed again. A site on the
+     * wall keeps everything: closing an app is not removing it, and a record
+     * thrown away here is a share target gone from the sheet and a manifest to
+     * fetch again the next time the site is opened. Taking a site off the wall
+     * is what clears it, in {@link #setWall}.
      */
     @PluginMethod
     public void finish(PluginCall call) {
@@ -498,20 +511,8 @@ public class NsiteShortcutsPlugin extends Plugin {
         final boolean fromWall =
             intent != null && intent.getBooleanExtra(NsiteAppActivity.EXTRA_FROM_WALL, false);
 
-        // A site with subscriptions keeps its record too: its worker is
-        // served from that manifest when an event arrives for it.
-        if (siteId != null
-            && Boolean.FALSE.equals(isPinned(siteId))
-            && !NappSubscriptions.has(getContext(), siteId)) {
-            NsiteSites.forget(getContext(), siteId);
-            // A site with no record cannot be served, so it must not go on
-            // being offered a share it would have nowhere to put, nor leave a
-            // notification in the shade whose tap would open nothing.
-            ShortcutManagerCompat.removeDynamicShortcuts(
-                getContext(),
-                Collections.singletonList(NsiteSites.key(siteId))
-            );
-            NappNotifications.cancelAll(getContext(), siteId);
+        if (siteId != null && !keepRecord(siteId)) {
+            forgetSite(getContext(), siteId);
         }
 
         getActivity().runOnUiThread(() -> {
@@ -526,10 +527,105 @@ public class NsiteShortcutsPlugin extends Plugin {
         call.resolve();
     }
 
+    /**
+     * Whether Tenna should go on remembering what a site is.
+     *
+     * Three reasons to, any one of which is enough:
+     *
+     * <ul>
+     *   <li>It is on the wall. The user has it; that is the whole answer.
+     *   <li>It is on the home screen. A pinned shortcut has no wall behind it
+     *       and must be answerable on a cold press without a relay — so a
+     *       launcher that won't say whether a site is pinned is taken at its
+     *       worst and the record is kept.
+     *   <li>It has notification subscriptions, whose worker is served from the
+     *       same manifest when an event arrives.
+     * </ul>
+     */
+    private boolean keepRecord(@NonNull String siteId) {
+        Context context = getContext();
+        return NsiteWall.has(context, siteId)
+            || !Boolean.FALSE.equals(isPinned(siteId))
+            || NappSubscriptions.has(context, siteId);
+    }
+
+    /**
+     * Drop everything Tenna holds about a site.
+     *
+     * A site with no record cannot be served, so it must not go on being
+     * offered a share it would have nowhere to put, nor leave a notification in
+     * the shade whose tap would open nothing.
+     */
+    private static void forgetSite(@NonNull Context context, @NonNull String siteId) {
+        NsiteSites.forget(context, siteId);
+        ShortcutManagerCompat.removeDynamicShortcuts(
+            context,
+            Collections.singletonList(NsiteSites.key(siteId))
+        );
+        NappNotifications.cancelAll(context, siteId);
+    }
+
+    /**
+     * Mirror the channel wall down here, and sweep up after it.
+     *
+     * The wall lives in the web layer's local storage, which is no use to the
+     * code that has to consult it: {@link #finish} runs inside a site's own
+     * window with no wall in memory, and the share sheet is read by the system
+     * when nothing of ours is running at all. So the whole set comes down on
+     * every change — see {@link NsiteWall} for why wholesale.
+     *
+     * Taking a site off the wall is what clears its record, which is the one
+     * moment Tenna is being told the user is done with it. Anything still
+     * pinned or still subscribed is left alone.
+     */
+    @PluginMethod
+    public void setWall(PluginCall call) {
+        JSArray siteIds = call.getArray("siteIds", null);
+        if (siteIds == null) {
+            call.reject("siteIds is required");
+            return;
+        }
+
+        Context context = getContext();
+
+        Set<String> wall = new LinkedHashSet<>();
+        try {
+            for (String siteId : siteIds.<String>toList()) {
+                if (siteId != null && !siteId.isEmpty()) wall.add(siteId);
+            }
+        } catch (JSONException e) {
+            call.reject("siteIds must be an array of strings", e);
+            return;
+        }
+
+        NsiteWall.replace(context, wall);
+
+        // Written first, so that a site being swept is judged against the wall
+        // as it is now rather than as it was.
+        for (NsiteSites.Record record : NsiteSites.list(context)) {
+            if (!keepRecord(record.siteId)) forgetSite(context, record.siteId);
+        }
+
+        call.resolve();
+    }
+
     // -- The OS share sheet ---------------------------------------------------
 
     /**
-     * Put a site in the share sheet, or take it back out.
+     * Bring a site on the wall up to date, and put it in the share sheet or
+     * take it back out.
+     *
+     * The wall is the only place a site's web app manifest is ever read, so it
+     * is the only place that can say what the site will take from the sheet,
+     * what it is called, or what it looks like. This is the call it makes about
+     * a site it is not otherwise touching — once per tile, as each one resolves.
+     *
+     * It writes the record when there isn't one. A site can sit on the wall for
+     * months without ever being opened, and a record is what everything else
+     * about it needs: the share sheet reads one, a notification is served from
+     * one, and a cold press on a launcher shortcut is answered out of one. The
+     * older arrangement — records made only by opening or pinning a site — left
+     * exactly those sites with nothing.
      *
      * Being in the sheet means being a *dynamic* shortcut: the sheet only
      * offers what the app currently publishes, and a shortcut that is merely
@@ -540,14 +636,13 @@ public class NsiteShortcutsPlugin extends Plugin {
      * the home screen, still enabled and still pointing at the same site — so
      * the worst this can do is cost a site its place in the share menu.
      *
-     * This is also where a site's {@code share_target} is written down. The
-     * wall is the only place a web app manifest is ever read, and it reads one
-     * long after the site was pinned — a site put on the home screen before
-     * Tenna knew about share targets at all has a record with nothing in that
-     * field, and the picker reads records rather than the wall.
+     * Every site the user has publishes a shortcut now rather than only the
+     * pinned few, so the per-app cap is reachable; {@code rank} is the site's
+     * place on the wall, and decides which site is dropped when it is reached.
+     * See {@link #shortcutFor}.
      */
     @PluginMethod
-    public void setShareTarget(PluginCall call) {
+    public void syncSite(PluginCall call) {
         String siteId = call.getString("siteId");
         if (siteId == null) {
             call.reject("siteId is required");
@@ -558,12 +653,30 @@ public class NsiteShortcutsPlugin extends Plugin {
         String id = NsiteSites.key(siteId);
 
         String shareTarget = call.getString("shareTarget");
-        if (shareTarget != null) {
-            try {
+        String event = call.getString("event");
+        String label = call.getString("label");
+        boolean named = label != null && !label.isEmpty();
+        Bitmap icon = decode(call.getString("icon"));
+
+        try {
+            NsiteSites.Record existing = NsiteSites.load(context, siteId);
+
+            if (existing == null) {
+                // No record yet — a site added to the wall and never opened.
+                // The manifest is what makes one worth having, so a call
+                // without it leaves the site as it found it.
+                if (event != null && named) {
+                    NsiteSites.save(context, siteId, label, event, icon, null, shareTarget);
+                }
+            } else if (named && !label.equals(existing.label)) {
+                // The site renamed itself. Nothing but the wall reads a web app
+                // manifest, so nothing but this would ever notice.
+                NsiteSites.save(context, siteId, label, existing.event, icon, null, shareTarget);
+            } else if (shareTarget != null) {
                 NsiteSites.setShareTarget(context, siteId, shareTarget);
-            } catch (IOException e) {
-                Log.w(TAG, "Could not record a share target", e);
             }
+        } catch (IOException e) {
+            Log.w(TAG, "Could not record a site", e);
         }
 
         if (!Boolean.TRUE.equals(call.getBoolean("enabled", false))) {
@@ -579,14 +692,16 @@ public class NsiteShortcutsPlugin extends Plugin {
         }
 
         NsiteSites.Record record = NsiteSites.load(context, siteId);
-        String label = call.getString("label", record != null ? record.label : siteId);
-        Bitmap bitmap = decode(call.getString("icon"));
-        if (bitmap == null) bitmap = NsiteSites.adaptiveIcon(context, siteId);
+        String name = named ? label : (record != null ? record.label : siteId);
+
+        // Whatever was drawn this time, or what was stored the last time — the
+        // wall only redraws a tile's artwork once while it is on screen.
+        Bitmap bitmap = icon != null ? icon : NsiteSites.adaptiveIcon(context, siteId);
 
         try {
             ShortcutManagerCompat.pushDynamicShortcut(
                 context,
-                shortcutFor(context, siteId, label == null ? siteId : label, bitmap, categories)
+                shortcutFor(context, siteId, name, bitmap, categories, call.getInt("rank", 0))
             );
         } catch (IllegalArgumentException | IllegalStateException e) {
             // Past the per-app cap, or the launcher is in a mood. The site
@@ -598,11 +713,17 @@ public class NsiteShortcutsPlugin extends Plugin {
     }
 
     /**
-     * Every pinned site that says it will take a share.
+     * Every site the user has that says it will take a share.
      *
      * For the picker, which is the way in when the sheet's own per-site entries
      * don't surface — their ranking is the system's business, and on a share
      * that Android decides to show as a flat app list they are simply absent.
+     *
+     * On the wall is enough; it does not have to be on the home screen. Adding
+     * a site to Tenna is how someone says they want it, and the launcher is a
+     * separate question about where its icon lives. A pinned site that has
+     * since come off the wall still counts, because its icon is still sitting
+     * there to be pressed.
      */
     @PluginMethod
     public void listShareTargets(PluginCall call) {
@@ -611,7 +732,8 @@ public class NsiteShortcutsPlugin extends Plugin {
 
         for (NsiteSites.Record record : NsiteSites.list(context)) {
             if (record.shareTarget == null) continue;
-            if (Boolean.FALSE.equals(isPinned(record.siteId))) continue;
+            if (!NsiteWall.has(context, record.siteId)
+                && Boolean.FALSE.equals(isPinned(record.siteId))) continue;
 
             JSObject site = new JSObject();
             site.put("siteId", record.siteId);

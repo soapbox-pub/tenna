@@ -25,17 +25,32 @@ export interface UseNsitePinResult {
 }
 
 /**
- * Put an nsite on the launcher.
+ * Put an nsite on the launcher, and keep what the system knows about it true.
  *
  * The site's tile is redrawn as a bitmap here rather than natively, because
  * the tile is already the answer to what the site looks like — its artwork on
  * its own colour, resolved out of its HTML — and the home screen and the
  * channel wall should not disagree about that.
+ *
+ * The second job is the larger one. The wall is the only place a site's web
+ * app manifest is ever read, so it is the only place that can tell the system
+ * what a site is called, what it looks like and what it will take from the
+ * share sheet — and it is the only place that reads one for a site sitting on
+ * the wall that has never been opened. So this runs for every tile, whether or
+ * not the site is on the home screen and whether or not it can be put there.
+ *
+ * `onWall` says whether this tile is one the user has, rather than one they
+ * are merely looking at. It is what decides whether the site is offered to the
+ * share sheet, so a site being browsed in the picker must never pass true.
+ * `rank` is the tile's place on the wall, which decides which site loses its
+ * place in the sheet when Android's cap on share targets is reached.
  */
 export function useNsitePin(
   event: NostrEvent,
   name: string,
   app: NsiteApp | undefined,
+  onWall: boolean,
+  rank = 0,
 ): UseNsitePinResult {
   const { toast } = useToast();
   const [available, setAvailable] = useState(false);
@@ -54,40 +69,62 @@ export function useNsitePin(
   const tile = useRef({ name, app });
   useEffect(() => { tile.current = { name, app }; }, [name, app]);
 
-  // Redrawing costs a Blossom round trip for the launcher's own artwork, and
-  // the check below runs every time the wall comes back into view. Once for as
-  // long as the tile is on screen is enough: what it draws only changes when
-  // Tenna does.
-  const redrawn = useRef(false);
+  // Drawing the icon costs a Blossom round trip. Once for as long as the tile
+  // is on screen is enough: what it draws only changes when Tenna does.
+  const drawn = useRef(false);
 
   /**
-   * Reconcile the share sheet with the home screen.
-   *
-   * A shortcut is only offered to the sheet once it is known to be pinned,
-   * because pinning is a request the system answers where we cannot hear it —
-   * and a site the user declined has no business in the share menu. Taking one
-   * back out leaves its launcher icon alone; a dynamic shortcut and a pinned
-   * one are the same object, and removing the first keeps the second.
+   * Tell the system what this site is, and put it in the share sheet or take
+   * it back out.
    *
    * Run for every site whose manifest has been read, not only for the ones
-   * that declared a target, because this is also what writes the answer to the
-   * site's record. The wall is the only place a manifest is ever read, and it
-   * reads one long after the site was pinned — so a site that has since
-   * dropped the member is only ever taken back out of the sheet here.
+   * that declared a share target, because the manifest is also where the
+   * site's name and artwork come from — and this is the only place either is
+   * ever read. A site added to the wall and never opened has nothing on disk
+   * until this runs, and a site that has since dropped its `share_target` is
+   * only ever taken back out of the sheet here.
+   *
+   * Being on the wall is what earns a place in the sheet. It used to be a
+   * shortcut on the home screen, which meant a share menu that only listed
+   * sites the user had gone to the further trouble of pinning — the launcher
+   * is a question about where an icon lives, not about which apps they have.
+   * A site that has been taken off the wall but is still on the home screen
+   * keeps its place too, but not from here: nothing draws a tile for it, so
+   * nothing runs this. It is held by the record its shortcut needs anyway.
    */
-  const syncShare = useCallback(async (isPinned: boolean) => {
+  const sync = useCallback(async () => {
     if (!known) return;
 
-    const offered = isPinned && !!shareTarget;
+    const offered = onWall && !!shareTarget;
     const { name, app } = tile.current;
-    const icon = isPinned ? await renderAppIconPng(name, app) : null;
+    const icon = drawn.current ? null : await renderAppIconPng(name, app);
+    if (icon) drawn.current = true;
 
-    // A site is only ever pinned once, so the artwork it was pinned with is
-    // whatever Tenna could draw that day. This is where a shortcut already on
-    // the home screen catches up with a better drawing — including one made
-    // from artwork the site was shipping all along and Tenna passed over.
-    if (icon && !redrawn.current) {
-      redrawn.current = true;
+    await NsiteShortcuts.syncSite({
+      siteId,
+      enabled: offered,
+      label: name,
+      icon: icon ?? undefined,
+      rank,
+      shareCategories: shareTarget ? shareCategories(shareTarget) : undefined,
+      // Only used if the site hasn't got a record yet, which is the case this
+      // exists for: one added to the wall and never opened.
+      event: JSON.stringify(event),
+      // The empty string is "read, and hasn't got one" — distinct from
+      // omitting it, which is "not read, leave the record alone".
+      shareTarget: shareTarget ? JSON.stringify(shareTarget) : '',
+    });
+
+    // A site is only ever pinned once, so a shortcut on the home screen wears
+    // whatever artwork Tenna could draw that day. This is where it catches up
+    // with a better drawing — including one made from artwork the site was
+    // shipping all along and Tenna passed over. It also carries the site's
+    // monochrome mark down, which nothing else writes: a notification arrives
+    // for a site with no window open, long after this manifest was read.
+    //
+    // After the sync above, so that a site whose record was only just made is
+    // found rather than passed over.
+    if (icon) {
       await NsiteShortcuts.refreshIcon({
         siteId,
         icon,
@@ -95,31 +132,31 @@ export function useNsitePin(
         // stops wearing Tenna's mark in the status bar.
         badge: (await renderAppBadgePng(app)) ?? undefined,
         shareCategories: offered && shareTarget ? shareCategories(shareTarget) : undefined,
+        rank,
       }).catch(() => {
         // An older shortcut than this build knows how to update. It keeps the
         // icon it has, which is the one it has always had.
       });
     }
+  }, [siteId, shareTarget, known, onWall, rank, event]);
 
-    await NsiteShortcuts.setShareTarget({
-      siteId,
-      enabled: offered,
-      label: name,
-      icon: icon ?? undefined,
-      shareCategories: shareTarget ? shareCategories(shareTarget) : undefined,
-      // The empty string is "read, and hasn't got one" — distinct from
-      // omitting it, which is "not read, leave the record alone".
-      shareTarget: shareTarget ? JSON.stringify(shareTarget) : '',
+  // Told to the system as soon as the manifest is read, and not behind
+  // `isSupported`: what a site is called and what it takes from the share
+  // sheet is no longer a question about the home screen. A launcher that
+  // declines pinned shortcuts still has a share sheet, and the site still
+  // needs a record for its notifications to be served from.
+  useEffect(() => {
+    if (!supportsNsiteWindows()) return;
+
+    void sync().catch(() => {
+      // The share sheet is a bonus; failing to update it is not worth a toast.
     });
-  }, [siteId, shareTarget, known]);
+  }, [sync]);
 
   const check = useCallback(async () => {
     const { pinned } = await NsiteShortcuts.isPinned({ siteId });
     setPinned(pinned);
-    await syncShare(pinned).catch(() => {
-      // The share sheet is a bonus; failing to update it is not worth a toast.
-    });
-  }, [siteId, syncShare]);
+  }, [siteId]);
 
   useEffect(() => {
     if (!supportsNsiteWindows()) return;

@@ -102,7 +102,11 @@ export function AppIcon({
   // The manifest's name for the site until the site itself says what it goes by.
   const name = app?.label ?? getNsiteName(event) ?? '???';
 
-  const pinning = useNsitePin(event, name, app);
+  // An `AppIcon` is a tile on the wall and nowhere else, so it is always a
+  // site the user has — a site merely being browsed in the picker draws itself
+  // and is never announced to the system. Its channel is its place on the
+  // wall, which is where it ranks in the share sheet. See `useNsitePin`.
+  const pinning = useNsitePin(event, name, app, true, channel - 1);
   const ownWindow = useNsiteWindow(event, name, app);
 
   const [infoOpen, setInfoOpen] = useState(false);

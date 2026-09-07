@@ -22,7 +22,7 @@ export interface NsiteLaunchSite {
    * transaction and a shared video is not going to fit in one.
    */
   shareToken?: string;
-  /** The site's `share_target`, as JSON text, as it stood when it was pinned. */
+  /** The site's `share_target`, as JSON text, as the wall last read it. */
   shareTarget?: string;
   /**
    * A site-absolute path to open the site at, instead of its front page.
@@ -34,7 +34,7 @@ export interface NsiteLaunchSite {
   path?: string;
 }
 
-/** A pinned site that will take something from the share sheet. */
+/** A site the user has that will take something from the share sheet. */
 export interface NsiteShareSite {
   siteId: string;
   label: string;
@@ -125,7 +125,7 @@ export interface NsiteShortcutsPlugin {
   }): Promise<{ updated: boolean }>;
 
   /**
-   * Redraw a pinned site's icon in place.
+   * Redraw a site's icon in place, wherever it already appears.
    *
    * Pinning is how a shortcut's artwork is normally set, and a site already on
    * the home screen cannot be pinned again from the wall — the menu offers it
@@ -133,8 +133,9 @@ export interface NsiteShortcutsPlugin {
    * better artwork than was known at the time, this is the way the icon
    * already on the home screen catches up.
    *
-   * The site's notification mark comes along for the same reason: this is the
-   * one call the wall makes about a site it is not otherwise touching.
+   * The site's notification mark comes along, since nothing else writes one:
+   * a notification arrives for a site with no window open, long after the
+   * manifest it was picked out of was read.
    */
   refreshIcon(options: {
     siteId: string;
@@ -144,32 +145,69 @@ export interface NsiteShortcutsPlugin {
     badge?: string;
     /** Kept on the shortcut, so refreshing does not take it out of the sheet. */
     shareCategories?: string[];
+    /** Kept for the same reason: updating a shortcut replaces it wholesale. */
+    rank?: number;
   }): Promise<{ updated: boolean }>;
 
   /** Leave a site's window, taking its task with it. */
   finish(): Promise<void>;
 
+  /**
+   * Mirror the wall down to the native side.
+   *
+   * Being on the wall is what keeps a site's record — its manifest, its icon,
+   * its place in the share sheet — and the native side cannot see local
+   * storage. It has to know: a site's window decides whether to throw its
+   * record away while running with no wall in memory, and the share sheet is
+   * read by the system when nothing of Tenna's is running at all.
+   *
+   * The whole set goes down on every change rather than one site at a time, so
+   * that a removal lost to a crash is corrected on the next launch instead of
+   * leaving a site on the wall here forever. Sites that came off the wall and
+   * are neither pinned nor subscribed are forgotten as part of the same call.
+   */
+  setWall(options: { siteIds: string[] }): Promise<void>;
+
   // -- The OS share sheet ---------------------------------------------------
 
   /**
-   * Offer this site to the share sheet, or withdraw it.
+   * Bring a site on the wall up to date, and offer it to the share sheet or
+   * withdraw it.
    *
-   * Separate from {@link NsiteShortcutsPlugin.pin} because pinning is a
-   * request the system answers out of our sight: the shortcut only becomes a
-   * share target once it is known to be on the home screen.
+   * The wall is the only place a site's web app manifest is read, so it is the
+   * only place that can say what a site takes from the sheet, what it is
+   * called, or what it looks like — long after the site was added, and whether
+   * or not it has ever been opened. This is the call the wall makes about a
+   * site it is not otherwise touching.
    *
-   * Also where the site's `share_target` is written to its record. The wall is
-   * the only place a web app manifest is read, and it reads one long after the
-   * site was pinned — so this is the moment a site pinned before Tenna knew
-   * about share targets gains one.
+   * Offering is separate from {@link NsiteShortcutsPlugin.pin} because pinning
+   * is a request the system answers out of our sight, and because a site does
+   * not have to be pinned to be shared to — being on the wall is enough.
    */
-  setShareTarget(options: {
+  syncSite(options: {
     siteId: string;
     /** False takes the site back out of the sheet, leaving any pinned icon. */
     enabled: boolean;
     label?: string;
     icon?: string;
     shareCategories?: string[];
+    /**
+     * The site's place on the wall, from the top.
+     *
+     * Android caps how many share targets an app may publish, and every site
+     * the user has publishes one — so past the cap this decides which site is
+     * dropped. The wall is a list they arranged; the bottom of it is the right
+     * end to cut from.
+     */
+    rank?: number;
+    /**
+     * The manifest event as JSON text.
+     *
+     * Only ever used to write a record for a site that hasn't got one — a site
+     * added to the wall and never opened. A newer manifest for a site that has
+     * one goes through {@link NsiteShortcutsPlugin.refresh} instead.
+     */
+    event?: string;
     /**
      * The site's `share_target` as JSON text, or `''` if it has none.
      *
@@ -179,7 +217,7 @@ export interface NsiteShortcutsPlugin {
     shareTarget?: string;
   }): Promise<void>;
 
-  /** Every pinned site that declared a `share_target`. */
+  /** Every site the user has that declared a `share_target`. */
   listShareTargets(): Promise<{ sites: NsiteShareSite[] }>;
 
   /** A share the user sent to Tenna itself, with no site chosen yet. */

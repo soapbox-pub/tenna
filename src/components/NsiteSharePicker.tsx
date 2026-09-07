@@ -118,7 +118,7 @@ export function NsiteSharePicker({ share, onDismiss, onHandOff }: NsiteSharePick
               ? 'Looking for apps that can take it…'
               : options.length > 0
                 ? `Pick where to send ${what}.`
-                : 'None of the apps on your home screen can take this.'}
+                : 'None of your apps can take this.'}
           </DialogDescription>
         </DialogHeader>
 
@@ -170,8 +170,8 @@ export function NsiteSharePicker({ share, onDismiss, onHandOff }: NsiteSharePick
 
         {!isPending && options.length === 0 && (
           <p className="py-2 text-sm text-muted-foreground">
-            An app has to be on your home screen, and has to say it takes shares, before it
-            can appear here.
+            An app has to be on your wall, and has to say it takes shares, before it can
+            appear here.
           </p>
         )}
       </DialogContent>

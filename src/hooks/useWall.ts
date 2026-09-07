@@ -1,7 +1,7 @@
 import type { NostrEvent } from '@nostrify/nostrify';
 import { useNostr } from '@nostrify/react';
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
-import { useCallback, useMemo } from 'react';
+import { useCallback, useEffect, useMemo } from 'react';
 
 import { useCacheFirstSeedMany } from '@/hooks/useCacheFirstSeed';
 import { useLocalStorage } from '@/hooks/useLocalStorage';
@@ -9,6 +9,7 @@ import { useInstalledApps } from '@/hooks/useNativeApps';
 import type { NativeApp } from '@/lib/nativeAppsPlugin';
 import { nsitePointerFilter } from '@/lib/nsiteAddress';
 import { isServableNsite } from '@/lib/nsiteFiles';
+import { NsiteShortcuts, supportsNsiteWindows } from '@/lib/nsiteShortcutsPlugin';
 import { getNsiteSubdomain, hexToBase36, parseNsiteSubdomain } from '@/lib/nsiteSubdomain';
 import { APP_ID, DEFAULT_NSITES, NSITE_RELAY, TEAM_SOAPBOX_PUBKEY } from '@/lib/tenna';
 import { nativeAppUri, nsiteUri, parseWallUri, wallUriKey, type WallAddress } from '@/lib/wallUri';
@@ -148,6 +149,27 @@ export function useWall() {
 
   const sites = useMemo(() => nsiteAddresses(uris), [uris]);
   const installed = useInstalledApps();
+
+  // Tell the native side what is on the wall.
+  //
+  // Being on the wall is what keeps a site's record — its manifest, its icon,
+  // its place in the share sheet — and none of the code that needs to know
+  // can see local storage: a site's own window decides whether to forget its
+  // record with no wall in memory, and the share sheet is read by the system
+  // when nothing of Tenna's is running at all.
+  //
+  // The stored addresses rather than the drawn tiles, because a site whose
+  // manifest hasn't arrived is still a site the user has.
+  const wallSiteIds = useMemo(() => sites.map(({ id }) => id), [sites]);
+
+  useEffect(() => {
+    if (!supportsNsiteWindows()) return;
+
+    void NsiteShortcuts.setWall({ siteIds: wallSiteIds }).catch(() => {
+      // An older build than this method, or a write that failed. The next
+      // change to the wall says the whole thing again.
+    });
+  }, [wallSiteIds]);
 
   // Sorted, so the key is the *set* of sites on the wall and not the order
   // they sit in. Dragging one tile past another asks for exactly the same

@@ -39,10 +39,13 @@ import org.json.JSONException;
 import org.json.JSONObject;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 
@@ -489,9 +492,20 @@ public class NsiteWebViewPlugin extends Plugin {
             public boolean shouldOverrideUrlLoading(WebView v, WebResourceRequest request) {
                 Uri url = request.getUrl();
                 String expected = host;
-                // Keep the site inside its own origin. Anything else it tries
-                // to navigate to is a link out, which is not ours to follow.
-                return expected == null || !expected.equalsIgnoreCase(url.getHost());
+                // Inside its own origin the site navigates as it pleases.
+                if (expected != null && expected.equalsIgnoreCase(url.getHost())) return false;
+
+                // Anything else is a link out, which this window cannot
+                // follow: it is one site's window, not a browser, and there is
+                // nowhere in it for another origin to go. So it is handed to
+                // the device, which is where a link out of an app goes.
+                //
+                // Only the main frame's. A third-party subframe reaching for
+                // its own origin is the page loading itself, not somebody
+                // asking to leave, and an embedded video has no business
+                // throwing the user into a browser.
+                if (request.isForMainFrame()) handOff(request);
+                return true;
             }
 
             @Override
@@ -510,6 +524,57 @@ public class NsiteWebViewPlugin extends Plugin {
             }
         });
     }
+
+    /**
+     * Hand a link out of the site to whatever on the device answers for it.
+     *
+     * A site's window has no address bar and no second tab, so a link to
+     * anywhere else can only be somebody else's to open: an http link goes to
+     * the browser, a {@code mailto:} to the mail app, a {@code lightning:} to a
+     * wallet. That is the same thing the tile for a native app does, and it
+     * runs through the same helper.
+     *
+     * Two things are asked of the link first. It must be one the user pressed,
+     * because a page that reaches for another app on load is not following
+     * anybody, and a site that could do that could throw somebody out of the
+     * app it took them a tap to enter, over and over. A redirect passes on the
+     * gesture that began it, so it counts as the tail of a press.
+     *
+     * And its scheme must not be one of {@link #UNHANDLED_SCHEMES}.
+     */
+    private void handOff(@NonNull WebResourceRequest request) {
+        Uri url = request.getUrl();
+        String scheme = url.getScheme();
+
+        if (scheme == null || UNHANDLED_SCHEMES.contains(scheme.toLowerCase(Locale.ROOT))) {
+            Log.i(TAG, "Refused to hand the device a " + scheme + ": link");
+            return;
+        }
+
+        if (!request.hasGesture() && !request.isRedirect()) {
+            Log.i(TAG, "Refused an unasked-for navigation to " + url);
+            return;
+        }
+
+        if (!NativeApps.openUri(getContext(), url.toString())) {
+            Log.i(TAG, "Nothing on the device answers for " + url);
+        }
+    }
+
+    /**
+     * Schemes a site never gets to hand the device.
+     *
+     * {@code intent:} and {@code android-app:} are not links. They are Intents
+     * written out as text, and an Intent the page composes can name an explicit
+     * component of another app and the extras to call it with — reaching past
+     * anything a link is allowed to do, from a document Tenna did not write.
+     * {@code file:} and {@code content:} name the device's own storage, which
+     * is not the site's to point a viewer at. The rest never reach a URL
+     * handler anyway, and are refused here so that stays true.
+     */
+    private static final Set<String> UNHANDLED_SCHEMES = new HashSet<>(Arrays.asList(
+        "intent", "android-app", "file", "content", "javascript", "data", "about"
+    ));
 
     /**
      * Install the NIP-07 provider and its transport.

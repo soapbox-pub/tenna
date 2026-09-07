@@ -239,10 +239,10 @@ final class NativeApps {
      * nothing is worse than one that says nothing happened. The answer comes
      * back so the caller can say so.
      *
-     * The whole URI is the caller's to build. This starts a view intent for
-     * whatever string it is given, which is only safe because the plugin is
-     * registered on the wall's activity alone — a site's own window has no
-     * route to it.
+     * The whole URI is the caller's to build: this starts a view intent for
+     * whatever string it is given, and vets none of it. Callers reached from
+     * the wall's own UI can be trusted with that. A site's window cannot, so
+     * {@code NsiteWebViewPlugin} screens a link's scheme before it gets here.
      */
     static boolean openUri(@NonNull Context context, @NonNull String uri) {
         Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(uri))

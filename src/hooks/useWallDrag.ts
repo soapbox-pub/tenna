@@ -89,6 +89,18 @@ export function useWallDrag({ uris, onLongPress, onDragStart, onDrop }: WallDrag
     { from: number; to: number; dx: number; dy: number; slots: Slot[] } | null
   >(null);
 
+  /**
+   * The frame the wall reorders in, during which nothing may animate.
+   *
+   * A dropped tile is in two places at once for an instant: the transform
+   * still holds it under the finger, and the reorder has already moved the
+   * box that transform is measured from. Left to transition, it leaps a slot
+   * further on and then flies back — the tile arriving where it already was.
+   * So the transforms and the reorder are taken in the same render with
+   * transitions off, and the wall is simply drawn as it was left.
+   */
+  const [settling, setSettling] = useState(false);
+
   const gesture = useRef<Gesture | null>(null);
 
   // The click that follows a press the user did not mean as a tap. A menu
@@ -185,7 +197,14 @@ export function useWallDrag({ uris, onLongPress, onDragStart, onDrop }: WallDrag
         const { uris: order, onDrop: drop } = latest.current;
         const from = order[g.index];
         const to = order[g.to];
-        if (from && to) drop(from, to);
+        if (from && to) {
+          drop(from, to);
+          setSettling(true);
+          // Two frames: one for the wall to be laid out in its new order with
+          // nothing animating, and one to be sure that layout has been drawn
+          // before movement is allowed again.
+          requestAnimationFrame(() => requestAnimationFrame(() => setSettling(false)));
+        }
       }
 
       setDrag(null);
@@ -329,6 +348,7 @@ export function useWallDrag({ uris, onLongPress, onDragStart, onDrop }: WallDrag
    * render and no bookkeeping.
    */
   function styleFor(index: number): CSSProperties | undefined {
+    if (settling) return { transition: 'none' };
     if (!drag) return undefined;
 
     if (index === drag.from) {

@@ -13,9 +13,11 @@ import androidx.core.app.RemoteInput;
  *
  * Both raise an event in the site's service worker, which is where the web
  * puts them: pressing a button is {@code notificationclick} with an
- * {@code action}, and dismissing is {@code notificationclose}. Neither opens
- * a window — a reply typed into the shade is answered without leaving the
- * shade, and a dismissal is the user saying they are done.
+ * {@code action}, and dismissing is {@code notificationclose} — one for every
+ * notification in the row, since a site has one row and the swipe took all of
+ * them. Neither opens a window: a reply typed into the shade is answered
+ * without leaving the shade, and a dismissal is the user saying they are
+ * done.
  *
  * A receiver rather than an activity because of that: nothing here is allowed
  * to bring the app forward, and the push service it starts is started under
@@ -30,11 +32,14 @@ import androidx.core.app.RemoteInput;
 public class NappNotificationReceiver extends BroadcastReceiver {
 
     static final String ACTION_ACTION = "pub.soapbox.tenna.napp.NOTIFICATION_ACTION";
-    static final String ACTION_DISMISSED = "pub.soapbox.tenna.napp.NOTIFICATION_DISMISSED";
 
-    /** A site's whole conversation swiped away, and every notification in it. */
-    static final String ACTION_CONVERSATION_DISMISSED =
-        "pub.soapbox.tenna.napp.CONVERSATION_DISMISSED";
+    /**
+     * A site's row swiped away, and with it every notification in it.
+     *
+     * There is no dismissing one on its own: a site has one row, so the swipe
+     * the user makes is a swipe at all of them.
+     */
+    static final String ACTION_DISMISSED = "pub.soapbox.tenna.napp.NOTIFICATION_DISMISSED";
 
     static final String EXTRA_SITE_ID = "pub.soapbox.tenna.napp.SITE_ID";
     static final String EXTRA_KEY = "pub.soapbox.tenna.napp.KEY";
@@ -50,12 +55,11 @@ public class NappNotificationReceiver extends BroadcastReceiver {
         String siteId = intent.getStringExtra(EXTRA_SITE_ID);
         if (siteId == null) return;
 
-        if (ACTION_CONVERSATION_DISMISSED.equals(intent.getAction())) {
-            // One swipe, several notifications: the row is a site's
-            // conversation and every line of it has just been taken down.
-            // Dispatched before they are forgotten: each event carries the
-            // notification the site is being told about, read out of the same
-            // record that is about to be deleted.
+        if (ACTION_DISMISSED.equals(intent.getAction())) {
+            // One swipe, every notification in the row. Dispatched before they
+            // are forgotten: each event carries the notification the site is
+            // being told about, read out of the same record that is about to
+            // be deleted.
             for (String dismissed : NappNotifications.conversationKeys(context, siteId)) {
                 NappPushService.dispatchNotificationEvent(
                     context, siteId, "notificationclose", dismissed, null, null
@@ -65,22 +69,10 @@ public class NappNotificationReceiver extends BroadcastReceiver {
             return;
         }
 
+        if (!ACTION_ACTION.equals(intent.getAction())) return;
+
         String key = intent.getStringExtra(EXTRA_KEY);
         if (key == null) return;
-
-        if (ACTION_DISMISSED.equals(intent.getAction())) {
-            // Dispatched before it is forgotten: the event carries the
-            // notification the site is being told about, and it is read out
-            // of the same record this is about to delete.
-            NappPushService.dispatchNotificationEvent(
-                context, siteId, "notificationclose", key, null, null
-            );
-            // Which also takes down the header, if that was the last of them.
-            NappNotifications.forget(context, siteId, key);
-            return;
-        }
-
-        if (!ACTION_ACTION.equals(intent.getAction())) return;
 
         NappPushService.dispatchNotificationEvent(
             context,

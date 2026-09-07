@@ -151,7 +151,7 @@ it:
 | `tag`         | A later notification with the same tag replaces this one.              |
 | `icon`        | The picture beside it. See [Pictures](#pictures).                      |
 | `badge`       | The site's mark in the status bar. See [The badge](#the-badge).        |
-| `image`       | A photograph, shown in full when the notification is expanded.         |
+| `image`       | A photograph, drawn above the words when the notification is expanded. |
 | `actions`     | Buttons. See [Tapping, buttons and replies](#tapping-buttons-and-replies). |
 | `data`        | Anything the site wants back on `notificationclick`.                   |
 | `silent`      | Post without sound or vibration.                                       |
@@ -215,11 +215,10 @@ declared:
   name channels inside it: that arrived with `data.napp` and left with it,
   since a channel a site names is a settings entry the user cannot be rid of
   short of reinstalling.
-- **A bundle of its own**, for the notifications that stand outside the
-  conversation — the ones showing an `image`. Those gather under a header named
-  after the site rather than into one pile marked Tenna, once the site has two
-  of them out. The conversation never joins it, because Android lifts
-  conversations into a section of their own at the top of the shade.
+- **Nothing else.** There is no second row and no header above one. Whatever
+  the site sends, however many times, it has the one row — which is also why
+  Android files it in the conversation section at the top of the shade rather
+  than in the pile it makes of an app with several notifications out.
 
 ##### The conversation
 
@@ -242,6 +241,7 @@ conversation**, and its notifications are the lines in it:
 | a line's name                 | that notification's `title`                    |
 | a line's face                 | that notification's `icon`, cut to a circle    |
 | a line's text                 | that notification's `body`                     |
+| a line's picture              | that notification's `image`, drawn above its words |
 
 A notification with no `body` has only its title to give, so the line is spoken
 by the site itself and the title is the words. Collapsed, the row shows the
@@ -255,10 +255,14 @@ next push starts a fresh conversation rather than resurrecting what was
 dismissed.
 
 The buttons under the row are the **newest** notification's — one row of
-buttons cannot answer four different things. And a notification carrying an
-`image` is left out of the conversation entirely: a photograph cannot be drawn
-inside one, and showing the photograph is the point. Those stand alone and
-gather under the site's bundle instead.
+buttons cannot answer four different things.
+
+An `image` is a line of its own, above the words, because Android draws a
+message carrying a picture *as* the picture and anything written on it is lost.
+Only the newest one in the row is drawn: a photograph takes most of the height
+there is, so a second is a picture the shade has no room for, and the older it
+is the more certainly it is the one dropped. A notification whose photograph is
+not shown still shows everything it said.
 
 ##### The badge
 
@@ -316,11 +320,12 @@ photograph will still pick up even though a face will not.
 
 The face on a line is that notification's `icon`, cut to a circle because that
 is the shape of the slot. A line with no `icon` gets the system's own lettered
-circle rather than the site's mark repeated down the row. The icon on a
-notification that stands *outside* the conversation is left square, since
-Android clips a large icon to its own shape and cropping it here would crop it
-twice, and falls back to the site's own tile as it appears on Tenna's home
-screen.
+circle rather than the site's mark repeated down the row.
+
+An `image` is written to Tenna's cache and handed to the shade as a file, since
+that is what a message carrying a picture takes. A handful are kept and the
+oldest go; a photograph the site sent last week is not one anybody is looking
+at.
 
 #### Tapping, buttons and replies
 

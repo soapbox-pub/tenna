@@ -30,8 +30,9 @@ import java.util.List;
  * route and everything the site attached are written down.
  *
  * <b>What does the site have out?</b> {@code getNotifications()} is a real
- * method and has to answer with the site's own live notifications, and the
- * header their bundle sits under has to know when the last of them is gone.
+ * method and has to answer with the site's own live notifications — and the
+ * one row the site occupies is drawn from them, so a record is what puts a
+ * notification on screen rather than a note about one that is.
  *
  * One file per site, replaced whole. These are small, there are at most
  * {@link #MAX_PER_SITE} of them, and they are read on the path to showing a
@@ -60,14 +61,6 @@ final class NappNotificationStore {
         @NonNull final String options;
         /** Where a tap goes, as a site-absolute path, or null for the front page. */
         @Nullable final String url;
-        /**
-         * Whether it was drawn as a conversation.
-         *
-         * Which is to say: whether it is in the shade at all, as far as the
-         * site's bundle is concerned. Android lifts a conversation into its
-         * own section, where it neither joins a group nor counts towards one.
-         */
-        final boolean conversation;
         final long postedAt;
 
         Entry(
@@ -76,7 +69,6 @@ final class NappNotificationStore {
             @NonNull String title,
             @NonNull String options,
             @Nullable String url,
-            boolean conversation,
             long postedAt
         ) {
             this.key = key;
@@ -84,7 +76,6 @@ final class NappNotificationStore {
             this.title = title;
             this.options = options;
             this.url = url;
-            this.conversation = conversation;
             this.postedAt = postedAt;
         }
 
@@ -96,7 +87,6 @@ final class NappNotificationStore {
             json.put("title", title);
             json.put("options", options);
             if (url != null) json.put("url", url);
-            if (conversation) json.put("conversation", true);
             json.put("postedAt", postedAt);
             return json;
         }
@@ -116,7 +106,6 @@ final class NappNotificationStore {
                 title,
                 options,
                 json.optString("url", null),
-                json.optBoolean("conversation", false),
                 json.optLong("postedAt", 0)
             );
         }
@@ -218,8 +207,8 @@ final class NappNotificationStore {
         try (OutputStream out = new FileOutputStream(file)) {
             out.write(stored.toString().getBytes(StandardCharsets.UTF_8));
         } catch (IOException e) {
-            // A notification whose record could not be written still shows;
-            // it just forgets its lines and where its tap was going.
+            // Nothing is lost but this site's row, which the next push
+            // rebuilds; better an empty file than half of one.
             //noinspection ResultOfMethodCallIgnored
             file.delete();
         }

@@ -1,11 +1,10 @@
-import type { NostrEvent } from '@nostrify/nostrify';
 import { Check, Loader2, Search } from 'lucide-react';
 import { useMemo, useState } from 'react';
 
 import { Input } from '@/components/ui/input';
 import { useNsiteAddress } from '@/hooks/useNsiteAddress';
 import { useNsiteApp } from '@/hooks/useNsiteApp';
-import { useNsiteCatalog } from '@/hooks/useNsiteCatalog';
+import { useNsiteCatalog, type NsiteCatalogEntry } from '@/hooks/useNsiteCatalog';
 import { useSeen } from '@/hooks/useSeen';
 import { notificationSuccess } from '@/lib/haptics';
 import { getTileGradient, getTileInitial } from '@/lib/iconTile';
@@ -21,18 +20,21 @@ interface NsitePickerProps {
 
 /** One site in the list: its icon, its name, and whether it is already up. */
 function NsiteRow({
-  event,
+  entry,
   added,
   onSelect,
 }: {
-  event: NostrEvent;
+  entry: NsiteCatalogEntry;
   added: boolean;
   onSelect: () => void;
 }) {
+  const { event } = entry;
   const [ref, seen] = useSeen<HTMLButtonElement>();
   const { data: app } = useNsiteApp(event, { enabled: seen });
 
-  const name = app?.label ?? getNsiteName(event) ?? '???';
+  // What the site says of itself once it has been fetched beats what its
+  // manifest or its author's profile could say before that.
+  const name = app?.label ?? entry.name ?? '???';
 
   return (
     <button
@@ -80,10 +82,11 @@ function NsiteRow({
 /**
  * Pick a Nostr site to put on the wall.
  *
- * The list is the catalog — the apps Tenna's own publisher ships and the
- * clients Nsite Packagers puts on Nostr — narrowed as the user types, the same
- * way the device's own apps are picked next door. A site already on the wall
- * stays in the list and says it is there, rather than going missing.
+ * The list is the catalog — the apps Tenna's own publisher ships, the clients
+ * Nsite Packagers puts on Nostr, and the sites published by the people the
+ * user follows — narrowed as the user types, the same way the device's own
+ * apps are picked next door. A site already on the wall stays in the list and
+ * says it is there, rather than going missing.
  *
  * The box does double duty: a name filters the catalog, and an address fetches
  * the site it names and offers it in the same list, as the one result. A site
@@ -109,12 +112,15 @@ export function NsitePicker({ addedUris, onAdd }: NsitePickerProps) {
     [addedUris],
   );
 
-  const results = useMemo(() => {
-    if (address.isAddress) return address.event ? [address.event] : [];
+  const results = useMemo((): NsiteCatalogEntry[] => {
+    if (address.isAddress) {
+      if (!address.event) return [];
+      return [{ event: address.event, name: getNsiteName(address.event) }];
+    }
     if (!catalog) return [];
     const needle = search.trim().toLowerCase();
     if (!needle) return catalog;
-    return catalog.filter((event) => (getNsiteName(event) ?? '').toLowerCase().includes(needle));
+    return catalog.filter((entry) => (entry.name ?? '').toLowerCase().includes(needle));
   }, [catalog, search, address.isAddress, address.event]);
 
   const loading = address.isAddress ? address.isLoading : isLoading;
@@ -166,14 +172,14 @@ export function NsitePicker({ addedUris, onAdd }: NsitePickerProps) {
 
         <div className="space-y-1">
           {!loading &&
-            results.map((event) => (
+            results.map((entry) => (
               <NsiteRow
-                key={event.id}
-                event={event}
-                added={added.has(getNsiteSubdomain(event))}
+                key={entry.event.id}
+                entry={entry}
+                added={added.has(getNsiteSubdomain(entry.event))}
                 onSelect={() => {
                   notificationSuccess();
-                  onAdd(nsiteUri(getNsiteSubdomain(event), address.relays));
+                  onAdd(nsiteUri(getNsiteSubdomain(entry.event), address.relays));
                 }}
               />
             ))}

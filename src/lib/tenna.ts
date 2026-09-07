@@ -14,7 +14,11 @@ export const TEAM_SOAPBOX_PUBKEY =
 export const NSITE_PACKAGERS_PUBKEY =
   'fbb512ea0839e0df4d0d21dc62793a483a877d40870d6032525896e30946ea30';
 
-/** Whose named nsites the "Add app" dialog offers to install. */
+/**
+ * Whose nsites the "Add app" dialog offers whoever is looking — the two
+ * publishers that package clients for it. A logged-in user's follows are added
+ * to these; see `useNsiteCatalog`.
+ */
 export const NSITE_CATALOG_PUBKEYS = [TEAM_SOAPBOX_PUBKEY, NSITE_PACKAGERS_PUBKEY];
 
 /**

@@ -151,7 +151,7 @@ it:
 | `tag`         | A later notification with the same tag replaces this one.              |
 | `icon`        | The picture beside it. See [Pictures](#pictures).                      |
 | `badge`       | The site's mark in the status bar. See [The badge](#the-badge).        |
-| `image`       | A photograph, drawn above the words when the notification is expanded. |
+| `image`       | A photograph, drawn as a thumbnail above the words when the notification is expanded. |
 | `actions`     | Buttons. See [Tapping, buttons and replies](#tapping-buttons-and-replies). |
 | `data`        | Anything the site wants back on `notificationclick`.                   |
 | `silent`      | Post without sound or vibration.                                       |
@@ -241,7 +241,7 @@ conversation**, and its notifications are the lines in it:
 | a line's name                 | that notification's `title`                    |
 | a line's face                 | that notification's `icon`, cut to a circle    |
 | a line's text                 | that notification's `body`                     |
-| a line's picture              | that notification's `image`, drawn above its words |
+| a line's picture              | that notification's `image`, as a thumbnail above its words |
 
 A notification with no `body` has only its title to give, so the line is spoken
 by the site itself and the title is the words. Collapsed, the row shows the
@@ -259,10 +259,16 @@ buttons cannot answer four different things.
 
 An `image` is a line of its own, above the words, because Android draws a
 message carrying a picture *as* the picture and anything written on it is lost.
-Only the newest one in the row is drawn: a photograph takes most of the height
-there is, so a second is a picture the shade has no room for, and the older it
-is the more certainly it is the one dropped. A notification whose photograph is
-not shown still shows everything it said.
+It is drawn small — about two lines of text tall. The shade gives a
+conversation a fixed height and draws a picture at whatever size it arrives
+at, so a photograph handed over whole takes the row and the notifications above
+it are hidden to make space, which is the opposite of the point. A thumbnail
+costs about one line instead. Tapping it opens the site, where the picture is
+full size.
+
+Only the newest photograph in the row is drawn, for the same reason: a second
+is one the shade has no space for. A notification whose photograph is not shown
+still shows everything it said.
 
 ##### The badge
 
@@ -322,10 +328,10 @@ The face on a line is that notification's `icon`, cut to a circle because that
 is the shape of the slot. A line with no `icon` gets the system's own lettered
 circle rather than the site's mark repeated down the row.
 
-An `image` is written to Tenna's cache and handed to the shade as a file, since
-that is what a message carrying a picture takes. A handful are kept and the
-oldest go; a photograph the site sent last week is not one anybody is looking
-at.
+An `image` is scaled to a thumbnail, written to Tenna's cache and handed to the
+shade as a file, since that is what a message carrying a picture takes. A
+handful are kept and the oldest go; a photograph the site sent last week is not
+one anybody is looking at.
 
 #### Tapping, buttons and replies
 

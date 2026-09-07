@@ -60,8 +60,23 @@ final class NappImages {
 
     private static final String TAG = "NappImages";
 
-    /** A big picture is drawn wide. Android's own ceiling is around this. */
-    private static final int PICTURE_PX = 1024;
+    /**
+     * How wide a photograph is drawn in a conversation.
+     *
+     * The shade draws a picture message at the bitmap's own size, capped to
+     * the width of the row, and a conversation is a fixed height — so a
+     * picture handed over at full resolution takes the whole row and the
+     * notifications above it are hidden to make space. Which is the opposite
+     * of the point: a site's notifications belong together, and a photograph
+     * is a preview of one of them rather than the row.
+     *
+     * 96dp is about the height of two lines of text, which is what a
+     * photograph is worth costing: it reads as a thumbnail of the thing
+     * rather than the thing, and the notification either side of it is still
+     * there. Measured rather than reasoned — at 180dp the notification above
+     * it was already being dropped. Nothing is ever scaled up to reach it.
+     */
+    private static final int PICTURE_DP = 96;
 
     /** The status bar draws its icons at 24dp. */
     private static final int STENCIL_DP = 24;
@@ -270,7 +285,7 @@ final class NappImages {
         switch (shape) {
             case SHAPE_STENCIL: return stencilPx(context);
             case SHAPE_ROUND: return AVATAR_PX;
-            default: return PICTURE_PX;
+            default: return picturePx(context);
         }
     }
 
@@ -295,6 +310,11 @@ final class NappImages {
 
         source.recycle();
         return out;
+    }
+
+    private static int picturePx(Context context) {
+        float density = context.getResources().getDisplayMetrics().density;
+        return Math.max(PICTURE_DP, Math.round(PICTURE_DP * density));
     }
 
     static int stencilPx(@NonNull Context context) {

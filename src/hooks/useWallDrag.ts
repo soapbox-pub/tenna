@@ -253,6 +253,21 @@ export function useWallDrag({ uris, onLongPress, onDragStart, onDrop }: WallDrag
     }
 
     /**
+     * Whether the event happened on the tile, rather than in the menu the
+     * tile opened.
+     *
+     * A tile's menu is a child of its slot in the React tree and a child of
+     * the document body in the DOM, and React sends events up the tree it
+     * knows about — so every press and every click inside the menu arrives
+     * here as though it had happened on the tile underneath. It didn't, and
+     * a menu whose first tap is eaten as the leftovers of the hold that
+     * opened it is a menu that has to be tapped twice.
+     */
+    function onTile(event: { currentTarget: HTMLElement; target: EventTarget | null }): boolean {
+      return event.currentTarget.contains(event.target as Node);
+    }
+
+    /**
      * The same three handlers on every slot.
      *
      * Which slot they are on is read off the element rather than closed over,
@@ -263,11 +278,17 @@ export function useWallDrag({ uris, onLongPress, onDragStart, onDrop }: WallDrag
       onPointerDown(event: React.PointerEvent<HTMLElement>) {
         // A secondary button is a menu request, not a press.
         if (event.button !== 0) return;
+        if (!onTile(event)) return;
 
         const index = Number(event.currentTarget.dataset.wallSlot);
         if (!Number.isInteger(index)) return;
 
         end(false);
+
+        // A new press is a new question, whatever became of the last one. A
+        // hold that opened a menu the user then dismissed by tapping the
+        // wallpaper leaves nothing to swallow, and the tap after it is meant.
+        swallow.current = false;
 
         const g: Gesture = {
           index,
@@ -298,8 +319,8 @@ export function useWallDrag({ uris, onLongPress, onDragStart, onDrop }: WallDrag
         window.addEventListener('pointercancel', cancel);
       },
 
-      onClickCapture(event: React.MouseEvent) {
-        if (!swallow.current) return;
+      onClickCapture(event: React.MouseEvent<HTMLElement>) {
+        if (!swallow.current || !onTile(event)) return;
         swallow.current = false;
         event.preventDefault();
         event.stopPropagation();
@@ -307,7 +328,7 @@ export function useWallDrag({ uris, onLongPress, onDragStart, onDrop }: WallDrag
 
       // The WebView's own long-press menu — copy image, select text — has
       // nothing to offer on an icon, and the tile's menu is already here.
-      onContextMenu(event: React.MouseEvent) {
+      onContextMenu(event: React.MouseEvent<HTMLElement>) {
         event.preventDefault();
       },
     };

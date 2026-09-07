@@ -3,7 +3,6 @@ import { Check, Loader2, Search } from 'lucide-react';
 import { useMemo, useState } from 'react';
 
 import { Input } from '@/components/ui/input';
-import type { AddedNsite } from '@/hooks/useAddedNsites';
 import { useNsiteAddress } from '@/hooks/useNsiteAddress';
 import { useNsiteApp } from '@/hooks/useNsiteApp';
 import { useNsiteCatalog } from '@/hooks/useNsiteCatalog';
@@ -11,12 +10,13 @@ import { useSeen } from '@/hooks/useSeen';
 import { notificationSuccess } from '@/lib/haptics';
 import { getTileGradient, getTileInitial } from '@/lib/iconTile';
 import { getNsiteName, getNsiteSubdomain } from '@/lib/nsiteSubdomain';
+import { nsiteUri, parseWallUri } from '@/lib/wallUri';
 import { cn } from '@/lib/utils';
 
 interface NsitePickerProps {
-  /** Sites already on the wall, shown as such rather than offered again. */
-  addedIds: string[];
-  onAdd: (site: AddedNsite) => void;
+  /** Everything on the wall, of which the sites are shown as already there. */
+  addedUris: string[];
+  onAdd: (uri: string) => void;
 }
 
 /** One site in the list: its icon, its name, and whether it is already up. */
@@ -91,12 +91,23 @@ function NsiteRow({
  * here — but that is a thing to reach for, not the way in, so it is the same
  * control rather than a form of its own.
  */
-export function NsitePicker({ addedIds, onAdd }: NsitePickerProps) {
+export function NsitePicker({ addedUris, onAdd }: NsitePickerProps) {
   const { data: catalog, isLoading, error } = useNsiteCatalog();
   const [search, setSearch] = useState('');
   const address = useNsiteAddress(search);
 
-  const added = useMemo(() => new Set(addedIds), [addedIds]);
+  // By subdomain rather than by URI: the same site added by two different
+  // naddrs carries two different relay hints and is still the same site.
+  const added = useMemo(
+    () =>
+      new Set(
+        addedUris
+          .map(parseWallUri)
+          .filter((entry) => entry?.kind === 'nsite')
+          .map((entry) => entry.id),
+      ),
+    [addedUris],
+  );
 
   const results = useMemo(() => {
     if (address.isAddress) return address.event ? [address.event] : [];
@@ -162,10 +173,7 @@ export function NsitePicker({ addedIds, onAdd }: NsitePickerProps) {
                 added={added.has(getNsiteSubdomain(event))}
                 onSelect={() => {
                   notificationSuccess();
-                  onAdd({
-                    id: getNsiteSubdomain(event),
-                    relays: address.relays.length > 0 ? address.relays : undefined,
-                  });
+                  onAdd(nsiteUri(getNsiteSubdomain(event), address.relays));
                 }}
               />
             ))}

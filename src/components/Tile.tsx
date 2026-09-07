@@ -1,5 +1,6 @@
 import type { ComponentProps, ReactNode } from 'react';
 
+import { DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { WhiteNoise } from '@/components/WhiteNoise';
 import { getTileGradient, getTileInitial } from '@/lib/iconTile';
 import { cn } from '@/lib/utils';
@@ -123,6 +124,28 @@ export function TileImage({ src, name }: { src: string; name: string }) {
 }
 
 /**
+ * What a tile's menu hangs off, which is not the tile.
+ *
+ * A menu needs something to be positioned against, and Radix positions
+ * against whatever opens it — but nothing opens this one by being pressed.
+ * The gesture that opens it is a hold, and a hold is the beginning of both
+ * opening the menu and picking the tile up to move it, so it is watched for
+ * by the wall rather than by any one tile (see `useWallDrag`). What is left
+ * for the trigger to do is be in the right place, so it is: the whole tile's
+ * worth of nothing, untouchable and out of the tab order, standing in for the
+ * button beside it.
+ */
+export function TileMenuAnchor() {
+  return (
+    <DropdownMenuTrigger
+      aria-hidden="true"
+      tabIndex={-1}
+      className="pointer-events-none absolute inset-0"
+    />
+  );
+}
+
+/**
  * A pressable tile with its name underneath.
  *
  * The shadow and the focus halo are both cast outside the tile, so neither can
@@ -158,7 +181,14 @@ export function TileButton({
       type="button"
       onClick={onSelect}
       title={title ?? name}
-      className={cn('group flex w-full flex-col items-center gap-2 outline-none', className)}
+      className={cn(
+        'group flex w-full flex-col items-center gap-2 outline-none',
+        // A tile is held as often as it is pressed. Neither the label nor the
+        // artwork should answer that with a selection handle or a save-image
+        // callout — the hold means something here already.
+        'select-none [-webkit-touch-callout:none]',
+        className,
+      )}
       {...props}
     >
       <TileFrame className="motion-safe:transition-transform motion-safe:duration-200 group-hover:-translate-y-1 group-active:scale-95 group-focus-visible:-translate-y-1">

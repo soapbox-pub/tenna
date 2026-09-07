@@ -8,10 +8,10 @@ import { LoginArea } from '@/components/auth/LoginArea';
 import { NativeAppIcon } from '@/components/NativeAppIcon';
 import { NsiteSharePicker } from '@/components/NsiteSharePicker';
 import { NsiteViewer } from '@/components/NsiteViewer';
-import { useAddedNativeApps, nativeAppId } from '@/hooks/useAddedNativeApps';
-import { useAddedNsites } from '@/hooks/useAddedNsites';
 import { usePendingShare } from '@/hooks/useNsiteShare';
-import { getNsiteSubdomain } from '@/lib/nsiteSubdomain';
+import { useWall } from '@/hooks/useWall';
+import { useWallDrag } from '@/hooks/useWallDrag';
+import { impactMedium } from '@/lib/haptics';
 
 /** Decorative star field scattered behind the apps. */
 const STARS: Array<{ top: string; left: string; color: string; delay: string; size: string }> = [
@@ -31,8 +31,11 @@ const Index = () => {
     description: 'Pick an app. Tenna is an nsite browser — your entrypoint to Nostr.',
   });
 
-  const added = useAddedNsites();
-  const nativeApps = useAddedNativeApps();
+  // One list, holding sites and the device's own apps in whatever order the
+  // user has dragged them into. Nothing on it is Tenna's rather than theirs:
+  // the three it ships with sit on the same list as everything added after,
+  // and move and come off the same way.
+  const wall = useWall();
 
   // The site tuned in over the wall, where a site can't be given a window of
   // its own. On Android pressing a tile launches one instead and nothing here
@@ -40,23 +43,28 @@ const Index = () => {
   const [active, setActive] = useState<{ event: NostrEvent; channel: number } | null>(null);
   const [adding, setAdding] = useState(false);
 
+  // Which tile is showing its menu. One at a time, and held here rather than
+  // in the tile, because the hold that opens a menu is the first half of the
+  // hold that picks a tile up — see `useWallDrag`.
+  const [menuFor, setMenuFor] = useState<string | null>(null);
+
   // Something the OS handed to Tenna rather than to one of the apps on it.
   const { share, dismiss, handOff } = usePendingShare();
 
-  // Every site on the wall is one the user has, in the end, chosen to keep —
-  // the three Tenna starts out with are on the same list as the ones added
-  // after them, in the order they were added, and can be taken off the same
-  // way. A site keeps the channel it was on when the next one is added after
-  // it.
-  const lineup = added.events ?? [];
+  const items = wall.items;
 
-  // The device's own apps come after the sites, so that adding one doesn't
-  // renumber the channels: a channel is a site's place in the lineup, and a
-  // native app has no channel to take.
-  const devices = nativeApps.apps;
+  const { gridRef, handlers, styleFor } = useWallDrag({
+    uris: items.map((item) => item.uri),
+    onLongPress: (uri) => {
+      impactMedium();
+      setMenuFor(uri);
+    },
+    onDragStart: () => setMenuFor(null),
+    onDrop: wall.move,
+  });
 
-  const loading = added.isLoading;
-  const empty = !loading && lineup.length === 0 && devices.length === 0;
+  const loading = wall.isLoading;
+  const empty = !loading && items.length === 0;
 
   return (
     <main className="relative min-h-screen overflow-hidden bg-[#150609] text-white">
@@ -103,28 +111,43 @@ const Index = () => {
           and 96px the ceiling, for the narrow windows where a column can't be
           added and the icons would otherwise stretch to fill.
         */}
-        <div className="grid grid-cols-[repeat(auto-fill,minmax(4.25rem,1fr))] justify-items-center gap-x-4 gap-y-7 sm:gap-x-6 sm:gap-y-9 [&>*]:max-w-24">
-          {/* One per site on the way, since the list of them is on the device
-              and only the manifests are still coming. */}
-          {loading &&
-            added.stored.map((site) => <AppIconSkeleton key={site.id} />)}
+        <div
+          ref={gridRef}
+          className="grid grid-cols-[repeat(auto-fill,minmax(4.25rem,1fr))] justify-items-center gap-x-4 gap-y-7 sm:gap-x-6 sm:gap-y-9 [&>*]:max-w-24"
+        >
+          {/* One per address on the way, since the list of them is on the
+              device and only what they resolve to is still coming. */}
+          {loading && wall.uris.map((uri) => <AppIconSkeleton key={uri} />)}
 
-          {lineup.map((event, i) => (
-            <AppIcon
-              key={event.id}
-              event={event}
-              channel={i + 1}
-              onSelect={() => setActive({ event, channel: i + 1 })}
-              onRemove={() => added.remove(getNsiteSubdomain(event))}
-            />
-          ))}
-
-          {devices.map((app) => (
-            <NativeAppIcon
-              key={app.id}
-              app={app}
-              onRemove={() => nativeApps.remove(app.id)}
-            />
+          {items.map((item, i) => (
+            // The slot a tile sits in, which is a different thing from the
+            // tile: during a drag the tiles are transformed out of their slots
+            // and back into other ones, and the grid underneath never moves.
+            <div
+              key={item.uri}
+              data-wall-slot={i}
+              style={styleFor(i)}
+              {...handlers}
+              className="relative w-full motion-safe:transition-transform motion-safe:duration-200 motion-safe:ease-out"
+            >
+              {item.kind === 'nsite' ? (
+                <AppIcon
+                  event={item.event}
+                  channel={item.channel}
+                  onSelect={() => setActive({ event: item.event, channel: item.channel })}
+                  onRemove={() => wall.remove(item.uri)}
+                  menuOpen={menuFor === item.uri}
+                  onMenuOpenChange={(open) => setMenuFor(open ? item.uri : null)}
+                />
+              ) : (
+                <NativeAppIcon
+                  app={item.app}
+                  onRemove={() => wall.remove(item.uri)}
+                  menuOpen={menuFor === item.uri}
+                  onMenuOpenChange={(open) => setMenuFor(open ? item.uri : null)}
+                />
+              )}
+            </div>
           ))}
 
           {!loading && <AddAppTile onSelect={() => setAdding(true)} />}
@@ -142,10 +165,8 @@ const Index = () => {
       <AddAppDialog
         open={adding}
         onOpenChange={setAdding}
-        addedIds={added.stored.map((site) => site.id)}
-        onAdd={added.add}
-        addedNativeIds={nativeApps.stored.map(nativeAppId)}
-        onAddNativeApp={nativeApps.add}
+        addedUris={wall.uris}
+        onAdd={wall.add}
       />
 
       <NsiteSharePicker share={share} onDismiss={dismiss} onHandOff={handOff} />

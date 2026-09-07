@@ -8,18 +8,15 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import type { AddedNsite } from '@/hooks/useAddedNsites';
-import { supportsNativeApps, type NativeApp } from '@/lib/nativeAppsPlugin';
+import { supportsNativeApps } from '@/lib/nativeAppsPlugin';
 
 interface AddAppDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  /** Sites already on the wall, so the same one isn't added twice. */
-  addedIds: string[];
-  onAdd: (site: AddedNsite) => void;
-  /** Device apps already on the wall, by `packageName/activityName`. */
-  addedNativeIds: string[];
-  onAddNativeApp: (app: NativeApp) => void;
+  /** Everything already on the wall, so the same thing isn't added twice. */
+  addedUris: string[];
+  /** One verb for both lists — a tile is a tile. See `wallUri`. */
+  onAdd: (uri: string) => void;
 }
 
 const TAB_LIST = 'w-full bg-white/5 p-1';
@@ -37,17 +34,13 @@ const TAB =
  * On anything but Android there is no second list to offer, so the dialog is
  * just the one, with no tabs above it to explain themselves.
  */
-export function AddAppDialog({
-  open,
-  onOpenChange,
-  addedIds,
-  onAdd,
-  addedNativeIds,
-  onAddNativeApp,
-}: AddAppDialogProps) {
+export function AddAppDialog({ open, onOpenChange, addedUris, onAdd }: AddAppDialogProps) {
   const native = supportsNativeApps();
 
-  const close = () => onOpenChange(false);
+  const pick = (uri: string) => {
+    onAdd(uri);
+    onOpenChange(false);
+  };
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -73,33 +66,15 @@ export function AddAppDialog({
             </TabsList>
 
             <TabsContent value="nostr" className="pt-4">
-              <NsitePicker
-                addedIds={addedIds}
-                onAdd={(site) => {
-                  onAdd(site);
-                  close();
-                }}
-              />
+              <NsitePicker addedUris={addedUris} onAdd={pick} />
             </TabsContent>
 
             <TabsContent value="installed" className="pt-4">
-              <InstalledAppPicker
-                addedIds={addedNativeIds}
-                onAdd={(app) => {
-                  onAddNativeApp(app);
-                  close();
-                }}
-              />
+              <InstalledAppPicker addedUris={addedUris} onAdd={pick} />
             </TabsContent>
           </Tabs>
         ) : (
-          <NsitePicker
-            addedIds={addedIds}
-            onAdd={(site) => {
-              onAdd(site);
-              close();
-            }}
-          />
+          <NsitePicker addedUris={addedUris} onAdd={pick} />
         )}
       </DialogContent>
     </Dialog>

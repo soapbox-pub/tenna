@@ -7,12 +7,13 @@ import { useSeen } from '@/hooks/useSeen';
 import { getTileGradient, getTileInitial } from '@/lib/iconTile';
 import { notificationSuccess } from '@/lib/haptics';
 import type { NativeApp } from '@/lib/nativeAppsPlugin';
+import { nativeAppUri, parseWallUri } from '@/lib/wallUri';
 import { cn } from '@/lib/utils';
 
 interface InstalledAppPickerProps {
-  /** Apps already on the wall, shown as such rather than offered again. */
-  addedIds: string[];
-  onAdd: (app: NativeApp) => void;
+  /** Everything on the wall, of which the apps are shown as already there. */
+  addedUris: string[];
+  onAdd: (uri: string) => void;
 }
 
 /** One app in the list: its icon, its name, and whether it is already up. */
@@ -77,11 +78,22 @@ function InstalledAppRow({
  * added last week should find it where they expect and be told it is already
  * there, not be left wondering why it is missing.
  */
-export function InstalledAppPicker({ addedIds, onAdd }: InstalledAppPickerProps) {
+export function InstalledAppPicker({ addedUris, onAdd }: InstalledAppPickerProps) {
   const { data: apps, isLoading, error } = useInstalledApps();
   const [search, setSearch] = useState('');
 
-  const added = useMemo(() => new Set(addedIds), [addedIds]);
+  // By package and activity rather than by URI: the name in the hint is the
+  // one the app went by when it was added, which an update is free to change.
+  const added = useMemo(
+    () =>
+      new Set(
+        addedUris
+          .map(parseWallUri)
+          .filter((entry) => entry?.kind === 'app')
+          .map((entry) => `${entry.packageName}/${entry.activityName}`),
+      ),
+    [addedUris],
+  );
 
   const results = useMemo(() => {
     if (!apps) return [];
@@ -138,7 +150,7 @@ export function InstalledAppPicker({ addedIds, onAdd }: InstalledAppPickerProps)
               added={added.has(app.id)}
               onSelect={() => {
                 notificationSuccess();
-                onAdd(app);
+                onAdd(nativeAppUri(app));
               }}
             />
           ))}

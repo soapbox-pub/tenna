@@ -1,23 +1,25 @@
 import { Info, Trash2 } from 'lucide-react';
-import { useCallback, useRef } from 'react';
+import { useCallback } from 'react';
 
-import { TileArtwork, TileButton, TileImage, TileStatic } from '@/components/Tile';
+import { TileArtwork, TileButton, TileImage, TileMenuAnchor, TileStatic } from '@/components/Tile';
 import { MENU, MENU_ITEM, MENU_ITEM_DESTRUCTIVE } from '@/components/tile-variants';
 import {
-  ContextMenu,
-  ContextMenuContent,
-  ContextMenuItem,
-  ContextMenuTrigger,
-} from '@/components/ui/context-menu';
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+} from '@/components/ui/dropdown-menu';
 import { useNativeAppIcon } from '@/hooks/useNativeApps';
 import { useToast } from '@/hooks/useToast';
-import { impactMedium, notificationError } from '@/lib/haptics';
+import { notificationError } from '@/lib/haptics';
 import { NativeApps, type NativeApp } from '@/lib/nativeAppsPlugin';
 
 interface NativeAppIconProps {
   app: NativeApp;
   /** Take the app off the wall. Every native tile was put there by the user. */
   onRemove: () => void;
+  /** Whether the tile's menu is up — the wall's business. See `AppIcon`. */
+  menuOpen: boolean;
+  onMenuOpenChange: (open: boolean) => void;
 }
 
 /**
@@ -77,27 +79,18 @@ function AndroidBadge() {
  * and "App info" means the system's settings page, since there is nothing
  * Tenna could say about an app it did not open.
  */
-export function NativeAppIcon({ app, onRemove }: NativeAppIconProps) {
+export function NativeAppIcon({
+  app,
+  onRemove,
+  menuOpen,
+  onMenuOpenChange,
+}: NativeAppIconProps) {
   const { toast } = useToast();
   // `isLoading` rather than `isPending`: a query that is disabled because this
   // platform has no such apps is pending forever, and static forever with it.
   const { data: icon, isLoading } = useNativeAppIcon(app);
 
-  // A long press is a press — see the same guard on `AppIcon`.
-  const suppressTap = useRef(false);
-
-  const handleOpenChange = useCallback((open: boolean) => {
-    if (open) {
-      suppressTap.current = true;
-      impactMedium();
-    } else {
-      setTimeout(() => { suppressTap.current = false; }, 250);
-    }
-  }, []);
-
   const handleSelect = useCallback(() => {
-    if (suppressTap.current) return;
-
     void NativeApps.launch(app)
       .then(({ launched }) => {
         if (launched) return;
@@ -125,38 +118,49 @@ export function NativeAppIcon({ app, onRemove }: NativeAppIconProps) {
   // would only clip corners that were transparent anyway — so it is drawn as
   // it arrived, and an app whose artwork could not be read at all falls back
   // to a tile with its initial on it.
-  const tile = (
-    <TileButton name={app.label} onSelect={handleSelect}>
-      {isLoading ? (
-        <TileStatic />
-      ) : !icon ? (
-        <TileArtwork name={app.label} />
-      ) : icon.adaptive ? (
-        <TileArtwork name={app.label} iconUrl={icon.url} fit="cover" />
-      ) : (
-        <TileImage src={icon.url} name={app.label} />
-      )}
-
-      <AndroidBadge />
-    </TileButton>
-  );
-
   return (
-    <ContextMenu onOpenChange={handleOpenChange}>
-      <ContextMenuTrigger asChild>{tile}</ContextMenuTrigger>
-      <ContextMenuContent className={MENU} collisionPadding={16}>
-        <ContextMenuItem
-          className={MENU_ITEM}
-          onSelect={() => void NativeApps.settings({ packageName: app.packageName }).catch(() => {})}
-        >
-          <Info />
-          App info
-        </ContextMenuItem>
-        <ContextMenuItem className={MENU_ITEM_DESTRUCTIVE} onSelect={onRemove} variant="destructive">
-          <Trash2 />
-          Remove from Tenna
-        </ContextMenuItem>
-      </ContextMenuContent>
-    </ContextMenu>
+    <>
+      <TileButton
+        name={app.label}
+        onSelect={handleSelect}
+        onContextMenu={(clicked) => {
+          clicked.preventDefault();
+          onMenuOpenChange(true);
+        }}
+      >
+        {isLoading ? (
+          <TileStatic />
+        ) : !icon ? (
+          <TileArtwork name={app.label} />
+        ) : icon.adaptive ? (
+          <TileArtwork name={app.label} iconUrl={icon.url} fit="cover" />
+        ) : (
+          <TileImage src={icon.url} name={app.label} />
+        )}
+
+        <AndroidBadge />
+      </TileButton>
+
+      <DropdownMenu open={menuOpen} onOpenChange={onMenuOpenChange} modal={false}>
+        <TileMenuAnchor />
+        <DropdownMenuContent className={MENU} align="center" collisionPadding={16}>
+          <DropdownMenuItem
+            className={MENU_ITEM}
+            onSelect={() => void NativeApps.settings({ packageName: app.packageName }).catch(() => {})}
+          >
+            <Info />
+            App info
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            className={MENU_ITEM_DESTRUCTIVE}
+            onSelect={onRemove}
+            variant="destructive"
+          >
+            <Trash2 />
+            Remove from Tenna
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </>
   );
 }

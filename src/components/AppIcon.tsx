@@ -1,6 +1,6 @@
 import type { NostrEvent } from '@nostrify/nostrify';
 import { Check, Info, Plus, SquarePlus, Trash2 } from 'lucide-react';
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useState } from 'react';
 
 import { NsiteAppInfo } from '@/components/NsiteAppInfo';
 import {
@@ -8,29 +8,37 @@ import {
   TileButton,
   TileFace,
   TileFrame,
+  TileMenuAnchor,
   TileStatic,
 } from '@/components/Tile';
 import { MENU, MENU_ITEM, MENU_ITEM_DESTRUCTIVE } from '@/components/tile-variants';
 import {
-  ContextMenu,
-  ContextMenuContent,
-  ContextMenuItem,
-  ContextMenuTrigger,
-} from '@/components/ui/context-menu';
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+} from '@/components/ui/dropdown-menu';
 import { useNsiteApp } from '@/hooks/useNsiteApp';
 import { useNsitePin } from '@/hooks/useNsitePin';
 import { useNsiteWindow } from '@/hooks/useNsiteWindow';
-import { impactMedium } from '@/lib/haptics';
 import { getNsiteName } from '@/lib/nsiteSubdomain';
 
 interface AppIconProps {
   event: NostrEvent;
-  /** 1-based position on the wall, which is the site's channel number. */
+  /** 1-based position among the sites, which is the site's channel number. */
   channel: number;
   /** Tune the site in here, for platforms that can't give it a window. */
   onSelect: () => void;
-  /** Take the site off the wall, for the ones the user put there. */
+  /** Take the site off the wall. */
   onRemove?: () => void;
+  /**
+   * Whether the tile's menu is up.
+   *
+   * Held by the wall rather than by the tile, because the gesture that opens
+   * it is the same one that picks the tile up to move it, and only the wall
+   * can see both. See `useWallDrag`.
+   */
+  menuOpen: boolean;
+  onMenuOpenChange: (open: boolean) => void;
 }
 
 /**
@@ -81,7 +89,14 @@ export function AddAppTile({ onSelect }: { onSelect: () => void }) {
  * site that turns out to have no icon at all keeps a tile in its own color
  * with its initial on it.
  */
-export function AppIcon({ event, channel, onSelect, onRemove }: AppIconProps) {
+export function AppIcon({
+  event,
+  channel,
+  onSelect,
+  onRemove,
+  menuOpen,
+  onMenuOpenChange,
+}: AppIconProps) {
   const { data: app, isPending } = useNsiteApp(event);
 
   // The manifest's name for the site until the site itself says what it goes by.
@@ -92,21 +107,6 @@ export function AppIcon({ event, channel, onSelect, onRemove }: AppIconProps) {
 
   const [infoOpen, setInfoOpen] = useState(false);
 
-  // A long press is a press. The menu opens on pointerdown and the pointerup
-  // that follows still lands on the tile, so without this the site would tune
-  // in behind the menu that was opened to avoid tuning it in. Held until just
-  // after the menu closes, so dismissing it doesn't arm a stray tap either.
-  const suppressTap = useRef(false);
-
-  const handleOpenChange = useCallback((open: boolean) => {
-    if (open) {
-      suppressTap.current = true;
-      impactMedium();
-    } else {
-      setTimeout(() => { suppressTap.current = false; }, 250);
-    }
-  }, []);
-
   // Where a site can have a window of its own, it gets one — pressing the tile
   // launches the site rather than tuning it in over the wall. Everywhere else
   // the wall is the only screen there is, so the viewer opens on top of it.
@@ -115,62 +115,64 @@ export function AppIcon({ event, channel, onSelect, onRemove }: AppIconProps) {
     else onSelect();
   }, [ownWindow, channel, onSelect]);
 
-  const handleSelect = useCallback(() => {
-    if (suppressTap.current) return;
-    launch();
-  }, [launch]);
-
-  const tile = (
-    <TileButton name={name} onSelect={handleSelect}>
-      {isPending ? (
-        <TileStatic />
-      ) : (
-        <TileArtwork
-          name={name}
-          iconUrl={app?.iconUrl}
-          fit={app?.fit}
-          background={app?.background}
-        />
-      )}
-    </TileButton>
-  );
-
   // Every tile has a menu, because every app has an info panel — a site the
   // user can neither pin nor take off the wall has still been granted things,
   // and this is the only place to see what.
   return (
     <>
-      <ContextMenu onOpenChange={handleOpenChange}>
-        <ContextMenuTrigger asChild>{tile}</ContextMenuTrigger>
-        {/* Kept off the edges of the screen: the menu opens where the finger
-            is, and a finger on the last tile in a row is at the edge. */}
-        <ContextMenuContent className={MENU} collisionPadding={16}>
-          <ContextMenuItem className={MENU_ITEM} onSelect={() => setInfoOpen(true)}>
+      <TileButton
+        name={name}
+        onSelect={launch}
+        // A right-click, or the key that stands in for one. The finger's way
+        // in is the hold, which the wall detects and answers with `menuOpen`.
+        onContextMenu={(clicked) => {
+          clicked.preventDefault();
+          onMenuOpenChange(true);
+        }}
+      >
+        {isPending ? (
+          <TileStatic />
+        ) : (
+          <TileArtwork
+            name={name}
+            iconUrl={app?.iconUrl}
+            fit={app?.fit}
+            background={app?.background}
+          />
+        )}
+      </TileButton>
+
+      <DropdownMenu open={menuOpen} onOpenChange={onMenuOpenChange} modal={false}>
+        <TileMenuAnchor />
+        {/* Kept off the edges of the screen: a tile at the end of a row is at
+            the edge, and the menu is wider than it is. */}
+        <DropdownMenuContent className={MENU} align="center" collisionPadding={16}>
+          <DropdownMenuItem className={MENU_ITEM} onSelect={() => setInfoOpen(true)}>
             <Info />
             App info
-          </ContextMenuItem>
+          </DropdownMenuItem>
           {pinning.available && (
-            <ContextMenuItem
+            <DropdownMenuItem
               className={MENU_ITEM}
               onSelect={pinning.pin}
               disabled={pinning.pinned}
             >
               {pinning.pinned ? <Check /> : <SquarePlus />}
               {pinning.pinned ? 'On your home screen' : 'Add to home screen'}
-            </ContextMenuItem>
+            </DropdownMenuItem>
           )}
           {onRemove && (
-            <ContextMenuItem
+            <DropdownMenuItem
               className={MENU_ITEM_DESTRUCTIVE}
               onSelect={onRemove}
               variant="destructive"
             >
               <Trash2 />
               Remove from Tenna
-            </ContextMenuItem>
+            </DropdownMenuItem>
           )}
-        </ContextMenuContent>
-      </ContextMenu>
+        </DropdownMenuContent>
+      </DropdownMenu>
 
       {/* Outside the menu, which is gone by the time this opens. It is handed
           the same verbs the menu offers, because it stands in for the screen

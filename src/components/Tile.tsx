@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import type { ComponentProps, ReactNode } from 'react';
 
 import { WhiteNoise } from '@/components/WhiteNoise';
 import { getTileGradient, getTileInitial } from '@/lib/iconTile';
@@ -130,13 +130,21 @@ export function TileImage({ src, name }: { src: string; name: string }) {
  * with them. The shadow is a `drop-shadow` filter on the frame, which reads
  * the alpha of what it wraps and so follows the squircle, and the halo is a
  * second squircle sitting a few pixels proud behind it.
+ *
+ * Everything else it is handed goes through to the button, ref included. A
+ * tile is what a long press is held on, and the press is detected by the
+ * context menu's trigger, which hands its pointer handlers to whatever it
+ * wraps — so a tile that kept those props to itself would be a tile with no
+ * menu.
  */
 export function TileButton({
   name,
   title,
   onSelect,
   children,
-}: {
+  className,
+  ...props
+}: Omit<ComponentProps<'button'>, 'onSelect' | 'children'> & {
   /** Drawn under the tile. */
   name: string;
   /** The accessible name, when it should say more than the label does. */
@@ -150,7 +158,8 @@ export function TileButton({
       type="button"
       onClick={onSelect}
       title={title ?? name}
-      className="group flex w-full flex-col items-center gap-2 outline-none"
+      className={cn('group flex w-full flex-col items-center gap-2 outline-none', className)}
+      {...props}
     >
       <TileFrame className="motion-safe:transition-transform motion-safe:duration-200 group-hover:-translate-y-1 group-active:scale-95 group-focus-visible:-translate-y-1">
         <span

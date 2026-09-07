@@ -6,10 +6,7 @@ import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
-import android.graphics.Paint;
-import android.graphics.Path;
-import android.graphics.PorterDuff;
-import android.graphics.PorterDuffXfermode;
+import android.graphics.Rect;
 import android.graphics.drawable.AdaptiveIconDrawable;
 import android.graphics.drawable.BitmapDrawable;
 import android.graphics.drawable.Drawable;
@@ -20,6 +17,7 @@ import android.util.Base64;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
+import androidx.annotation.RequiresApi;
 
 import java.io.ByteArrayOutputStream;
 import java.text.Collator;
@@ -55,6 +53,26 @@ final class NativeApps {
     private static final int ICON_PX = 192;
 
     private NativeApps() {}
+
+    /**
+     * One app's artwork, and what shape it arrived in.
+     *
+     * The two kinds of icon Android has are not the same object. An adaptive
+     * one is a square canvas meant to be cut; a legacy one is a finished
+     * picture that has already been cut, by whoever drew it. Only the caller
+     * knows which of those it can put behind a squircle, so it is told.
+     */
+    static final class Art {
+        /** Base64 PNG, without a data URL prefix. */
+        final String png;
+        /** Whether the artwork is a full square, with a shape still to cut. */
+        final boolean adaptive;
+
+        Art(@NonNull String png, boolean adaptive) {
+            this.png = png;
+            this.adaptive = adaptive;
+        }
+    }
 
     /** One launchable app, as the wall sees it. */
     static final class Entry {
@@ -125,17 +143,22 @@ final class NativeApps {
     }
 
     /**
-     * An app's icon as a base64 PNG, without a data URL prefix.
+     * An app's icon, uncut.
      *
-     * Already the shape the device draws it in, transparent around the edges,
-     * and meant to be shown as-is. An app's icon is the app's own artwork in a
-     * way an nsite's is not — it was drawn for this device, it is already on
-     * this device's home screen, and cutting Tenna's squircle out of it would
-     * turn Signal's circle into a rounded square and put a sheen of glass over
-     * artwork that never asked for one.
+     * An adaptive icon comes back as the whole square its two layers are drawn
+     * on, with no mask applied. Which shape this device would have cut out of
+     * it is the device's business, and the wall is not the device: taking the
+     * host's mask would make Tenna a home screen of circles on one phone and
+     * of squircles on the next, and neither would match the nsites sitting
+     * beside them. The shape is cut where every other tile's is — in the web
+     * layer, once, the same way for all of them.
+     *
+     * A legacy icon has no square to cut. It is a finished picture with its
+     * own outline and transparency around it, so it is passed through and said
+     * to be what it is.
      */
     @Nullable
-    static String icon(@NonNull Context context, @NonNull String packageName, @Nullable String activityName) {
+    static Art icon(@NonNull Context context, @NonNull String packageName, @Nullable String activityName) {
         Entry entry = find(context, packageName, activityName);
         if (entry == null) return null;
 
@@ -148,7 +171,10 @@ final class NativeApps {
             return null;
         }
 
-        return encode(rasterize(drawable));
+        boolean adaptive = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
+            && drawable instanceof AdaptiveIconDrawable;
+
+        return new Art(encode(rasterize(drawable)), adaptive);
     }
 
     /**
@@ -230,18 +256,13 @@ final class NativeApps {
         }
     }
 
-    /**
-     * Whatever the drawable is, as a bitmap of a known size, in the shape the
-     * device would draw it.
-     *
-     * A legacy icon is already a picture with its own outline and transparency
-     * around it, and is passed through. An adaptive one is not: it is two full
-     * square layers, drawn oversized, that every launcher cuts a shape out of
-     * before showing. Doing that here is what makes the two kinds comparable —
-     * otherwise every modern icon on the wall would be a hard-edged square.
-     */
+    /** Whatever the drawable is, as a bitmap of a known size, uncut. */
     @NonNull
     private static Bitmap rasterize(@NonNull Drawable drawable) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && drawable instanceof AdaptiveIconDrawable) {
+            return layers((AdaptiveIconDrawable) drawable);
+        }
+
         if (drawable instanceof BitmapDrawable) {
             Bitmap bitmap = ((BitmapDrawable) drawable).getBitmap();
             if (bitmap != null && !bitmap.isRecycled()) {
@@ -252,50 +273,42 @@ final class NativeApps {
         Bitmap out = Bitmap.createBitmap(ICON_PX, ICON_PX, Bitmap.Config.ARGB_8888);
         drawable.setBounds(0, 0, ICON_PX, ICON_PX);
         drawable.draw(new Canvas(out));
-
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && drawable instanceof AdaptiveIconDrawable) {
-            return cut(out, iconMask((AdaptiveIconDrawable) drawable));
-        }
-
         return out;
     }
 
     /**
-     * The shape this device cuts its adaptive icons into.
+     * An adaptive icon's two layers, painted straight onto a square.
      *
-     * The system exposes its own mask from Android 13, which is the right
-     * answer wherever it can be had — a device themed to circles and a device
-     * themed to squircles should not both get Tenna's idea of the shape. Below
-     * that the mask is only reachable through a hidden resource, so the
-     * platform's default stands in; a circle is the shape the adaptive icon
-     * spec is drawn against, and every icon is designed to survive it.
+     * Not the drawable itself. {@link AdaptiveIconDrawable#draw} paints its
+     * layers *through its own mask* — rendering it is how a circle is
+     * produced, not how one is avoided — so asking it to draw and then not
+     * masking the result gets the host's shape anyway, baked in and no longer
+     * removable.
+     *
+     * The layers underneath have no shape at all. They are the oversized
+     * canvas the mask is cut from: {@code 108dp} of artwork behind a
+     * {@code 72dp} viewport, a quarter of the viewport bleeding past it on
+     * every side. Drawn at those bounds, what lands on the bitmap is exactly
+     * the square a launcher would have cut, and the cutting is left to Tenna.
      */
-    @Nullable
-    private static Path iconMask(@NonNull AdaptiveIconDrawable drawable) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            Path mask = drawable.getIconMask();
-            if (mask != null && !mask.isEmpty()) return mask;
-        }
-        return null;
-    }
-
-    /** The artwork with everything outside the mask taken away. */
     @NonNull
-    private static Bitmap cut(@NonNull Bitmap source, @Nullable Path mask) {
+    @RequiresApi(Build.VERSION_CODES.O)
+    private static Bitmap layers(@NonNull AdaptiveIconDrawable drawable) {
         Bitmap out = Bitmap.createBitmap(ICON_PX, ICON_PX, Bitmap.Config.ARGB_8888);
         Canvas canvas = new Canvas(out);
-        Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
 
-        // Painted first and drawn through, rather than clipped: a clip path is
-        // not antialiased, and an icon with a stair-stepped edge is worse than
-        // no shape at all.
-        if (mask != null) canvas.drawPath(mask, paint);
-        else canvas.drawCircle(ICON_PX / 2f, ICON_PX / 2f, ICON_PX / 2f, paint);
+        int bleed = Math.round(ICON_PX * AdaptiveIconDrawable.getExtraInsetFraction());
+        Rect bounds = new Rect(-bleed, -bleed, ICON_PX + bleed, ICON_PX + bleed);
 
-        paint.setXfermode(new PorterDuffXfermode(PorterDuff.Mode.SRC_IN));
-        canvas.drawBitmap(source, 0, 0, paint);
+        // Background first, then foreground. Either may be missing — the spec
+        // requires neither — and an icon with no background is one whose
+        // corners the tile's own color shows through.
+        for (Drawable layer : new Drawable[] { drawable.getBackground(), drawable.getForeground() }) {
+            if (layer == null) continue;
+            layer.setBounds(bounds);
+            layer.draw(canvas);
+        }
 
-        source.recycle();
         return out;
     }
 

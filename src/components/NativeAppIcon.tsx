@@ -21,6 +21,53 @@ interface NativeAppIconProps {
 }
 
 /**
+ * The robot, drawn small enough to survive being a fifth of an inch across.
+ *
+ * The viewBox is the ink and nothing else — no margin of its own — so that
+ * whatever centres it is centring the shape rather than the box around it.
+ */
+function AndroidMark({ className }: { className?: string }) {
+  return (
+    <svg viewBox="3.5 1.6 17 12.4" aria-hidden="true" className={className}>
+      <path
+        d="M7.4 2.4 9.3 6.1M16.6 2.4 14.7 6.1"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+      />
+      <path d="M3.5 14a8.5 8.5 0 0 1 17 0z" fill="currentColor" />
+      <circle cx="8.7" cy="9.3" r="1.05" fill="#fff" />
+      <circle cx="15.3" cy="9.3" r="1.05" fill="#fff" />
+    </svg>
+  );
+}
+
+/**
+ * The mark in the corner of a device app's tile.
+ *
+ * Every other tile on the wall opens inside Tenna; these leave it. Android
+ * says the same thing the same way about a shortcut a browser put on its home
+ * screen — a small badge of whoever is really behind the icon, clipped to the
+ * corner — and a person who has seen one of those knows what this one means
+ * without being told.
+ *
+ * A white disc with a ring of the wallpaper around it, so it reads against a
+ * dark icon and a bright one alike, and set a little proud of the tile so the
+ * artwork keeps its own corner.
+ */
+function AndroidBadge() {
+  return (
+    <span
+      aria-hidden="true"
+      className="absolute -bottom-[3%] -right-[3%] flex size-[32%] items-center justify-center rounded-full bg-white ring-2 ring-[#150609]"
+    >
+      <AndroidMark className="h-auto w-[58%] text-[#3DDC84]" />
+    </span>
+  );
+}
+
+/**
  * One of the device's own apps on the wall.
  *
  * The same tile as an nsite's, and deliberately so: a person's phone does not
@@ -34,7 +81,7 @@ export function NativeAppIcon({ app, onRemove }: NativeAppIconProps) {
   const { toast } = useToast();
   // `isLoading` rather than `isPending`: a query that is disabled because this
   // platform has no such apps is pending forever, and static forever with it.
-  const { data: iconUrl, isLoading } = useNativeAppIcon(app);
+  const { data: icon, isLoading } = useNativeAppIcon(app);
 
   // A long press is a press — see the same guard on `AppIcon`.
   const suppressTap = useRef(false);
@@ -72,18 +119,25 @@ export function NativeAppIcon({ app, onRemove }: NativeAppIconProps) {
       });
   }, [app, toast]);
 
-  // The icon as the device draws it, and nothing else — see `TileImage`. Only
-  // an app whose artwork could not be read at all falls back to a tile with
-  // its initial on it, where there is nothing of the app's own left to show.
+  // An adaptive icon is a square with no shape cut out of it yet, so it takes
+  // the same squircle an nsite's artwork does and the wall comes out of one
+  // mould. A legacy icon has an outline of its own already — Tenna's shape
+  // would only clip corners that were transparent anyway — so it is drawn as
+  // it arrived, and an app whose artwork could not be read at all falls back
+  // to a tile with its initial on it.
   const tile = (
     <TileButton name={app.label} onSelect={handleSelect}>
       {isLoading ? (
         <TileStatic />
-      ) : iconUrl ? (
-        <TileImage src={iconUrl} name={app.label} />
-      ) : (
+      ) : !icon ? (
         <TileArtwork name={app.label} />
+      ) : icon.adaptive ? (
+        <TileArtwork name={app.label} iconUrl={icon.url} fit="cover" />
+      ) : (
+        <TileImage src={icon.url} name={app.label} />
       )}
+
+      <AndroidBadge />
     </TileButton>
   );
 

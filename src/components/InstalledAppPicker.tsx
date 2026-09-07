@@ -26,7 +26,7 @@ function InstalledAppRow({
   onSelect: () => void;
 }) {
   const [ref, seen] = useSeen<HTMLButtonElement>();
-  const { data: iconUrl } = useNativeAppIcon(seen ? app : undefined);
+  const { data: icon } = useNativeAppIcon(seen ? app : undefined);
 
   return (
     <button
@@ -40,18 +40,21 @@ function InstalledAppRow({
         added ? 'cursor-default opacity-50' : 'hover:bg-white/10 active:bg-white/15',
       )}
     >
-      {/* The icon as the device draws it — already the right shape, with
-          nothing of Tenna's behind it. See `TileImage`. */}
-      {iconUrl ? (
+      {/* The tile this row would put on the wall, at the size of a row: an
+          adaptive icon cut to Tenna's squircle, a legacy one left in the
+          outline it came with. See `NativeAppIcon`. */}
+      {icon?.adaptive ? (
         <img
-          src={iconUrl}
+          src={icon.url}
           alt=""
           decoding="async"
-          className="h-11 w-11 shrink-0 object-contain"
+          className="app-squircle size-11 shrink-0 object-cover"
         />
+      ) : icon ? (
+        <img src={icon.url} alt="" decoding="async" className="size-11 shrink-0 object-contain" />
       ) : (
         <span
-          className="app-squircle flex h-11 w-11 shrink-0 items-center justify-center text-lg font-semibold text-white/95"
+          className="app-squircle flex size-11 shrink-0 items-center justify-center text-lg font-semibold text-white/95"
           style={{ background: getTileGradient(app.label) }}
         >
           {getTileInitial(app.label)}

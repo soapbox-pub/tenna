@@ -22,6 +22,17 @@ export function useInstalledApps() {
   });
 }
 
+/** An app's artwork, and what may be done to it. */
+export interface NativeAppIconArt {
+  /** Data URL for the PNG. */
+  url: string;
+  /**
+   * Whether it is a full square with no shape cut out of it yet, and so may
+   * be put behind the squircle every other tile on the wall is cut to.
+   */
+  adaptive: boolean;
+}
+
 /**
  * One app's icon, as a data URL.
  *
@@ -34,10 +45,10 @@ export function useNativeAppIcon(app: { packageName: string; activityName: strin
   return useQuery({
     queryKey: ['native-app-icon', app?.packageName, app?.activityName],
     enabled: supportsNativeApps() && !!app,
-    queryFn: async (): Promise<string | null> => {
+    queryFn: async (): Promise<NativeAppIconArt | null> => {
       if (!app) return null;
-      const { icon } = await NativeApps.icon(app);
-      return icon ? `data:image/png;base64,${icon}` : null;
+      const { icon, adaptive } = await NativeApps.icon(app);
+      return icon ? { url: `data:image/png;base64,${icon}`, adaptive } : null;
     },
     // Artwork changes when the app updates, which is not while it is on screen.
     staleTime: Infinity,

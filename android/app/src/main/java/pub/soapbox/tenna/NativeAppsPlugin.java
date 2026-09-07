@@ -62,8 +62,11 @@ public class NativeAppsPlugin extends Plugin {
             return;
         }
 
+        NativeApps.Art art = NativeApps.icon(getContext(), packageName, call.getString("activityName"));
+
         JSObject result = new JSObject();
-        result.put("icon", NativeApps.icon(getContext(), packageName, call.getString("activityName")));
+        result.put("icon", art == null ? null : art.png);
+        result.put("adaptive", art != null && art.adaptive);
         call.resolve(result);
     }
 

@@ -26,9 +26,15 @@ export interface NativeAppsPlugin {
   /**
    * One app's icon, as a base64 PNG without a data URL prefix.
    *
+   * Uncut: an adaptive icon arrives as the whole square its layers are drawn
+   * on, with the host's mask not applied, and `adaptive` says so. A legacy
+   * icon is a finished picture with its own outline, and says that instead.
+   *
    * Null if the app has been uninstalled since the list was taken.
    */
-  icon(options: { packageName: string; activityName?: string }): Promise<{ icon: string | null }>;
+  icon(
+    options: { packageName: string; activityName?: string },
+  ): Promise<{ icon: string | null; adaptive: boolean }>;
 
   /**
    * Open an app.

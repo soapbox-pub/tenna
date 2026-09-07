@@ -6,8 +6,8 @@ import { useCallback } from 'react';
 import { useLocalStorage } from '@/hooks/useLocalStorage';
 import { nsitePointerFilter } from '@/lib/nsiteAddress';
 import { isServableNsite } from '@/lib/nsiteFiles';
-import { getNsiteSubdomain, parseNsiteSubdomain } from '@/lib/nsiteSubdomain';
-import { APP_ID, NSITE_RELAY } from '@/lib/tenna';
+import { getNsiteSubdomain, hexToBase36, parseNsiteSubdomain } from '@/lib/nsiteSubdomain';
+import { APP_ID, DEFAULT_NSITES, NSITE_RELAY, TEAM_SOAPBOX_PUBKEY } from '@/lib/tenna';
 
 const STORAGE_KEY = `${APP_ID}:added-nsites`;
 
@@ -18,6 +18,22 @@ export interface AddedNsite {
   /** Relays the address it was added by named, if it named any. */
   relays?: string[];
 }
+
+/**
+ * What a wall nobody has touched starts out with.
+ *
+ * These are ordinary entries on the list, not a lineup above it: the wall no
+ * longer has a curated half the user can only look at, so the apps Tenna ships
+ * with are the same kind of thing as the ones the user adds, removable in the
+ * same way. Nothing here is written to storage until the list is edited, and
+ * the moment it is — including by removing all three — the stored list is what
+ * there is.
+ *
+ * Module-level, because it is the query key for the fetch that resolves it.
+ */
+const DEFAULTS: AddedNsite[] = DEFAULT_NSITES.map((identifier) => ({
+  id: `${hexToBase36(TEAM_SOAPBOX_PUBKEY)}${identifier}`,
+}));
 
 /** Only the shape survives a round trip through localStorage; check it. */
 function tidy(value: unknown): AddedNsite[] {
@@ -45,8 +61,7 @@ const SERIALIZER = {
 };
 
 /**
- * The sites the user added by hand, and the manifests they currently resolve
- * to.
+ * The sites on the wall, and the manifests they currently resolve to.
  *
  * What is kept is the address, not the manifest. A site publishes again and
  * everything about it changes but the address, so storing the manifest would
@@ -59,7 +74,7 @@ const SERIALIZER = {
  */
 export function useAddedNsites() {
   const { nostr } = useNostr();
-  const [stored, setStored] = useLocalStorage<AddedNsite[]>(STORAGE_KEY, [], SERIALIZER);
+  const [stored, setStored] = useLocalStorage<AddedNsite[]>(STORAGE_KEY, DEFAULTS, SERIALIZER);
 
   const query = useQuery({
     queryKey: ['added-nsites', stored],

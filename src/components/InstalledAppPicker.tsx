@@ -1,8 +1,9 @@
 import { Check, Loader2, Search } from 'lucide-react';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useMemo, useState } from 'react';
 
 import { Input } from '@/components/ui/input';
 import { useNativeAppIcon, useInstalledApps } from '@/hooks/useNativeApps';
+import { useSeen } from '@/hooks/useSeen';
 import { getTileGradient, getTileInitial } from '@/lib/iconTile';
 import { notificationSuccess } from '@/lib/haptics';
 import type { NativeApp } from '@/lib/nativeAppsPlugin';
@@ -12,40 +13,6 @@ interface InstalledAppPickerProps {
   /** Apps already on the wall, shown as such rather than offered again. */
   addedIds: string[];
   onAdd: (app: NativeApp) => void;
-}
-
-/**
- * Whether an element has been scrolled into view yet, and stays true after.
- *
- * A device has a couple of hundred launchable apps and each icon is a separate
- * trip to the package manager. Fetching all of them to fill a list the user
- * will scroll a tenth of is most of a second of the main thread spent on
- * artwork nobody sees, so a row asks for its icon when it is looked at.
- */
-function useSeen<T extends Element>() {
-  const ref = useRef<T>(null);
-
-  // Where there is no observer to ask, everything counts as looked at — which
-  // is the honest answer for a list that cannot report being scrolled.
-  const [seen, setSeen] = useState(() => typeof IntersectionObserver === 'undefined');
-
-  useEffect(() => {
-    const element = ref.current;
-    if (!element || seen) return;
-
-    const observer = new IntersectionObserver(
-      ([entry]) => {
-        if (entry?.isIntersecting) setSeen(true);
-      },
-      // A screen's worth of warning, so a row is drawn before it arrives.
-      { rootMargin: '200px' },
-    );
-
-    observer.observe(element);
-    return () => observer.disconnect();
-  }, [seen]);
-
-  return [ref, seen] as const;
 }
 
 /** One app in the list: its icon, its name, and whether it is already up. */

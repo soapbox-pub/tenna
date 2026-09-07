@@ -10,7 +10,6 @@ import { NsiteSharePicker } from '@/components/NsiteSharePicker';
 import { NsiteViewer } from '@/components/NsiteViewer';
 import { useAddedNativeApps, nativeAppId } from '@/hooks/useAddedNativeApps';
 import { useAddedNsites } from '@/hooks/useAddedNsites';
-import { useNsites } from '@/hooks/useNsites';
 import { usePendingShare } from '@/hooks/useNsiteShare';
 import { getNsiteSubdomain } from '@/lib/nsiteSubdomain';
 
@@ -32,7 +31,6 @@ const Index = () => {
     description: 'Pick an app. Tenna is an nsite browser — your entrypoint to Nostr.',
   });
 
-  const { data: nsites, isLoading } = useNsites();
   const added = useAddedNsites();
   const nativeApps = useAddedNativeApps();
 
@@ -45,22 +43,19 @@ const Index = () => {
   // Something the OS handed to Tenna rather than to one of the apps on it.
   const { share, dismiss, handOff } = usePendingShare();
 
-  // The curator's lineup first, then whatever the user added, so a site keeps
-  // the channel it was on when the next one is added after it. A site already
-  // in the lineup is not a second tile: the curator got there first, and the
-  // wall shows one tile per site.
-  const curated = nsites ?? [];
-  const curatedIds = new Set(curated.map(getNsiteSubdomain));
-  const own = (added.events ?? []).filter((event) => !curatedIds.has(getNsiteSubdomain(event)));
-
-  const lineup = [...curated, ...own];
+  // Every site on the wall is one the user has, in the end, chosen to keep —
+  // the three Tenna starts out with are on the same list as the ones added
+  // after them, in the order they were added, and can be taken off the same
+  // way. A site keeps the channel it was on when the next one is added after
+  // it.
+  const lineup = added.events ?? [];
 
   // The device's own apps come after the sites, so that adding one doesn't
   // renumber the channels: a channel is a site's place in the lineup, and a
   // native app has no channel to take.
   const devices = nativeApps.apps;
 
-  const loading = isLoading || added.isLoading;
+  const loading = added.isLoading;
   const empty = !loading && lineup.length === 0 && devices.length === 0;
 
   return (
@@ -109,8 +104,10 @@ const Index = () => {
           added and the icons would otherwise stretch to fill.
         */}
         <div className="grid grid-cols-[repeat(auto-fill,minmax(4.25rem,1fr))] justify-items-center gap-x-4 gap-y-7 sm:gap-x-6 sm:gap-y-9 [&>*]:max-w-24">
+          {/* One per site on the way, since the list of them is on the device
+              and only the manifests are still coming. */}
           {loading &&
-            Array.from({ length: 6 }).map((_, i) => <AppIconSkeleton key={i} />)}
+            added.stored.map((site) => <AppIconSkeleton key={site.id} />)}
 
           {lineup.map((event, i) => (
             <AppIcon
@@ -118,9 +115,7 @@ const Index = () => {
               event={event}
               channel={i + 1}
               onSelect={() => setActive({ event, channel: i + 1 })}
-              onRemove={
-                i >= curated.length ? () => added.remove(getNsiteSubdomain(event)) : undefined
-              }
+              onRemove={() => added.remove(getNsiteSubdomain(event))}
             />
           ))}
 
@@ -147,7 +142,7 @@ const Index = () => {
       <AddAppDialog
         open={adding}
         onOpenChange={setAdding}
-        addedIds={[...curatedIds, ...added.stored.map((site) => site.id)]}
+        addedIds={added.stored.map((site) => site.id)}
         onAdd={added.add}
         addedNativeIds={nativeApps.stored.map(nativeAppId)}
         onAddNativeApp={nativeApps.add}

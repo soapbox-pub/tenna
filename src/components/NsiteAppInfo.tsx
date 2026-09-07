@@ -6,6 +6,7 @@ import { nip19 } from 'nostr-tools';
 import { useEffect, useMemo, useRef, useState, type ComponentType } from 'react';
 
 import { TileArtwork, TileFrame } from '@/components/Tile';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -13,6 +14,8 @@ import {
   DialogContent,
   DialogTitle,
 } from '@/components/ui/dialog';
+import { Skeleton } from '@/components/ui/skeleton';
+import { useAuthor } from '@/hooks/useAuthor';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useNsiteAllowance } from '@/hooks/useNsiteAllowance';
 import type { NsiteApp } from '@/hooks/useNsiteApp';
@@ -59,6 +62,57 @@ function middleEllipsis(text: string, max: number): string {
   const head = Math.ceil((max - 1) / 2);
   const tail = Math.floor((max - 1) / 2);
   return `${text.slice(0, head)}…${text.slice(-tail)}`;
+}
+
+/**
+ * Who put the site out, under the site's name.
+ *
+ * Not a claim the site makes about itself: the manifest is signed, so the
+ * publisher is the key behind that signature, and the face and name here are
+ * only that key's own profile shown in its place. The key is always known —
+ * the profile may not be, and a publisher who has never written one is still
+ * named, by the npub cut short, rather than left blank.
+ */
+function Publisher({ pubkey }: { pubkey: string }) {
+  const author = useAuthor(pubkey);
+  const metadata = author.data?.metadata;
+
+  // The profile is a small, quick thing to fetch and it sits between the app's
+  // name and the row of buttons. A line that appeared late would push the
+  // buttons down under a finger already reaching for them, so the space is
+  // held from the start.
+  if (author.isPending) {
+    return (
+      <div className="flex items-center gap-2" aria-hidden="true">
+        <Skeleton className="size-6 rounded-full bg-white/10" />
+        <Skeleton className="h-4 w-28 bg-white/10" />
+      </div>
+    );
+  }
+
+  const name = metadata?.display_name || metadata?.name || shortNpub(pubkey);
+
+  return (
+    <div className="flex max-w-full items-center gap-2">
+      <Avatar size="sm" className="shrink-0">
+        <AvatarImage src={metadata?.picture} alt="" />
+        <AvatarFallback className="bg-white/10 text-white/80">
+          {name.slice(0, 1).toUpperCase()}
+        </AvatarFallback>
+      </Avatar>
+
+      <span className="min-w-0 truncate text-base text-white/70">{name}</span>
+    </div>
+  );
+}
+
+/** What to call a publisher who has never said. */
+function shortNpub(pubkey: string): string {
+  try {
+    return middleEllipsis(nip19.npubEncode(pubkey), 15);
+  } catch {
+    return 'Unknown publisher';
+  }
 }
 
 /**
@@ -409,6 +463,12 @@ export function NsiteAppInfo({
           <h2 className="max-w-full break-words text-center text-3xl font-semibold leading-tight">
             {name}
           </h2>
+
+          {/* Closer to the name than the gap would put it, because the two are
+              one thing being read: what this is, and whose it is. */}
+          <div className="-mt-2 flex max-w-full justify-center">
+            <Publisher pubkey={event.pubkey} />
+          </div>
 
           <div className="flex flex-wrap items-start justify-center gap-6 pt-2">
             {onOpen && (

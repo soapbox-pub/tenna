@@ -83,11 +83,9 @@ const Index = () => {
       ))}
 
       {/*
-        Four across on a phone, the way a home screen is, widening to six on a
-        large display rather than blowing the icons up to fill it. The
-        container stops well short of the viewport for the same reason: past a
-        certain size a grid of app icons stops reading as a home screen and
-        starts reading as a poster.
+        The container stops well short of the viewport, because past a certain
+        size a grid of app icons stops reading as a home screen and starts
+        reading as a poster.
       */}
       <div className="relative mx-auto max-w-2xl px-5 pb-safe-offset-20 pt-safe-offset-4 sm:px-8 sm:pt-safe-offset-8">
         {/*
@@ -100,7 +98,17 @@ const Index = () => {
           <LoginArea />
         </header>
 
-        <div className="grid grid-cols-4 gap-x-4 gap-y-7 sm:grid-cols-5 sm:gap-x-6 sm:gap-y-9 lg:grid-cols-6">
+        {/*
+          An icon is a size before it is a count. The wall lays out as many
+          columns as fit at 68px and lets them share out what's left, so a
+          wider screen gets more apps across rather than bigger ones — four on
+          a phone held upright, six turned on its side or on a desktop, and
+          all of them about 80px either way. 68px is the floor because it is
+          what four across comes to on the narrowest phone worth drawing for,
+          and 96px the ceiling, for the narrow windows where a column can't be
+          added and the icons would otherwise stretch to fill.
+        */}
+        <div className="grid grid-cols-[repeat(auto-fill,minmax(4.25rem,1fr))] justify-items-center gap-x-4 gap-y-7 sm:gap-x-6 sm:gap-y-9 [&>*]:max-w-24">
           {loading &&
             Array.from({ length: 6 }).map((_, i) => <AppIconSkeleton key={i} />)}
 

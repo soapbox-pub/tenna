@@ -63,6 +63,13 @@ export function TileStatic() {
  * is what an Android adaptive icon is drawn expecting. A glyph is inset on its
  * own colour instead, because a small mark stretched to the edges of a tile
  * stops looking like an icon.
+ *
+ * The images here are decoded synchronously and never lazily. Every URL they
+ * are handed is a data URL, a blob, or a hotlink already in the HTTP cache,
+ * so there is nothing for laziness to save — and an image decoded off the
+ * main thread is one with no bits for a frame or two whenever its `src`
+ * changes, during which the colour behind it shows through where the icon
+ * was. A tile that changes its picture should do it in one frame.
  */
 export function TileArtwork({
   name,
@@ -81,8 +88,7 @@ export function TileArtwork({
         <img
           src={iconUrl}
           alt=""
-          decoding="async"
-          loading="lazy"
+          decoding="sync"
           className={cn(
             'absolute',
             fit === 'cover'
@@ -116,8 +122,7 @@ export function TileImage({ src, name }: { src: string; name: string }) {
       src={src}
       alt=""
       title={name}
-      decoding="async"
-      loading="lazy"
+      decoding="sync"
       className="absolute inset-0 h-full w-full object-contain"
     />
   );

@@ -181,8 +181,17 @@ export function AppIcon({
     });
   }, [app, name, siteId, event.id]);
 
-  // What is drawn: the site's answer, then last time's, then static.
-  const art = app ?? snapshot;
+  // What is drawn: last time's picture, so long as it was drawn from the
+  // manifest on the wall today; else the site's answer; else static.
+  //
+  // The snapshot first, not the live answer, because on an unchanged site
+  // they are the same picture and swapping one for the other is a `src`
+  // change on the image — and an image whose `src` changes has no bits for
+  // a frame or two, in which the tile's own colour shows through where the
+  // icon was. The record is still rewritten above, so a site that has
+  // republished is drawn fresh on the next launch, and on this one the
+  // moment its manifest arrives.
+  const art = snapshot?.from === event.id ? snapshot : (app ?? snapshot);
 
   // An `AppIcon` is a tile on the wall and nowhere else, so it is always a
   // site the user has — a site merely being browsed in the picker draws itself

@@ -17,22 +17,32 @@ export function parseAuthorEvent(event: NostrEvent): AuthorResult {
   }
 }
 
-export function useAuthor(pubkey: string | undefined) {
+/**
+ * The profile behind a pubkey.
+ *
+ * `enabled` is for the callers that are a list: a screen naming one publisher
+ * always wants it, but a row in a long list of them should not send anybody to
+ * a relay until it has been scrolled to. See `useSeen`.
+ */
+export function useAuthor(pubkey: string | undefined, options?: { enabled?: boolean }) {
   const { nostr } = useNostr();
   const { store } = useNostrStorage();
   const queryClient = useQueryClient();
+
+  const enabled = options?.enabled ?? true;
 
   // A name and a face the app has seen before are drawn on the first frame
   // rather than after a relay answers. The query below still runs, and still
   // wins when it does.
   useCacheFirstSeed<AuthorResult>({
-    queryKey: pubkey ? ['nostr', 'author', pubkey] : undefined,
+    queryKey: pubkey && enabled ? ['nostr', 'author', pubkey] : undefined,
     filter: { kinds: [0], authors: pubkey ? [pubkey] : [] },
     toData: parseAuthorEvent,
     getEvent: (data) => data.event,
   });
 
   return useQuery<AuthorResult>({
+    enabled,
     queryKey: ['nostr', 'author', pubkey ?? ''],
     queryFn: async (c) => {
       if (!pubkey) {

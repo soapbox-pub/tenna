@@ -1,7 +1,9 @@
 import { Check, Loader2, Search } from 'lucide-react';
 import { useMemo, useState } from 'react';
 
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Input } from '@/components/ui/input';
+import { useAuthor } from '@/hooks/useAuthor';
 import { useNsiteAddress } from '@/hooks/useNsiteAddress';
 import { useNsiteApp } from '@/hooks/useNsiteApp';
 import { useNsiteCatalog, type NsiteCatalogEntry } from '@/hooks/useNsiteCatalog';
@@ -18,7 +20,12 @@ interface NsitePickerProps {
   onAdd: (uri: string) => void;
 }
 
-/** One site in the list: its icon, its name, and whether it is already up. */
+/** A profile's name as one line of it, or null where it says nothing. */
+function tidyName(value: string | undefined): string | null {
+  return value?.replace(/\s+/g, ' ').trim() || null;
+}
+
+/** One site in the list: its icon, its name, its publisher, and whether it is already up. */
 function NsiteRow({
   entry,
   added,
@@ -32,9 +39,23 @@ function NsiteRow({
   const [ref, seen] = useSeen<HTMLButtonElement>();
   const { data: app } = useNsiteApp(event, { enabled: seen });
 
+  // Fetched on the same terms as the artwork beside it: when the row is
+  // looked at, and once per publisher however many of their sites are listed.
+  const { data: author } = useAuthor(event.pubkey, { enabled: seen });
+  const metadata = author?.metadata;
+
   // What the site says of itself once it has been fetched beats what its
   // manifest or its author's profile could say before that.
   const name = app?.label ?? entry.name ?? '???';
+
+  // Who signed the manifest, where they have ever said. A publisher with no
+  // profile is left unsaid rather than written out as an npub: a row is one
+  // line, and 63 characters of base32 would crowd out the name it belongs to.
+  //
+  // A site that doesn't name itself is named after its publisher, and those
+  // rows would otherwise read "Alex by Alex".
+  const publisher = tidyName(metadata?.display_name || metadata?.name);
+  const by = publisher && publisher.toLowerCase() !== name.toLowerCase() ? publisher : null;
 
   return (
     <button
@@ -72,7 +93,27 @@ function NsiteRow({
         )}
       </span>
 
-      <span className="min-w-0 flex-1 truncate text-base text-white/95">{name}</span>
+      {/* What it is and whose it is, read as one line. Both names are cut to
+          fit, the publisher's first: an app is picked here by its own name,
+          and the publisher is what tells two of the same name apart. */}
+      <span className="flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden">
+        <span className="min-w-0 truncate text-base font-medium text-white/95">{name}</span>
+
+        {by && (
+          <>
+            <span className="shrink-0 text-sm text-white/45">by</span>
+
+            <Avatar className="size-5 shrink-0">
+              <AvatarImage src={metadata?.picture} alt="" />
+              <AvatarFallback className="bg-white/10 text-[0.625rem] text-white/80">
+                {by.slice(0, 1).toUpperCase()}
+              </AvatarFallback>
+            </Avatar>
+
+            <span className="min-w-0 shrink-[3] truncate text-sm text-white/55">{by}</span>
+          </>
+        )}
+      </span>
 
       {added && <Check aria-hidden="true" className="size-5 shrink-0 text-white/50" />}
     </button>

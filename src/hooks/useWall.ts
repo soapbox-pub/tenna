@@ -1,35 +1,16 @@
-import type { NostrEvent } from '@nostrify/nostrify';
-import { useNostr } from '@nostrify/react';
-import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo } from 'react';
 
-import { useCacheFirstSeedMany } from '@/hooks/useCacheFirstSeed';
 import { useLocalStorage } from '@/hooks/useLocalStorage';
-import { useInstalledApps } from '@/hooks/useNativeApps';
-import type { NativeApp } from '@/lib/nativeAppsPlugin';
-import { nsitePointerFilter } from '@/lib/nsiteAddress';
-import { isServableNsite } from '@/lib/nsiteFiles';
 import { NsiteShortcuts, supportsNsiteWindows } from '@/lib/nsiteShortcutsPlugin';
-import { getNsiteSubdomain, hexToBase36, parseNsiteSubdomain } from '@/lib/nsiteSubdomain';
-import { APP_ID, DEFAULT_NSITES, NSITE_RELAY, TEAM_SOAPBOX_PUBKEY } from '@/lib/tenna';
-import { nativeAppUri, nsiteUri, parseWallUri, wallUriKey, type WallAddress } from '@/lib/wallUri';
+import { hexToBase36, parseNsiteSubdomain } from '@/lib/nsiteSubdomain';
+import { APP_ID, DEFAULT_NSITES, TEAM_SOAPBOX_PUBKEY } from '@/lib/tenna';
+import { nativeAppUri, nsiteUri, parseWallUri, wallUriKey } from '@/lib/wallUri';
 
 const STORAGE_KEY = `${APP_ID}:wall`;
 
 /** Where the wall was kept when a site and an app were two different lists. */
 const LEGACY_NSITES = `${APP_ID}:added-nsites`;
 const LEGACY_APPS = `${APP_ID}:added-native-apps`;
-
-/** One tile, with whatever it takes to draw it resolved. */
-export type WallItem =
-  | {
-      uri: string;
-      kind: 'nsite';
-      event: NostrEvent;
-      /** Its place among the sites, which is the channel it tunes to. */
-      channel: number;
-    }
-  | { uri: string; kind: 'app'; app: NativeApp };
 
 /**
  * What a wall nobody has touched starts out with.
@@ -118,37 +99,26 @@ function initialWall(): string[] {
   return initial;
 }
 
-/** The sites on the wall, in wall order, with the relays to look for them on. */
-function nsiteAddresses(uris: string[]): Array<{ uri: string; id: string; relays: string[] }> {
-  return uris
-    .map((uri) => ({ uri, address: parseWallUri(uri) }))
-    .filter(
-      (entry): entry is { uri: string; address: Extract<WallAddress, { kind: 'nsite' }> } =>
-        entry.address?.kind === 'nsite',
-    )
-    .map(({ uri, address }) => ({ uri, id: address.id, relays: address.relays }));
-}
-
 /**
  * Everything on the wall, in the order it sits there.
  *
  * One list, holding both kinds of tile, because that is what the person
  * looking at the screen sees: a phone does not sort its home screen by what
- * technology is behind each icon, and neither does this one. What is stored
- * is an address rather than the thing it names — a site republishes and
- * everything about it changes but its address, an app updates and is renamed
- * — so both are resolved fresh every time the wall is drawn.
+ * technology is behind each icon, and neither does this one.
+ *
+ * The list is the wall. It is on the device, it is read in one synchronous
+ * call, and every address on it is drawn — nothing here asks a relay or the
+ * package manager, and nothing a relay says can take a tile away. What is
+ * stored is an address rather than the thing it names, so each tile resolves
+ * its own (see `WallTile`), and a tile whose site hasn't answered yet is
+ * still a tile: its place, its name as best it can be known, and its menu.
  *
  * The list is state, so it must be held in one place: two components calling
  * this hook get two copies of it, and a change in one is invisible to the
  * other until a reload. The wall owns it and hands the verbs down.
  */
 export function useWall() {
-  const { nostr } = useNostr();
   const [uris, setUris] = useLocalStorage<string[]>(STORAGE_KEY, initialWall(), SERIALIZER);
-
-  const sites = useMemo(() => nsiteAddresses(uris), [uris]);
-  const installed = useInstalledApps();
 
   // Tell the native side what is on the wall.
   //
@@ -157,10 +127,14 @@ export function useWall() {
   // can see local storage: a site's own window decides whether to forget its
   // record with no wall in memory, and the share sheet is read by the system
   // when nothing of Tenna's is running at all.
-  //
-  // The stored addresses rather than the drawn tiles, because a site whose
-  // manifest hasn't arrived is still a site the user has.
-  const wallSiteIds = useMemo(() => sites.map(({ id }) => id), [sites]);
+  const wallSiteIds = useMemo(
+    () =>
+      uris.flatMap((uri) => {
+        const address = parseWallUri(uri);
+        return address?.kind === 'nsite' ? [address.id] : [];
+      }),
+    [uris],
+  );
 
   useEffect(() => {
     if (!supportsNsiteWindows()) return;
@@ -170,113 +144,6 @@ export function useWall() {
       // change to the wall says the whole thing again.
     });
   }, [wallSiteIds]);
-
-  // Sorted, so the key is the *set* of sites on the wall and not the order
-  // they sit in. Dragging one tile past another asks for exactly the same
-  // manifests; a key that moved with them would be a cache entry nobody had
-  // filled yet, and the whole wall would drop back to static on every drop.
-  const queryKey = useMemo(
-    () => ['wall-nsites', [...sites.map(({ uri }) => uri)].sort()],
-    [sites],
-  );
-
-  const filters = useMemo(
-    () =>
-      sites
-        .map(({ id }) => parseNsiteSubdomain(id))
-        .filter((pointer) => pointer !== null)
-        .map(nsitePointerFilter),
-    [sites],
-  );
-
-  // The wall is what the app opens on, and a site whose manifest hasn't come
-  // back draws nothing at all — so without this the first thing anyone sees on
-  // a cold start is an empty screen, held for as long as a relay takes. The
-  // manifests are the same ones as last time; they are already on disk.
-  useCacheFirstSeedMany<NostrEvent[]>({
-    queryKey: sites.length > 0 ? queryKey : undefined,
-    filters,
-    toData: (events) => {
-      const servable = events.filter(isServableNsite);
-      return servable.length > 0 ? servable : undefined;
-    },
-  });
-
-  const manifests = useQuery({
-    queryKey,
-    // And when the set really does change, the manifests already in hand are
-    // still the right ones for the sites that didn't. Adding a tile should
-    // add a tile, not blank the wall while a relay answers.
-    placeholderData: keepPreviousData,
-    enabled: sites.length > 0,
-    queryFn: async (c): Promise<NostrEvent[]> => {
-      const signal = AbortSignal.any([c.signal, AbortSignal.timeout(8000)]);
-
-      // Whatever relays the addresses came with, alongside the one the rest of
-      // the wall is served from: a site added by an naddr from elsewhere lives
-      // where that naddr said it does.
-      const urls = [...new Set([NSITE_RELAY, ...sites.flatMap(({ relays }) => relays)])];
-
-      const events = await nostr.group(urls).query(filters, { signal });
-      return events.filter(isServableNsite);
-    },
-    staleTime: 60_000,
-  });
-
-  const items = useMemo((): WallItem[] => {
-    // One manifest per site, the newest of the ones on offer. A relay may
-    // answer with an older replaceable it hasn't caught up on, or not at all.
-    const byId = new Map<string, NostrEvent>();
-    for (const event of manifests.data ?? []) {
-      const id = getNsiteSubdomain(event);
-      const seen = byId.get(id);
-      if (!seen || seen.created_at < event.created_at) byId.set(id, event);
-    }
-
-    const live = installed.data;
-    const byAppId = live && new Map(live.map((app) => [app.id, app]));
-
-    const wall: WallItem[] = [];
-    let channel = 0;
-
-    for (const uri of uris) {
-      const address = parseWallUri(uri);
-      if (!address) continue;
-
-      if (address.kind === 'nsite') {
-        const event = byId.get(address.id);
-        // A site whose manifest hasn't arrived draws nothing, so it holds no
-        // slot and takes no channel; it appears when the relay answers.
-        if (!event) continue;
-        wall.push({ uri, kind: 'nsite', event, channel: ++channel });
-        continue;
-      }
-
-      const id = `${address.packageName}/${address.activityName}`;
-
-      // Still asking the device. Show the app under the name it was added by
-      // rather than leaving a hole; a tile whose app turns out to be gone is
-      // corrected a moment later.
-      if (!byAppId) {
-        wall.push({
-          uri,
-          kind: 'app',
-          app: {
-            id,
-            packageName: address.packageName,
-            activityName: address.activityName,
-            label: address.label ?? address.packageName,
-          },
-        });
-        continue;
-      }
-
-      const app = byAppId.get(id);
-      if (app) wall.push({ uri, kind: 'app', app });
-    }
-
-    return wall;
-  }, [uris, manifests.data, installed.data]);
 
   const add = useCallback(
     (uri: string) => {
@@ -306,9 +173,8 @@ export function useWall() {
    * Put the tile at `from` where the tile at `to` is, closing the gap behind
    * it — which is what dragging one icon across a home screen does.
    *
-   * The indices are into the drawn wall, not the stored list, since those are
-   * not the same list: a site whose manifest hasn't arrived is stored but not
-   * drawn. So the move is made in terms of the URIs at those positions.
+   * In terms of the URIs rather than their indices, so a caller holding a
+   * stale copy of the list still names the tiles it meant.
    */
   const move = useCallback(
     (fromUri: string, toUri: string) => {
@@ -327,11 +193,8 @@ export function useWall() {
   );
 
   return {
-    /** The addresses on file, in wall order. */
+    /** The addresses on the wall, in wall order. Every one of them is drawn. */
     uris,
-    /** Those of them that resolve to something drawable, in the same order. */
-    items,
-    isLoading: manifests.isLoading || installed.isLoading,
     add,
     remove,
     move,

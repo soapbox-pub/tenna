@@ -7,7 +7,6 @@ import {
   TileArtwork,
   TileButton,
   TileFace,
-  TileFrame,
   TileMenuAnchor,
   TileStatic,
 } from '@/components/Tile';
@@ -39,21 +38,6 @@ interface AppIconProps {
    */
   menuOpen: boolean;
   onMenuOpenChange: (open: boolean) => void;
-}
-
-/**
- * A tile with nothing tuned into it yet, for the wait before the lineup itself
- * arrives — there is no site to name, so the label is a bar.
- */
-export function AppIconSkeleton() {
-  return (
-    <div className="flex w-full flex-col items-center gap-2">
-      <TileFrame>
-        <TileStatic />
-      </TileFrame>
-      <span className="h-3 w-3/4 rounded-full bg-white/15 motion-safe:animate-pulse" />
-    </div>
-  );
 }
 
 /**

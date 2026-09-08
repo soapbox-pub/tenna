@@ -94,12 +94,13 @@ export function NativeAppIcon({
     void NativeApps.launch(app)
       .then(({ launched }) => {
         if (launched) return;
-        // Uninstalled since the wall was drawn. The stored list is reconciled
-        // against the device on the next look, so this only has to say so.
+        // Uninstalled since it was added. The tile stays, because the wall is
+        // the user's list and nothing takes a thing off it but them; this
+        // says so and points at the way off.
         notificationError();
         toast({
           title: `${app.label} isn't installed anymore`,
-          description: 'Its tile will come off the wall.',
+          description: 'Hold its tile to remove it from Tenna.',
           variant: 'destructive',
         });
       })

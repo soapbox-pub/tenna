@@ -3,15 +3,16 @@ import { useSeoMeta } from '@unhead/react';
 import { useState } from 'react';
 
 import { AddAppDialog } from '@/components/AddAppDialog';
-import { AddAppTile, AppIcon, AppIconSkeleton } from '@/components/AppIcon';
+import { AddAppTile } from '@/components/AppIcon';
 import { LoginArea } from '@/components/auth/LoginArea';
-import { NativeAppIcon } from '@/components/NativeAppIcon';
 import { NsiteSharePicker } from '@/components/NsiteSharePicker';
 import { NsiteViewer } from '@/components/NsiteViewer';
+import { WallTile } from '@/components/WallTile';
 import { usePendingShare } from '@/hooks/useNsiteShare';
 import { useWall } from '@/hooks/useWall';
 import { useWallDrag } from '@/hooks/useWallDrag';
 import { impactMedium } from '@/lib/haptics';
+import { parseWallUri } from '@/lib/wallUri';
 
 /** Decorative star field scattered behind the apps. */
 const STARS: Array<{ top: string; left: string; color: string; delay: string; size: string }> = [
@@ -34,7 +35,8 @@ const Index = () => {
   // One list, holding sites and the device's own apps in whatever order the
   // user has dragged them into. Nothing on it is Tenna's rather than theirs:
   // the three it ships with sit on the same list as everything added after,
-  // and move and come off the same way.
+  // and move and come off the same way. It is read off the device and drawn
+  // as it is; nothing here waits for a relay.
   const wall = useWall();
 
   // The site tuned in over the wall, where a site can't be given a window of
@@ -51,10 +53,8 @@ const Index = () => {
   // Something the OS handed to Tenna rather than to one of the apps on it.
   const { share, dismiss, handOff } = usePendingShare();
 
-  const items = wall.items;
-
   const { gridRef, handlers, styleFor } = useWallDrag({
-    uris: items.map((item) => item.uri),
+    uris: wall.uris,
     onLongPress: (uri) => {
       impactMedium();
       setMenuFor(uri);
@@ -63,8 +63,12 @@ const Index = () => {
     onDrop: wall.move,
   });
 
-  const loading = wall.isLoading;
-  const empty = !loading && items.length === 0;
+  const empty = wall.uris.length === 0;
+
+  // A site's channel is its place among the sites, counted down the wall.
+  // Counted here, over the stored list, so that a site still loading holds
+  // its number and the ones after it don't shift when it arrives.
+  let channel = 0;
 
   return (
     <main className="relative min-h-screen overflow-hidden bg-[#150609] text-white">
@@ -115,48 +119,35 @@ const Index = () => {
           ref={gridRef}
           className="grid grid-cols-[repeat(auto-fill,minmax(4.25rem,1fr))] justify-items-center gap-x-4 gap-y-7 sm:gap-x-6 sm:gap-y-9 [&>*]:max-w-24"
         >
-          {/* One per address on the way, since the list of them is on the
-              device and only what they resolve to is still coming. */}
-          {loading && wall.uris.map((uri) => <AppIconSkeleton key={uri} />)}
-
-          {items.map((item, i) => (
+          {wall.uris.map((uri, i) => (
             // The slot a tile sits in, which is a different thing from the
             // tile: during a drag the tiles are transformed out of their slots
             // and back into other ones, and the grid underneath never moves.
             <div
-              key={item.uri}
+              key={uri}
               data-wall-slot={i}
               style={styleFor(i)}
               {...handlers}
               className="relative w-full motion-safe:transition-transform motion-safe:duration-200 motion-safe:ease-out"
             >
-              {item.kind === 'nsite' ? (
-                <AppIcon
-                  event={item.event}
-                  channel={item.channel}
-                  onSelect={() => setActive({ event: item.event, channel: item.channel })}
-                  onRemove={() => wall.remove(item.uri)}
-                  menuOpen={menuFor === item.uri}
-                  onMenuOpenChange={(open) => setMenuFor(open ? item.uri : null)}
-                />
-              ) : (
-                <NativeAppIcon
-                  app={item.app}
-                  onRemove={() => wall.remove(item.uri)}
-                  menuOpen={menuFor === item.uri}
-                  onMenuOpenChange={(open) => setMenuFor(open ? item.uri : null)}
-                />
-              )}
+              <WallTile
+                uri={uri}
+                channel={parseWallUri(uri)?.kind === 'nsite' ? ++channel : 0}
+                onSelect={(event, tuned) => setActive({ event, channel: tuned })}
+                onRemove={() => wall.remove(uri)}
+                menuOpen={menuFor === uri}
+                onMenuOpenChange={(open) => setMenuFor(open ? uri : null)}
+              />
             </div>
           ))}
 
-          {!loading && <AddAppTile onSelect={() => setAdding(true)} />}
+          <AddAppTile onSelect={() => setAdding(true)} />
         </div>
 
         {empty && (
           <div className="mx-auto max-w-md rounded-xl border border-dashed border-white/20 px-8 py-12 text-center">
             <p className="mx-auto max-w-sm text-white/70">
-              No apps here yet. Check your relay connection, or give it a moment to load.
+              No apps here yet. Press the plus to add one.
             </p>
           </div>
         )}

@@ -1,9 +1,18 @@
+import type { NostrEvent } from '@nostrify/nostrify';
+import { useNostr } from '@nostrify/react';
+import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo } from 'react';
 
+import { useCacheFirstSeedMany } from '@/hooks/useCacheFirstSeed';
 import { useLocalStorage } from '@/hooks/useLocalStorage';
+import { forgetSynced } from '@/hooks/useNsitePin';
+import { useNostrStorage } from '@/hooks/useNostrStorage';
+import { nsitePointerFilter } from '@/lib/nsiteAddress';
+import { isServableNsite } from '@/lib/nsiteFiles';
 import { NsiteShortcuts, supportsNsiteWindows } from '@/lib/nsiteShortcutsPlugin';
-import { hexToBase36, parseNsiteSubdomain } from '@/lib/nsiteSubdomain';
-import { APP_ID, DEFAULT_NSITES, TEAM_SOAPBOX_PUBKEY } from '@/lib/tenna';
+import { getNsiteSubdomain, hexToBase36, parseNsiteSubdomain } from '@/lib/nsiteSubdomain';
+import { APP_ID, DEFAULT_NSITES, NSITE_RELAY, TEAM_SOAPBOX_PUBKEY } from '@/lib/tenna';
+import { removeTileSnapshot } from '@/lib/tileSnapshot';
 import { nativeAppUri, nsiteUri, parseWallUri, wallUriKey } from '@/lib/wallUri';
 
 const STORAGE_KEY = `${APP_ID}:wall`;
@@ -99,6 +108,18 @@ function initialWall(): string[] {
   return initial;
 }
 
+/** One manifest per site, the newest of those on offer. */
+function newestPerSite(events: NostrEvent[]): NostrEvent[] {
+  const byId = new Map<string, NostrEvent>();
+  for (const event of events) {
+    if (!isServableNsite(event)) continue;
+    const id = getNsiteSubdomain(event);
+    const seen = byId.get(id);
+    if (!seen || seen.created_at < event.created_at) byId.set(id, event);
+  }
+  return [...byId.values()];
+}
+
 /**
  * Everything on the wall, in the order it sits there.
  *
@@ -107,18 +128,29 @@ function initialWall(): string[] {
  * technology is behind each icon, and neither does this one.
  *
  * The list is the wall. It is on the device, it is read in one synchronous
- * call, and every address on it is drawn — nothing here asks a relay or the
- * package manager, and nothing a relay says can take a tile away. What is
- * stored is an address rather than the thing it names, so each tile resolves
- * its own (see `WallTile`), and a tile whose site hasn't answered yet is
- * still a tile: its place, its name as best it can be known, and its menu.
+ * call, and every address on it is drawn. What is stored is an address rather
+ * than the thing it names, so the sites' manifests are looked up alongside —
+ * one query for all of them — and handed back by site; a site whose manifest
+ * hasn't arrived is still a tile, and nothing a relay says can take one away.
  *
  * The list is state, so it must be held in one place: two components calling
  * this hook get two copies of it, and a change in one is invisible to the
  * other until a reload. The wall owns it and hands the verbs down.
  */
 export function useWall() {
+  const { nostr } = useNostr();
+  const { store } = useNostrStorage();
+  const queryClient = useQueryClient();
   const [uris, setUris] = useLocalStorage<string[]>(STORAGE_KEY, initialWall(), SERIALIZER);
+
+  const sites = useMemo(
+    () =>
+      uris.flatMap((uri) => {
+        const address = parseWallUri(uri);
+        return address?.kind === 'nsite' ? [address] : [];
+      }),
+    [uris],
+  );
 
   // Tell the native side what is on the wall.
   //
@@ -127,14 +159,7 @@ export function useWall() {
   // can see local storage: a site's own window decides whether to forget its
   // record with no wall in memory, and the share sheet is read by the system
   // when nothing of Tenna's is running at all.
-  const wallSiteIds = useMemo(
-    () =>
-      uris.flatMap((uri) => {
-        const address = parseWallUri(uri);
-        return address?.kind === 'nsite' ? [address.id] : [];
-      }),
-    [uris],
-  );
+  const wallSiteIds = useMemo(() => sites.map(({ id }) => id), [sites]);
 
   useEffect(() => {
     if (!supportsNsiteWindows()) return;
@@ -144,6 +169,58 @@ export function useWall() {
       // change to the wall says the whole thing again.
     });
   }, [wallSiteIds]);
+
+  // The sites' manifests, all in one query. Keyed by the *set* of sites, so
+  // dragging one past another asks for nothing new.
+  const queryKey = useMemo(() => ['wall-nsites', [...wallSiteIds].sort()], [wallSiteIds]);
+
+  const filters = useMemo(
+    () =>
+      sites
+        .map(({ id }) => parseNsiteSubdomain(id))
+        .filter((pointer) => pointer !== null)
+        .map(nsitePointerFilter),
+    [sites],
+  );
+
+  // Off the disk first, so the wall is whole before any relay has answered.
+  useCacheFirstSeedMany<NostrEvent[]>({
+    queryKey: sites.length > 0 ? queryKey : undefined,
+    filters,
+    toData: (events) => {
+      const servable = newestPerSite(events);
+      return servable.length > 0 ? servable : undefined;
+    },
+  });
+
+  const manifests = useQuery({
+    queryKey,
+    placeholderData: keepPreviousData,
+    enabled: sites.length > 0,
+    queryFn: async (c): Promise<NostrEvent[]> => {
+      const signal = AbortSignal.any([c.signal, AbortSignal.timeout(8000)]);
+      const urls = [...new Set([NSITE_RELAY, ...sites.flatMap(({ relays }) => relays)])];
+
+      // The pool returns whatever had arrived when its timeout fired as
+      // though it were the whole answer. So the relay's reply is one input
+      // among three — with what the query already holds and what is on disk
+      // — and the newest manifest per site wins. A short reply adds nothing
+      // and takes nothing.
+      const [fetched, stored] = await Promise.all([
+        nostr.group(urls).query(filters, { signal }).catch((): NostrEvent[] => []),
+        store.query(filters).catch((): NostrEvent[] => []),
+      ]);
+      const held = queryClient.getQueryData<NostrEvent[]>(queryKey) ?? [];
+
+      return newestPerSite([...held, ...stored, ...fetched]);
+    },
+    staleTime: 60_000,
+  });
+
+  const events = useMemo(
+    () => new Map((manifests.data ?? []).map((event) => [getNsiteSubdomain(event), event])),
+    [manifests.data],
+  );
 
   const add = useCallback(
     (uri: string) => {
@@ -164,6 +241,11 @@ export function useWall() {
 
   const remove = useCallback(
     (uri: string) => {
+      const address = parseWallUri(uri);
+      if (address?.kind === 'nsite') {
+        removeTileSnapshot(address.id);
+        forgetSynced(address.id);
+      }
       setUris((prev) => prev.filter((existing) => existing !== uri));
     },
     [setUris],
@@ -195,6 +277,8 @@ export function useWall() {
   return {
     /** The addresses on the wall, in wall order. Every one of them is drawn. */
     uris,
+    /** The sites' manifests, by subdomain, as far as they have arrived. */
+    events,
     add,
     remove,
     move,

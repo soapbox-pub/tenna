@@ -102,6 +102,11 @@ function parseEvent(json: string | undefined): NostrEvent | null {
   }
 }
 
+// Asked the moment this module loads rather than on first render, which on a
+// cold start is a login read from the keystore later. The two have nothing to
+// do with each other, and the wall waits on both.
+if (supportsNsiteWindows()) launchQuery = askLauncher();
+
 /**
  * What this launch of the app is for.
  *

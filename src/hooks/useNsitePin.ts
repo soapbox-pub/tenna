@@ -9,6 +9,28 @@ import { impactLight, notificationError } from '@/lib/haptics';
 import { NsiteShortcuts, supportsNsiteWindows } from '@/lib/nsiteShortcutsPlugin';
 import { shareCategories } from '@/lib/nsiteShareTarget';
 import { getNsiteSubdomain } from '@/lib/nsiteSubdomain';
+import { APP_ID } from '@/lib/tenna';
+
+/**
+ * Bump when what `sync` writes down changes — the tile drawing, the badge —
+ * so every site is told again on the next launch.
+ */
+const SYNC_VERSION = 1;
+
+const syncKey = (siteId: string) => `${APP_ID}:synced:${siteId}`;
+
+/**
+ * Forget that a site was told to the system, so the next tile drawn for it
+ * says everything again. For the wall, when a site comes off it: the record
+ * is swept then, and a site added back would otherwise be taken as known.
+ */
+export function forgetSynced(siteId: string): void {
+  try {
+    localStorage.removeItem(syncKey(siteId));
+  } catch {
+    // Nothing to forget.
+  }
+}
 
 export interface UseNsitePinResult {
   /**
@@ -97,6 +119,17 @@ export function useNsitePin(
 
     const offered = onWall && !!shareTarget;
     const { name, app } = tile.current;
+
+    // Everything below is a bitmap drawn from Blossom and two trips over the
+    // bridge, for every tile, on every launch — and nearly always to say what
+    // was said last time. What the system is told is a function of these, so
+    // when none of them has changed, it already knows.
+    const stamp = JSON.stringify([SYNC_VERSION, event.id, name, rank, offered, shareTarget]);
+    try {
+      if (localStorage.getItem(syncKey(siteId)) === stamp) return;
+    } catch {
+      // No memory of it; tell it again.
+    }
     const icon = drawn.current ? null : await renderAppIconPng(name, app);
     if (icon) drawn.current = true;
 
@@ -137,6 +170,12 @@ export function useNsitePin(
         // An older shortcut than this build knows how to update. It keeps the
         // icon it has, which is the one it has always had.
       });
+    }
+
+    try {
+      localStorage.setItem(syncKey(siteId), stamp);
+    } catch {
+      // Said again next launch, which is what happened before this existed.
     }
   }, [siteId, shareTarget, known, onWall, rank, event]);
 

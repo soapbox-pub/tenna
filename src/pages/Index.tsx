@@ -3,11 +3,11 @@ import { useSeoMeta } from '@unhead/react';
 import { useState } from 'react';
 
 import { AddAppDialog } from '@/components/AddAppDialog';
-import { AddAppTile } from '@/components/AppIcon';
+import { AddAppTile, AppIcon, AppIconPending } from '@/components/AppIcon';
 import { LoginArea } from '@/components/auth/LoginArea';
+import { NativeAppIcon } from '@/components/NativeAppIcon';
 import { NsiteSharePicker } from '@/components/NsiteSharePicker';
 import { NsiteViewer } from '@/components/NsiteViewer';
-import { WallTile } from '@/components/WallTile';
 import { usePendingShare } from '@/hooks/useNsiteShare';
 import { useWall } from '@/hooks/useWall';
 import { useWallDrag } from '@/hooks/useWallDrag';
@@ -119,27 +119,62 @@ const Index = () => {
           ref={gridRef}
           className="grid grid-cols-[repeat(auto-fill,minmax(4.25rem,1fr))] justify-items-center gap-x-4 gap-y-7 sm:gap-x-6 sm:gap-y-9 [&>*]:max-w-24"
         >
-          {wall.uris.map((uri, i) => (
-            // The slot a tile sits in, which is a different thing from the
-            // tile: during a drag the tiles are transformed out of their slots
-            // and back into other ones, and the grid underneath never moves.
-            <div
-              key={uri}
-              data-wall-slot={i}
-              style={styleFor(i)}
-              {...handlers}
-              className="relative w-full motion-safe:transition-transform motion-safe:duration-200 motion-safe:ease-out"
-            >
-              <WallTile
-                uri={uri}
-                channel={parseWallUri(uri)?.kind === 'nsite' ? ++channel : 0}
-                onSelect={(event, tuned) => setActive({ event, channel: tuned })}
-                onRemove={() => wall.remove(uri)}
-                menuOpen={menuFor === uri}
-                onMenuOpenChange={(open) => setMenuFor(open ? uri : null)}
-              />
-            </div>
-          ))}
+          {wall.uris.map((uri, i) => {
+            const address = parseWallUri(uri);
+            if (!address) return null;
+
+            const menu = {
+              onRemove: () => wall.remove(uri),
+              menuOpen: menuFor === uri,
+              onMenuOpenChange: (open: boolean) => setMenuFor(open ? uri : null),
+            };
+
+            let tile;
+            if (address.kind === 'app') {
+              // Drawn from the address alone — package, activity, and the
+              // name it was added under — with nothing asked of the device.
+              tile = (
+                <NativeAppIcon
+                  app={{
+                    id: `${address.packageName}/${address.activityName}`,
+                    packageName: address.packageName,
+                    activityName: address.activityName,
+                    label: address.label ?? address.packageName,
+                  }}
+                  {...menu}
+                />
+              );
+            } else {
+              const tuned = ++channel;
+              const event = wall.events.get(address.id);
+              tile = event ? (
+                <AppIcon
+                  event={event}
+                  channel={tuned}
+                  onSelect={() => setActive({ event, channel: tuned })}
+                  {...menu}
+                />
+              ) : (
+                <AppIconPending siteId={address.id} {...menu} />
+              );
+            }
+
+            return (
+              // The slot a tile sits in, which is a different thing from the
+              // tile: during a drag the tiles are transformed out of their
+              // slots and back into other ones, and the grid underneath never
+              // moves.
+              <div
+                key={uri}
+                data-wall-slot={i}
+                style={styleFor(i)}
+                {...handlers}
+                className="relative w-full motion-safe:transition-transform motion-safe:duration-200 motion-safe:ease-out"
+              >
+                {tile}
+              </div>
+            );
+          })}
 
           <AddAppTile onSelect={() => setAdding(true)} />
         </div>

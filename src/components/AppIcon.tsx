@@ -1,6 +1,6 @@
 import type { NostrEvent } from '@nostrify/nostrify';
 import { Check, Info, Plus, SquarePlus, Trash2 } from 'lucide-react';
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 
 import { NsiteAppInfo } from '@/components/NsiteAppInfo';
 import {
@@ -19,7 +19,13 @@ import {
 import { useNsiteApp } from '@/hooks/useNsiteApp';
 import { useNsitePin } from '@/hooks/useNsitePin';
 import { useNsiteWindow } from '@/hooks/useNsiteWindow';
-import { getNsiteName } from '@/lib/nsiteSubdomain';
+import {
+  getNsiteName,
+  getNsiteSubdomain,
+  NSITE_NAMED_KIND,
+  parseNsiteSubdomain,
+} from '@/lib/nsiteSubdomain';
+import { readTileSnapshot, writeTileSnapshot } from '@/lib/tileSnapshot';
 
 interface AppIconProps {
   event: NostrEvent;
@@ -38,6 +44,75 @@ interface AppIconProps {
    */
   menuOpen: boolean;
   onMenuOpenChange: (open: boolean) => void;
+}
+
+/**
+ * What to call a site from its address alone. A named site is addressed by
+ * its `d` tag, which is the name its manifest falls back to anyway; a root
+ * site or a snapshot is addressed by a key, so the start of it is all there is.
+ */
+function nameFromAddress(siteId: string): string {
+  const pointer = parseNsiteSubdomain(siteId);
+  if (pointer?.kind === NSITE_NAMED_KIND && pointer.identifier) return pointer.identifier;
+  return `${siteId.slice(0, 9)}…`;
+}
+
+/**
+ * A site whose manifest hasn't arrived.
+ *
+ * Still a tile, in its place, because the user put it there. It is drawn as
+ * it last was, if it ever was, and as static under its address otherwise; it
+ * can't be opened yet, and the one thing that can be done to it is take it
+ * off.
+ */
+export function AppIconPending({
+  siteId,
+  onRemove,
+  menuOpen,
+  onMenuOpenChange,
+}: { siteId: string } & Pick<AppIconProps, 'onRemove' | 'menuOpen' | 'onMenuOpenChange'>) {
+  const [snapshot] = useState(() => readTileSnapshot(siteId));
+  const name = snapshot?.name ?? nameFromAddress(siteId);
+
+  return (
+    <>
+      <TileButton
+        name={name}
+        onSelect={() => {}}
+        onContextMenu={(clicked) => {
+          clicked.preventDefault();
+          onMenuOpenChange(true);
+        }}
+      >
+        {snapshot ? (
+          <TileArtwork
+            name={name}
+            iconUrl={snapshot.icon}
+            fit={snapshot.fit}
+            background={snapshot.background}
+          />
+        ) : (
+          <TileStatic />
+        )}
+      </TileButton>
+
+      <DropdownMenu open={menuOpen} onOpenChange={onMenuOpenChange} modal={false}>
+        <TileMenuAnchor />
+        <DropdownMenuContent className={MENU} align="center" collisionPadding={16}>
+          {onRemove && (
+            <DropdownMenuItem
+              className={MENU_ITEM_DESTRUCTIVE}
+              onSelect={onRemove}
+              variant="destructive"
+            >
+              <Trash2 />
+              Remove from Tenna
+            </DropdownMenuItem>
+          )}
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </>
+  );
 }
 
 /**
@@ -68,10 +143,12 @@ export function AddAppTile({ onSelect }: { onSelect: () => void }) {
  * One nsite on the home screen: a rounded tile with the site's own icon on it
  * and its name underneath.
  *
- * The tile is never empty. Static plays on it while the icon is being resolved
- * — the site is known by then, so its name is already under the tile — and a
- * site that turns out to have no icon at all keeps a tile in its own color
- * with its initial on it.
+ * The tile is never empty, and on a site seen before it is never static: it
+ * is drawn as it was last drawn, from a record on the device, on the first
+ * frame — and redrawn from the site itself when that has been read, which is
+ * also when the record is written for next time. A site never seen before
+ * plays static while its icon is resolved, and one that turns out to have no
+ * icon at all keeps a tile in its own color with its initial on it.
  */
 export function AppIcon({
   event,
@@ -83,8 +160,29 @@ export function AppIcon({
 }: AppIconProps) {
   const { data: app, isPending } = useNsiteApp(event);
 
-  // The manifest's name for the site until the site itself says what it goes by.
-  const name = app?.label ?? getNsiteName(event) ?? '???';
+  const siteId = getNsiteSubdomain(event);
+  const [snapshot] = useState(() => readTileSnapshot(siteId));
+
+  // The site's own name for itself once it has been read; until then, what
+  // it was called last time, or what the manifest calls it.
+  const fallback = getNsiteName(event) ?? '???';
+  const name = app ? (app.label ?? fallback) : (snapshot?.name ?? fallback);
+
+  useEffect(() => {
+    if (!app) return;
+    writeTileSnapshot(siteId, {
+      name,
+      // The data URL where the pixels could be read back; failing that, a
+      // hotlink is a URL that will still be there tomorrow, and a blob is not.
+      icon: app.thumb ?? (app.iconUrl?.startsWith('https:') ? app.iconUrl : null),
+      fit: app.fit,
+      background: app.background,
+      from: event.id,
+    });
+  }, [app, name, siteId, event.id]);
+
+  // What is drawn: the site's answer, then last time's, then static.
+  const art = app ?? snapshot;
 
   // An `AppIcon` is a tile on the wall and nowhere else, so it is always a
   // site the user has — a site merely being browsed in the picker draws itself
@@ -118,15 +216,17 @@ export function AppIcon({
           onMenuOpenChange(true);
         }}
       >
-        {isPending ? (
-          <TileStatic />
-        ) : (
+        {art ? (
           <TileArtwork
             name={name}
-            iconUrl={app?.iconUrl}
-            fit={app?.fit}
-            background={app?.background}
+            iconUrl={'iconUrl' in art ? art.iconUrl : art.icon}
+            fit={art.fit}
+            background={art.background}
           />
+        ) : isPending ? (
+          <TileStatic />
+        ) : (
+          <TileArtwork name={name} />
         )}
       </TileButton>
 

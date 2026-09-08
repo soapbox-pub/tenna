@@ -13,6 +13,11 @@ export interface NsiteApp {
   label: string | null;
   /** Blob URL for an icon shipped with the site, or an https URL it points at. */
   iconUrl: string | null;
+  /**
+   * The same artwork as a small data URL, for writing down. Null when the
+   * image could not be read back off a canvas — a hotlink without CORS.
+   */
+  thumb: string | null;
   fit: IconFit;
   /** Tile color the site declares for itself, if any. Hex only. */
   background: string | null;
@@ -50,6 +55,7 @@ export interface IconSource {
 const NOTHING: NsiteApp = {
   label: null,
   iconUrl: null,
+  thumb: null,
   fit: 'cover',
   background: null,
   shareTarget: null,
@@ -295,9 +301,11 @@ function pickLabel(doc: Document, webManifest: unknown): string | null {
   );
 }
 
+/** Edge of the thumbnail written down for a tile: a tile's worth at 3x. */
+const THUMB_SIZE = 256;
+
 /**
- * Whether the artwork is a glyph floating in empty space rather than a picture
- * that fills its frame.
+ * Read the artwork's pixels: whether it is a glyph, and a small copy of it.
  *
  * Sites are careless about which is which — plenty declare a padded, mostly
  * transparent favicon as their apple-touch-icon — and getting it wrong is
@@ -305,11 +313,15 @@ function pickLabel(doc: Document, webManifest: unknown): string | null {
  * picture inset on a tile looks like a sticker. So the pixels get the last
  * word: if the border ring is almost entirely transparent, it's a glyph.
  *
- * Returns null when the image can't be read — an undecodable file, or a
+ * The thumbnail comes out of the same decode. It is what the tile is drawn
+ * from on the next launch, before anything has been fetched — see
+ * `tileSnapshot`. WebP where the browser can encode it, PNG where it can't.
+ *
+ * Both are null when the image can't be read — an undecodable file, or a
  * hotlinked one from a server that sends no CORS headers, which taints the
  * canvas. The caller falls back to what the declaration promised.
  */
-async function looksLikeGlyph(url: string): Promise<boolean | null> {
+async function readIcon(url: string): Promise<{ glyph: boolean | null; thumb: string | null }> {
   try {
     const img = new Image();
     img.crossOrigin = 'anonymous';
@@ -323,7 +335,7 @@ async function looksLikeGlyph(url: string): Promise<boolean | null> {
     canvas.height = size;
 
     const ctx = canvas.getContext('2d', { willReadFrequently: true });
-    if (!ctx) return null;
+    if (!ctx) return { glyph: null, thumb: null };
     ctx.drawImage(img, 0, 0, size, size);
 
     const { data } = ctx.getImageData(0, 0, size, size);
@@ -338,9 +350,16 @@ async function looksLikeGlyph(url: string): Promise<boolean | null> {
       }
     }
 
-    return ring > 0 && clear / ring > 0.9;
+    const glyph = ring > 0 && clear / ring > 0.9;
+
+    canvas.width = THUMB_SIZE;
+    canvas.height = THUMB_SIZE;
+    ctx.drawImage(img, 0, 0, THUMB_SIZE, THUMB_SIZE);
+    const thumb = canvas.toDataURL('image/webp', 0.85);
+
+    return { glyph, thumb };
   } catch {
-    return null;
+    return { glyph: null, thumb: null };
   }
 }
 
@@ -432,11 +451,12 @@ export function useNsiteApp(event: NostrEvent, options?: { enabled?: boolean }) 
         const url = await resolveIcon(candidate, source).catch(() => null);
         if (!url) continue;
 
-        const glyph = await looksLikeGlyph(url);
+        const { glyph, thumb } = await readIcon(url);
         const fit: IconFit = glyph === null ? candidate.fit : glyph ? 'contain' : 'cover';
         return {
           label,
           iconUrl: url,
+          thumb,
           fit,
           background,
           shareTarget,
@@ -449,6 +469,7 @@ export function useNsiteApp(event: NostrEvent, options?: { enabled?: boolean }) 
       return {
         label,
         iconUrl: null,
+        thumb: null,
         fit: 'cover',
         background,
         shareTarget,

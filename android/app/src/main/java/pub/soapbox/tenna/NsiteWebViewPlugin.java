@@ -129,6 +129,9 @@ public class NsiteWebViewPlugin extends Plugin {
     /** The site's fullscreen video, while one is up. See {@link #presentFullscreen}. */
     @Nullable private View fullscreenView;
 
+    /** How a file the site offers is saved. */
+    @Nullable private NsiteDownloads downloads;
+
     /**
      * Where the system bars and the cutout are, in pixels.
      *
@@ -281,6 +284,7 @@ public class NsiteWebViewPlugin extends Plugin {
             WebView view = new WebView(getContext());
             configure(view);
             installBridge(view, origin, providerScript);
+            installDownloads(view, siteHost, origin);
 
             // The frame the site's pixels travel in: it fades in with them,
             // shuts off with them, and hides them behind a permission prompt.
@@ -639,8 +643,13 @@ public class NsiteWebViewPlugin extends Plugin {
         // chooser nobody will reply to, and one closed mid-video leaves the
         // system bars hidden over whatever comes next. See NsiteChromeClient.
         NsiteChromeClient chrome = chromeClient;
+        NsiteDownloads saving = downloads;
         chromeClient = null;
+        downloads = null;
         if (chrome != null) chrome.release();
+        // A file half written is closed and taken away, rather than left
+        // looking like a file.
+        if (saving != null) saving.release();
 
         WebView view = webView;
         ViewGroup frame = container;
@@ -818,6 +827,33 @@ public class NsiteWebViewPlugin extends Plugin {
     private static final Set<String> UNHANDLED_SCHEMES = new HashSet<>(Arrays.asList(
         "intent", "android-app", "file", "content", "javascript", "data", "about"
     ));
+
+    /**
+     * Let the site save a file it offers.
+     *
+     * A download is a navigation that turned out not to be a page, so without
+     * this the WebView simply does nothing with it — the same silence a file
+     * chooser met before there was a chrome client. See {@link NsiteDownloads}.
+     */
+    private void installDownloads(WebView view, String siteHost, String origin) {
+        NsiteDownloads saving = new NsiteDownloads(
+            getActivity(),
+            view,
+            siteHost,
+            origin,
+            this::startForResult,
+            // A file at somebody else's origin is a link out, and goes where
+            // every other link out of a site's window goes.
+            url -> {
+                if (!NativeApps.openUri(getContext(), url)) {
+                    Log.i(TAG, "Nothing on the device answers for " + url);
+                }
+            }
+        );
+
+        downloads = saving;
+        view.setDownloadListener(saving);
+    }
 
     /**
      * Install the NIP-07 provider and its transport.

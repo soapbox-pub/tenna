@@ -1,5 +1,6 @@
 package pub.soapbox.tenna;
 
+import android.Manifest;
 import android.app.Activity;
 import android.content.ClipData;
 import android.content.DialogInterface;
@@ -13,6 +14,7 @@ import android.view.ViewGroup;
 import android.webkit.JsPromptResult;
 import android.webkit.JsResult;
 import android.webkit.MimeTypeMap;
+import android.webkit.PermissionRequest;
 import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
 import android.webkit.WebView;
@@ -70,6 +72,17 @@ final class NsiteChromeClient extends WebChromeClient {
     private static final long CAPTURE_LIFETIME_MS = 24 * 60 * 60 * 1000L;
 
     /**
+     * What a capability is called on the way to the web layer.
+     *
+     * These strings are the `NsiteBrowserPermissionType` union in
+     * `nsiteBrowserPermissions.ts`, and are what a stored decision is filed
+     * under. They are not Android's names for the same things, which is
+     * `Manifest.permission` and is the plugin's business.
+     */
+    private static final String KIND_CAMERA = "camera";
+    private static final String KIND_MICROPHONE = "microphone";
+
+    /**
      * Starts an activity and reports back what it returned.
      *
      * The chooser has to be launched through a registered
@@ -89,6 +102,35 @@ final class NsiteChromeClient extends WebChromeClient {
     }
 
     /**
+     * Who is asked when something needs permission, and how the answer
+     * arrives.
+     *
+     * Two quite different questions, in a deliberate order. Whether the *site*
+     * may have the camera is Tenna's to ask, of the user, once per site, and
+     * it is remembered per site the way a browser remembers it per origin.
+     * Whether *Tenna* may have the camera is Android's, asked of the user
+     * once, and remembered for the app. The site's question comes first: there
+     * is no sense putting the system's prompt in front of somebody who has not
+     * yet agreed that this site should have it at all.
+     *
+     * Both are answered on the main thread, whenever the answer is known —
+     * which may be after a prompt, a system dialog, and a trip through the
+     * bridge.
+     */
+    interface Consent {
+        /** Whether this site may reach these capabilities. */
+        void forSite(@NonNull String[] kinds, @NonNull Decision decision);
+
+        /** Whether Tenna holds the Android permissions to provide them. */
+        void forApp(@NonNull String[] permissions, @NonNull Decision decision);
+    }
+
+    /** The answer to something that had to be asked. */
+    interface Decision {
+        void decided(boolean granted);
+    }
+
+    /**
      * Where a site's fullscreen video goes, and where it comes back from.
      *
      * The view itself is Chromium's; all that is asked here is somewhere to
@@ -105,6 +147,7 @@ final class NsiteChromeClient extends WebChromeClient {
 
     private final Activity activity;
     private final Launcher launcher;
+    private final Consent consent;
     private final Stage stage;
 
     /** What the site is called, for the dialogs it opens. */
@@ -122,15 +165,20 @@ final class NsiteChromeClient extends WebChromeClient {
     /** How to give a fullscreen view back, or null when nothing is up. */
     @Nullable private CustomViewCallback fullscreen;
 
+    /** The `getUserMedia` being decided, or null when none is. */
+    @Nullable private PermissionRequest media;
+
     NsiteChromeClient(
         @NonNull Activity activity,
         @Nullable String siteName,
         @NonNull Launcher launcher,
+        @NonNull Consent consent,
         @NonNull Stage stage
     ) {
         this.activity = activity;
         this.siteName = siteName;
         this.launcher = launcher;
+        this.consent = consent;
         this.stage = stage;
     }
 
@@ -150,6 +198,7 @@ final class NsiteChromeClient extends WebChromeClient {
         answer(null);
         dismiss();
         onHideCustomView();
+        refuseMedia();
     }
 
     // -----------------------------------------------------------------------
@@ -180,15 +229,40 @@ final class NsiteChromeClient extends WebChromeClient {
         List<String> accept = Arrays.asList(params.getAcceptTypes());
 
         // `capture` asks for the device's camera rather than its files. It is
-        // a request, not a requirement — a device with no camera app falls
-        // through to the picker, which is what a browser does with it too.
+        // a request, not a requirement — a device with no camera app, or a
+        // user who would rather not, falls through to the picker, which is
+        // what a browser does with it too.
+        //
+        // No prompt of Tenna's here, unlike `getUserMedia`. Nothing is handed
+        // to the site but the one photo, and it was the user who pressed the
+        // button that opened the camera. Android's own permission is still
+        // needed — see `withCamera`.
         if (params.isCaptureEnabled()) {
-            if (accept.contains("video/*") && captureVideo()) return true;
-            if (accept.contains("image/*") && capturePhoto()) return true;
+            final boolean video = accept.contains("video/*");
+            if (video || accept.contains("image/*")) {
+                withCamera(granted -> {
+                    if (granted && (video ? captureVideo() : capturePhoto())) return;
+                    pick(params);
+                });
+                return true;
+            }
         }
 
         pick(params);
         return true;
+    }
+
+    /**
+     * Hold Android's camera permission, or find out that we don't.
+     *
+     * Needed only because Tenna now declares `CAMERA` at all, for
+     * `getUserMedia`. Android requires the runtime grant for
+     * `ACTION_IMAGE_CAPTURE` from apps that declare the permission and from no
+     * others — so adding it for one feature quietly took the other away, and
+     * this gives it back.
+     */
+    private void withCamera(@NonNull Decision decision) {
+        consent.forApp(new String[] { Manifest.permission.CAMERA }, decision);
     }
 
     /** Show the device's file picker for what the site said it accepts. */
@@ -350,6 +424,106 @@ final class NsiteChromeClient extends WebChromeClient {
         ValueCallback<Uri[]> callback = pending;
         pending = null;
         if (callback != null) callback.onReceiveValue(files);
+    }
+
+    // -----------------------------------------------------------------------
+    // Camera and microphone
+    // -----------------------------------------------------------------------
+
+    /**
+     * A site calling `getUserMedia`.
+     *
+     * The default {@link WebChromeClient} denies this outright, which is why
+     * a site's camera button did nothing: the page got `NotAllowedError` with
+     * nobody having been asked. Capacitor's client goes the other way and
+     * grants whatever the app's manifest declares, without asking either —
+     * neither is an answer a person had any part in.
+     *
+     * So it is put to the user, twice over and in order: whether this site may
+     * have it, and then whether Tenna may. See {@link Consent}.
+     *
+     * All of it or none of it. `getUserMedia({video, audio})` fails whole if
+     * either half is refused, so a half grant would only produce a failure the
+     * user had apparently agreed to — and a site asking for the microphone
+     * while the user thought they were allowing the camera is exactly the
+     * confusion worth refusing.
+     */
+    @Override
+    public void onPermissionRequest(PermissionRequest request) {
+        final String[] resources = request.getResources();
+        final List<String> kinds = new ArrayList<>(2);
+
+        for (String resource : resources) {
+            if (PermissionRequest.RESOURCE_VIDEO_CAPTURE.equals(resource)) {
+                kinds.add(KIND_CAMERA);
+            } else if (PermissionRequest.RESOURCE_AUDIO_CAPTURE.equals(resource)) {
+                kinds.add(KIND_MICROPHONE);
+            } else {
+                // Protected media identifiers, MIDI: things with no prompt of
+                // their own and nothing to weigh. A request Tenna has no way
+                // to put to the user is not one it can grant on their behalf.
+                Log.i(TAG, "Refused a site's request for " + resource);
+                request.deny();
+                return;
+            }
+        }
+
+        if (kinds.isEmpty()) {
+            request.deny();
+            return;
+        }
+
+        // Only one at a time, and the newest wins. A site that asks again
+        // before the first was answered has abandoned the first.
+        refuseMedia();
+        media = request;
+
+        consent.forSite(kinds.toArray(new String[0]), forSite -> {
+            if (media != request) return;
+
+            if (!forSite) {
+                media = null;
+                request.deny();
+                return;
+            }
+
+            consent.forApp(permissionsFor(kinds), forApp -> {
+                if (media != request) return;
+                media = null;
+
+                if (forApp) request.grant(resources);
+                else request.deny();
+            });
+        });
+    }
+
+    /**
+     * The request went away on its own — a navigation, or the page dropping it.
+     *
+     * Cleared rather than denied: the object is spent, and denying a request
+     * Chromium has already withdrawn does nothing but risk an exception.
+     */
+    @Override
+    public void onPermissionRequestCanceled(PermissionRequest request) {
+        if (media == request) media = null;
+    }
+
+    /** Turn down whatever `getUserMedia` is outstanding, if any. */
+    private void refuseMedia() {
+        PermissionRequest request = media;
+        media = null;
+        if (request != null) request.deny();
+    }
+
+    /** What Android calls the capabilities the site named. */
+    @NonNull
+    private static String[] permissionsFor(@NonNull List<String> kinds) {
+        List<String> permissions = new ArrayList<>(2);
+        if (kinds.contains(KIND_CAMERA)) permissions.add(Manifest.permission.CAMERA);
+        // MODIFY_AUDIO_SETTINGS is declared alongside this but is not a
+        // runtime permission, so it is never asked for.
+        if (kinds.contains(KIND_MICROPHONE)) permissions.add(Manifest.permission.RECORD_AUDIO);
+        return permissions.toArray(new String[0]);
     }
 
     // -----------------------------------------------------------------------

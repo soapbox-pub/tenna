@@ -1,5 +1,6 @@
 import { Capacitor, registerPlugin, type PluginListenerHandle } from '@capacitor/core';
 
+import type { NsiteBrowserPermissionType } from '@/lib/nsiteBrowserPermissions';
 import type { NsiteShareDelivery } from '@/lib/nsiteShareTarget';
 
 /** A JSON-RPC call raised by the site's `window.nostr`. */
@@ -8,6 +9,13 @@ export interface NsiteRpcEvent {
   method: string;
   /** JSON text — see the note on the native side about object coercion. */
   params: string;
+}
+
+/** The site called `getUserMedia` and the WebView wants an answer. */
+export interface NsiteMediaEvent {
+  id: number;
+  /** What it asked for: `camera`, `microphone`, or both. */
+  kinds: NsiteBrowserPermissionType[];
 }
 
 export interface NsiteWebViewPlugin {
@@ -61,6 +69,16 @@ export interface NsiteWebViewPlugin {
   /** Hide the site's pixels without unloading it. */
   setConcealed(options: { concealed: boolean }): Promise<void>;
 
+  /**
+   * Answer a request previously raised as `nsiteMedia`.
+   *
+   * `granted` says only what the *site* was allowed. Whether Tenna itself may
+   * reach the camera is Android's question, asked afterwards and natively —
+   * there is no point putting the OS prompt in front of someone who has not
+   * yet said the site can have it.
+   */
+  respondMedia(options: { id: number; granted: boolean }): Promise<void>;
+
   /** Answer a call previously raised as `nsiteRpc`. */
   respond(options: {
     id: number;
@@ -78,6 +96,11 @@ export interface NsiteWebViewPlugin {
   addListener(
     event: 'nsiteRpc',
     handler: (event: NsiteRpcEvent) => void,
+  ): Promise<PluginListenerHandle>;
+
+  addListener(
+    event: 'nsiteMedia',
+    handler: (event: NsiteMediaEvent) => void,
   ): Promise<PluginListenerHandle>;
 
   /**

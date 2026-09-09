@@ -18,6 +18,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { useAuthor } from '@/hooks/useAuthor';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useNsiteAllowance } from '@/hooks/useNsiteAllowance';
+import { useNsiteBrowserAllowance } from '@/hooks/useNsiteBrowserAllowance';
 import type { NsiteApp } from '@/hooks/useNsiteApp';
 import type { UseNsitePinResult } from '@/hooks/useNsitePin';
 import { useToast } from '@/hooks/useToast';
@@ -30,6 +31,12 @@ import {
   removeNsitePermission,
   type NsitePermission,
 } from '@/lib/nsitePermissions';
+import {
+  clearNsiteBrowserPermissions,
+  getBrowserPermissionLabel,
+  removeNsiteBrowserPermission,
+  type NsiteBrowserPermission,
+} from '@/lib/nsiteBrowserPermissions';
 import { getNsiteSubdomain, NSITE_SNAPSHOT_KIND } from '@/lib/nsiteSubdomain';
 import { cn } from '@/lib/utils';
 
@@ -317,7 +324,14 @@ export function NsiteAppInfo({
   }, [event, siteId]);
   const allowance = useNsiteAllowance(siteId, user?.pubkey);
   const permissions = allowance?.permissions ?? [];
-  const hasPermissions = permissions.length > 0;
+
+  // What the site may do with the device, as against with an identity. Keyed
+  // by site rather than by pubkey, so there is an answer here for a
+  // logged-out reader too. See `nsiteBrowserPermissions`.
+  const browserAllowance = useNsiteBrowserAllowance(siteId);
+  const browserPermissions = browserAllowance?.permissions ?? [];
+
+  const hasPermissions = permissions.length > 0 || browserPermissions.length > 0;
 
   // Taking back "send notifications" has to reach further than the stored
   // decision: the subscriptions the site set are on disk on the native side,
@@ -335,7 +349,13 @@ export function NsiteAppInfo({
     if (perm.type === 'push') forgetSubscriptions();
   };
 
+  const handleRemoveBrowser = (perm: NsiteBrowserPermission) => {
+    removeNsiteBrowserPermission(siteId, perm.type);
+  };
+
   const handleClearAll = () => {
+    clearNsiteBrowserPermissions(siteId);
+
     if (!user) return;
     const hadPush = permissions.some((perm) => perm.type === 'push');
     clearNsitePermissions(siteId, user.pubkey);
@@ -516,17 +536,42 @@ export function NsiteAppInfo({
             </div>
 
             {/* A summary line where the system puts one, and the controls
-                themselves where there is something to control. */}
-            {!user ? (
+                themselves where there is something to control.
+
+                Both kinds of permission are listed together, because the
+                distinction between them — one is about a key, the other about
+                the device — is not one a person came here to think about. The
+                device's are shown whether or not anyone is signed in, since
+                that is what they are keyed on. */}
+            {!hasPermissions ? (
               <p className="mt-1 text-base text-white/55">
-                Sign in to see what this app may do with your identity.
-              </p>
-            ) : !hasPermissions ? (
-              <p className="mt-1 text-base text-white/55">
-                Nothing granted yet. What you allow this app to do will be listed here.
+                {user
+                  ? 'Nothing granted yet. What you allow this app to do will be listed here.'
+                  : 'Nothing granted yet. Sign in to also see what this app may do with your identity.'}
               </p>
             ) : (
               <ul className="-mx-2 mt-2 divide-y divide-white/10">
+                {browserPermissions.map((perm) => (
+                  <li key={perm.type} className="flex items-center gap-3 px-2 py-3">
+                    <span className="min-w-0 flex-1 truncate text-base text-white/90">
+                      {getBrowserPermissionLabel(perm.type)}
+                      {!perm.allowed && (
+                        <span className="text-white/45"> — refused</span>
+                      )}
+                    </span>
+
+                    <button
+                      type="button"
+                      onClick={() => handleRemoveBrowser(perm)}
+                      aria-label={`Forget ${getBrowserPermissionLabel(perm.type)}`}
+                      title="Forget"
+                      className="flex size-9 shrink-0 items-center justify-center rounded-full text-white/50 outline-none transition-colors hover:bg-white/10 hover:text-[#F96C91] focus-visible:ring-2 focus-visible:ring-[#FEF960]"
+                    >
+                      <X className="size-5" />
+                    </button>
+                  </li>
+                ))}
+
                 {permissions.map((perm) => (
                   <li
                     key={`${perm.type}-${perm.kind}`}

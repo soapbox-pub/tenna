@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Bell, Check, KeyRound, Lock, Pen, ShieldAlert, X } from 'lucide-react';
+import { Bell, Camera, Check, KeyRound, Lock, Mic, Pen, ShieldAlert, X } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -39,6 +39,10 @@ function getPromptIcon(type: NsitePromptState['type']) {
       return <KeyRound className="size-5 text-violet-500" />;
     case 'push':
       return <Bell className="size-5 text-emerald-500" />;
+    case 'camera':
+      return <Camera className="size-5 text-rose-500" />;
+    case 'microphone':
+      return <Mic className="size-5 text-rose-500" />;
   }
 }
 
@@ -58,6 +62,10 @@ function getPromptTitle(type: NsitePromptState['type'], kind: number | null): st
       return 'Decrypt message (NIP-44)';
     case 'push':
       return 'Send notifications';
+    case 'camera':
+      return 'Use the camera';
+    case 'microphone':
+      return 'Use the microphone';
   }
 }
 
@@ -73,6 +81,10 @@ function getPromptDescription(type: NsitePromptState['type']): string {
       return 'This app wants to decrypt a message using your keys.';
     case 'push':
       return 'This app wants Tenna to watch relays for it and notify you of new events, even while it is closed.';
+    case 'camera':
+      return 'This app wants to see through your camera while you are using it.';
+    case 'microphone':
+      return 'This app wants to hear through your microphone while you are using it.';
   }
 }
 

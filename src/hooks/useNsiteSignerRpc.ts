@@ -14,6 +14,11 @@ import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { NappPush, supportsNappPush } from '@/lib/nappPushPlugin';
 import { normalizeNappSubscriptions } from '@/lib/nappSubscriptions';
 import {
+  getNsiteBrowserPermission,
+  setNsiteBrowserPermission,
+  type NsiteBrowserPermissionType,
+} from '@/lib/nsiteBrowserPermissions';
+import {
   getNsitePermission,
   setNsitePermission,
   type NsitePermissionType,
@@ -25,8 +30,16 @@ import {
 
 /** Describes a pending permission prompt waiting for the user's decision. */
 export interface NsitePromptState {
-  /** The permission type being requested. */
-  type: NsitePermissionType;
+  /**
+   * What is being asked for.
+   *
+   * Two stores answer for these. A {@link NsitePermissionType} is a decision
+   * about the user's keys and is remembered per identity; a
+   * {@link NsiteBrowserPermissionType} is a decision about the device and is
+   * remembered per site. They share a prompt because they are the same
+   * question to the person reading it.
+   */
+  type: NsitePermissionType | NsiteBrowserPermissionType;
   /** For signEvent: the event kind. Null otherwise. */
   kind: number | null;
   /** For signEvent: the unsigned event template. */
@@ -51,6 +64,16 @@ interface UseNsiteSignerRpcOptions {
 interface UseNsiteSignerRpcResult {
   /** The `onRpc` callback to pass to `<Nsite>`. Transport-agnostic. */
   onRpc: (method: string, params: unknown) => Promise<unknown>;
+  /**
+   * The `onMedia` callback to pass to `<Nsite>`.
+   *
+   * Not an RPC call — `getUserMedia` is asked of the browser rather than of
+   * the host, and reaches this from the native chrome client rather than over
+   * the provider's channel. It lives here anyway, because what it needs is
+   * this hook's prompt: one question on screen at a time, whichever of the
+   * two kinds of question it is.
+   */
+  onMedia: (kinds: NsiteBrowserPermissionType[]) => Promise<boolean>;
   /** Current pending prompt, or null if no prompt is active. */
   pendingPrompt: NsitePromptState | null;
   /** Call this to resolve the current prompt. */
@@ -131,6 +154,41 @@ export function useNsiteSignerRpc({
       }
     },
     [siteId, siteName, user, showPrompt],
+  );
+
+  /**
+   * Whether the site may reach the camera or the microphone.
+   *
+   * Deliberately not `checkPermission`. That one refuses outright when nobody
+   * is signed in, which is right for every question it answers — they are all
+   * questions about a key. This one is a question about the device, is stored
+   * per site rather than per identity, and has an answer for a logged-out
+   * reader too. See `nsiteBrowserPermissions`.
+   *
+   * All of what was asked for, or none of it. `getUserMedia({video, audio})`
+   * fails whole if either is refused, so granting half of it would only
+   * produce a failure the user had apparently agreed to.
+   */
+  const onMedia = useCallback(
+    async (kinds: NsiteBrowserPermissionType[]): Promise<boolean> => {
+      if (kinds.length === 0) return false;
+
+      for (const kind of kinds) {
+        const stored = getNsiteBrowserPermission(siteId, kind);
+        if (stored === 'allow') continue;
+        if (stored === 'deny') return false;
+
+        const decision = await showPrompt({ type: kind, kind: null });
+
+        if (decision.remember) {
+          setNsiteBrowserPermission(siteId, siteName, kind, decision.allowed);
+        }
+        if (!decision.allowed) return false;
+      }
+
+      return true;
+    },
+    [siteId, siteName, showPrompt],
   );
 
   // ---------------------------------------------------------------------------
@@ -299,5 +357,5 @@ export function useNsiteSignerRpc({
     [user, checkPermission, siteId, siteName],
   );
 
-  return { onRpc, pendingPrompt, resolvePrompt };
+  return { onRpc, onMedia, pendingPrompt, resolvePrompt };
 }

@@ -2,11 +2,13 @@ package pub.soapbox.tenna;
 
 import android.animation.Animator;
 import android.animation.AnimatorListenerAdapter;
+import android.Manifest;
 import android.annotation.SuppressLint;
 import android.content.ActivityNotFoundException;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.ApplicationInfo;
+import android.content.pm.PackageManager;
 import android.content.res.Configuration;
 import android.graphics.Color;
 import android.net.Uri;
@@ -27,6 +29,7 @@ import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
+import androidx.core.content.ContextCompat;
 import androidx.core.graphics.Insets;
 import androidx.core.view.ViewCompat;
 import androidx.core.view.WindowCompat;
@@ -126,6 +129,23 @@ public class NsiteWebViewPlugin extends Plugin {
     /** Who is waiting on the activity that launcher started. */
     @Nullable private NsiteChromeClient.ResultHandler activityResult;
 
+    /** How an Android permission is asked for. See {@link #load}. */
+    @Nullable private ActivityResultLauncher<String[]> permissionLauncher;
+
+    /** Who is waiting on the permissions that launcher asked for. */
+    @Nullable private NsiteChromeClient.Decision permissionResult;
+
+    /**
+     * The `getUserMedia` requests the web layer is deciding, by id.
+     *
+     * A map rather than a single slot because the answer comes back over the
+     * bridge, and a request abandoned mid-prompt would otherwise strand the
+     * next one behind it.
+     */
+    private final Map<Integer, NsiteChromeClient.Decision> mediaRequests = new HashMap<>();
+
+    private int nextMediaId = 1;
+
     /** The site's fullscreen video, while one is up. See {@link #presentFullscreen}. */
     @Nullable private View fullscreenView;
 
@@ -198,6 +218,102 @@ public class NsiteWebViewPlugin extends Plugin {
                 if (handler != null) handler.handle(result.getResultCode(), result.getData());
             }
         );
+
+        // Registered here for the same reason, and answered all-or-nothing:
+        // what asks for these is `getUserMedia`, which fails whole anyway.
+        permissionLauncher = getBridge().registerForActivityResult(
+            new ActivityResultContracts.RequestMultiplePermissions(),
+            results -> {
+                NsiteChromeClient.Decision decision = permissionResult;
+                permissionResult = null;
+                if (decision == null) return;
+
+                boolean granted = true;
+                for (Boolean result : results.values()) {
+                    if (!Boolean.TRUE.equals(result)) granted = false;
+                }
+                decision.decided(granted);
+            }
+        );
+    }
+
+    /**
+     * Ask the user whether this site may reach a capability of the device.
+     *
+     * The question goes to the web layer, because that is where the prompt is
+     * drawn and where the answer is remembered — per site, the way a browser
+     * remembers it per origin. See `nsiteBrowserPermissions.ts`.
+     *
+     * The site is concealed for the duration by the same machinery every other
+     * prompt uses, so nothing it draws can sit behind the decision.
+     */
+    private void requestSiteMedia(
+        @NonNull String[] kinds,
+        @NonNull NsiteChromeClient.Decision decision
+    ) {
+        int id = nextMediaId++;
+        mediaRequests.put(id, decision);
+
+        JSObject event = new JSObject();
+        event.put("id", id);
+        event.put("kinds", new JSArray(Arrays.asList(kinds)));
+        notifyListeners("nsiteMedia", event);
+    }
+
+    /** The web layer's answer to a request raised as `nsiteMedia`. */
+    @PluginMethod
+    public void respondMedia(PluginCall call) {
+        Integer id = call.getInt("id");
+        boolean granted = Boolean.TRUE.equals(call.getBoolean("granted", false));
+
+        getActivity().runOnUiThread(() -> {
+            NsiteChromeClient.Decision decision = id == null ? null : mediaRequests.remove(id);
+            if (decision != null) decision.decided(granted);
+            call.resolve();
+        });
+    }
+
+    /**
+     * Hold the Android permissions named, asking for them if we don't.
+     *
+     * Only reached once the site's own request has been allowed, so the system
+     * dialog never appears in front of somebody who was about to say no.
+     */
+    private void requestAppPermissions(
+        @NonNull String[] permissions,
+        @NonNull NsiteChromeClient.Decision decision
+    ) {
+        if (permissions.length == 0) {
+            decision.decided(true);
+            return;
+        }
+
+        boolean held = true;
+        for (String permission : permissions) {
+            if (ContextCompat.checkSelfPermission(getContext(), permission)
+                != PackageManager.PERMISSION_GRANTED) {
+                held = false;
+            }
+        }
+        if (held) {
+            decision.decided(true);
+            return;
+        }
+
+        ActivityResultLauncher<String[]> launcher = permissionLauncher;
+        if (launcher == null) {
+            decision.decided(false);
+            return;
+        }
+
+        // One at a time. Nothing here asks twice over — a site's request is
+        // serialised behind its own prompt — but a stranded decision would
+        // hang the site's `getUserMedia` for good.
+        NsiteChromeClient.Decision waiting = permissionResult;
+        permissionResult = decision;
+        if (waiting != null) waiting.decided(false);
+
+        launcher.launch(permissions);
     }
 
     /**
@@ -646,6 +762,13 @@ public class NsiteWebViewPlugin extends Plugin {
         NsiteDownloads saving = downloads;
         chromeClient = null;
         downloads = null;
+
+        // Anything still being decided is decided against. The site is going,
+        // and a `getUserMedia` left waiting on a prompt nobody can answer
+        // would never settle.
+        for (NsiteChromeClient.Decision decision : mediaRequests.values()) decision.decided(false);
+        mediaRequests.clear();
+        permissionResult = null;
         if (chrome != null) chrome.release();
         // A file half written is closed and taken away, rather than left
         // looking like a file.
@@ -724,7 +847,21 @@ public class NsiteWebViewPlugin extends Plugin {
         // file chooser — it drops the request on the floor, which is a site
         // whose upload button does nothing when it is pressed.
         NsiteChromeClient chrome = new NsiteChromeClient(
-            getActivity(), siteName, this::startForResult, this::presentFullscreen);
+            getActivity(),
+            siteName,
+            this::startForResult,
+            new NsiteChromeClient.Consent() {
+                @Override
+                public void forSite(@NonNull String[] kinds, @NonNull NsiteChromeClient.Decision decision) {
+                    requestSiteMedia(kinds, decision);
+                }
+
+                @Override
+                public void forApp(@NonNull String[] permissions, @NonNull NsiteChromeClient.Decision decision) {
+                    requestAppPermissions(permissions, decision);
+                }
+            },
+            this::presentFullscreen);
         chromeClient = chrome;
         view.setWebChromeClient(chrome);
 

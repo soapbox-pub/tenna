@@ -5,7 +5,7 @@ import { useEffect, useMemo, useRef } from 'react';
 import type { NsiteFrameProps } from '@/components/nsite/types';
 import { supportsNappPush } from '@/lib/nappPushPlugin';
 import { buildManifest, resolveServers } from '@/lib/nsiteFiles';
-import { NsiteWebView, type NsiteRpcEvent } from '@/lib/nsiteNativePlugin';
+import { NsiteWebView, type NsiteMediaEvent, type NsiteRpcEvent } from '@/lib/nsiteNativePlugin';
 import { getNsiteNostrProviderScript } from '@/lib/nsiteNostrProvider';
 import type { NsiteShareDelivery } from '@/lib/nsiteShareTarget';
 import { getNsiteSubdomain } from '@/lib/nsiteSubdomain';
@@ -28,6 +28,7 @@ export function NsiteNative({
   name,
   pubkey,
   onRpc,
+  onMedia,
   onLoad,
   concealed,
   closing,
@@ -38,6 +39,7 @@ export function NsiteNative({
   // Kept in refs so the open/close effect depends on the site alone. A
   // re-render must never tear down a loaded site and start it over.
   const onRpcRef = useRef(onRpc);
+  const onMediaRef = useRef(onMedia);
   const onLoadRef = useRef(onLoad);
   const onCloseRef = useRef(onRequestClose);
   // A notification's path is the same thing to the native side as a GET
@@ -56,6 +58,7 @@ export function NsiteNative({
   // from the one already delivered.
   const openedShare = useRef(entry);
   useEffect(() => { onRpcRef.current = onRpc; }, [onRpc]);
+  useEffect(() => { onMediaRef.current = onMedia; }, [onMedia]);
   useEffect(() => { onLoadRef.current = onLoad; }, [onLoad]);
   useEffect(() => { onCloseRef.current = onRequestClose; }, [onRequestClose]);
   useEffect(() => { shareRef.current = entry; }, [entry]);
@@ -78,10 +81,24 @@ export function NsiteNative({
       }
     };
 
+    // `getUserMedia`, which the WebView asks about rather than the site. A
+    // frame with nobody to ask refuses: silence would leave the site's
+    // `getUserMedia` hanging forever, which is worse than a no.
+    const handleMedia = async ({ id, kinds }: NsiteMediaEvent) => {
+      const handler = onMediaRef.current;
+      try {
+        const granted = handler ? await handler(kinds) : false;
+        await NsiteWebView.respondMedia({ id, granted });
+      } catch {
+        await NsiteWebView.respondMedia({ id, granted: false });
+      }
+    };
+
     (async () => {
       listeners.push(
         await NsiteWebView.addListener('nsiteLoad', () => onLoadRef.current?.()),
         await NsiteWebView.addListener('nsiteRpc', (e) => { void handleRpc(e); }),
+        await NsiteWebView.addListener('nsiteMedia', (e) => { void handleMedia(e); }),
       );
 
       // A late unmount would otherwise leave a WebView with no owner.

@@ -20,6 +20,14 @@ export interface NsiteWebViewPlugin {
    */
   open(options: {
     siteId: string;
+    /**
+     * What to call the site in anything shown in its name.
+     *
+     * The origin can't stand in for it — it's a hash under `nsite.localhost`,
+     * which says nothing about whose window this is — so a dialog the site
+     * opens with `alert`, `confirm` or `prompt` is titled with this.
+     */
+    name?: string;
     files: Record<string, string>;
     servers: string[];
     /** The NIP-07 provider to install, or omitted to withhold `window.nostr`. */

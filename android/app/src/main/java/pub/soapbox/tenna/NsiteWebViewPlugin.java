@@ -103,6 +103,15 @@ public class NsiteWebViewPlugin extends Plugin {
     @Nullable private String host;
 
     /**
+     * What the site is called, for anything shown in its name.
+     *
+     * The origin cannot stand in for it. It is a hash under
+     * {@code nsite.localhost}, which tells a reader nothing about whose window
+     * they are in — so a dialog the site opens is titled with this instead.
+     */
+    @Nullable private String siteName;
+
+    /**
      * Everything the site's window needs that isn't its own bytes: the file
      * chooser, and whatever else {@link NsiteChromeClient} comes to answer.
      */
@@ -213,6 +222,7 @@ public class NsiteWebViewPlugin extends Plugin {
     @SuppressLint("SetJavaScriptEnabled")
     public void open(PluginCall call) {
         String siteId = call.getString("siteId");
+        String name = call.getString("name");
         String providerScript = call.getString("providerScript");
         JSObject manifest = call.getObject("files");
         JSArray serverList = call.getArray("servers");
@@ -248,6 +258,7 @@ public class NsiteWebViewPlugin extends Plugin {
             destroyWebView();
 
             host = siteHost;
+            siteName = name;
             edgeToEdge = true;
             fileServer = new NsiteFileServer(
                 files,
@@ -561,6 +572,7 @@ public class NsiteWebViewPlugin extends Plugin {
         fileServer = null;
         replyProxy = null;
         host = null;
+        siteName = null;
         barAppearance = null;
         shuttingDown = false;
 
@@ -621,7 +633,8 @@ public class NsiteWebViewPlugin extends Plugin {
         // Without one of these the WebView doesn't fall back to anything for a
         // file chooser — it drops the request on the floor, which is a site
         // whose upload button does nothing when it is pressed.
-        NsiteChromeClient chrome = new NsiteChromeClient(getActivity(), this::startForResult);
+        NsiteChromeClient chrome = new NsiteChromeClient(
+            getActivity(), siteName, this::startForResult);
         chromeClient = chrome;
         view.setWebChromeClient(chrome);
 

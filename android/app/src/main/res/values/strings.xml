@@ -4,4 +4,13 @@
     <string name="title_activity_main">Tenna</string>
     <string name="package_name">pub.soapbox.tenna</string>
     <string name="custom_url_scheme">pub.soapbox.tenna</string>
+
+    <!--
+        Over a dialog a site opened. A site's window has no address bar, so the
+        name is the only thing saying whose words are in the box.
+    -->
+    <string name="nsite_dialog_title">%1$s says</string>
+
+    <!-- What a site that arrived without a name is called over one. -->
+    <string name="nsite_dialog_anonymous">This site</string>
 </resources>

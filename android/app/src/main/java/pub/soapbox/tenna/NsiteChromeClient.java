@@ -2,17 +2,25 @@ package pub.soapbox.tenna;
 
 import android.app.Activity;
 import android.content.ClipData;
+import android.content.DialogInterface;
 import android.content.Intent;
 import android.net.Uri;
 import android.provider.MediaStore;
 import android.util.Log;
+import android.util.TypedValue;
+import android.view.ViewGroup;
+import android.webkit.JsPromptResult;
+import android.webkit.JsResult;
 import android.webkit.MimeTypeMap;
 import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
 import android.webkit.WebView;
+import android.widget.EditText;
+import android.widget.FrameLayout;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
+import androidx.appcompat.app.AlertDialog;
 import androidx.core.content.FileProvider;
 
 import java.io.File;
@@ -79,14 +87,31 @@ final class NsiteChromeClient extends WebChromeClient {
         void handle(int resultCode, @Nullable Intent data);
     }
 
+    /** Room around the field in a `prompt`, in dp. */
+    private static final int PROMPT_PADDING_DP = 20;
+
     private final Activity activity;
     private final Launcher launcher;
+
+    /** What the site is called, for the dialogs it opens. */
+    @Nullable private final String siteName;
 
     /** The chooser Chromium is blocked on, or null when there is none. */
     @Nullable private ValueCallback<Uri[]> pending;
 
-    NsiteChromeClient(@NonNull Activity activity, @NonNull Launcher launcher) {
+    /** The dialog the site has on screen, so it can be taken down with it. */
+    @Nullable private AlertDialog dialog;
+
+    /** What that dialog answers with if it leaves the screen unanswered. */
+    @Nullable private Runnable refusal;
+
+    NsiteChromeClient(
+        @NonNull Activity activity,
+        @Nullable String siteName,
+        @NonNull Launcher launcher
+    ) {
         this.activity = activity;
+        this.siteName = siteName;
         this.launcher = launcher;
     }
 
@@ -95,10 +120,13 @@ final class NsiteChromeClient extends WebChromeClient {
      *
      * Called when the site's WebView is destroyed. The picker it opened may
      * still be on screen and will still return, to a callback that is by then
-     * nobody's; answering now is what keeps that from being a leak.
+     * nobody's; answering now is what keeps that from being a leak. A dialog
+     * has to come down for a plainer reason besides — a window left on screen
+     * after the activity it belongs to is gone is a leak the system reports.
      */
     void release() {
         answer(null);
+        dismiss();
     }
 
     // -----------------------------------------------------------------------
@@ -299,5 +327,142 @@ final class NsiteChromeClient extends WebChromeClient {
         ValueCallback<Uri[]> callback = pending;
         pending = null;
         if (callback != null) callback.onReceiveValue(files);
+    }
+
+    // -----------------------------------------------------------------------
+    // JavaScript dialogs
+    // -----------------------------------------------------------------------
+
+    @Override
+    public boolean onJsAlert(WebView view, String url, String message, JsResult result) {
+        // An alert has nothing to disagree with, so dismissing it and pressing
+        // its one button mean the same thing.
+        show(dialog(message).setPositiveButton(android.R.string.ok, answering(result::confirm)),
+            result::confirm);
+        return true;
+    }
+
+    @Override
+    public boolean onJsConfirm(WebView view, String url, String message, JsResult result) {
+        show(dialog(message)
+            .setPositiveButton(android.R.string.ok, answering(result::confirm))
+            .setNegativeButton(android.R.string.cancel, answering(result::cancel)),
+            result::cancel);
+        return true;
+    }
+
+    @Override
+    public boolean onJsPrompt(
+        WebView view,
+        String url,
+        String message,
+        String defaultValue,
+        JsPromptResult result
+    ) {
+        final EditText field = new EditText(activity);
+        field.setText(defaultValue == null ? "" : defaultValue);
+        field.setSelection(field.getText().length());
+
+        show(dialog(message)
+            .setView(padded(field))
+            .setPositiveButton(android.R.string.ok,
+                answering(() -> result.confirm(field.getText().toString())))
+            .setNegativeButton(android.R.string.cancel, answering(result::cancel)),
+            result::cancel);
+        return true;
+    }
+
+    /**
+     * The shape every dialog a site opens takes.
+     *
+     * Titled with the site's name, because a modal drawn over a window with no
+     * address bar in it has nothing else to say whose words these are. A site
+     * that could put an unattributed box on screen could put Tenna's words in
+     * it.
+     *
+     * The message is the site's own and is set as text — never as anything the
+     * dialog would read as markup.
+     */
+    @NonNull
+    private AlertDialog.Builder dialog(@Nullable String message) {
+        String name = siteName == null || siteName.trim().isEmpty()
+            ? activity.getString(R.string.nsite_dialog_anonymous)
+            : siteName;
+
+        return new AlertDialog.Builder(activity, R.style.NsiteDialog)
+            .setTitle(activity.getString(R.string.nsite_dialog_title, name))
+            .setMessage(message == null ? "" : message);
+    }
+
+    /**
+     * Put a site's dialog on screen, and hold the page to a single answer.
+     *
+     * {@code refusal} is what the page is told if the dialog leaves without
+     * one — a press of the back button, or the window closing under it.
+     * Chromium blocks the renderer on a JavaScript dialog until it is answered
+     * exactly once, so a dismissal that answered nothing would be a site
+     * frozen for good, and a second answer after a button press would take the
+     * renderer down.
+     */
+    private void show(@NonNull AlertDialog.Builder builder, @NonNull Runnable refusal) {
+        // At most one at a time. Chromium won't ask for a second while the
+        // first is up, but a dialog stranded by a reload would sit there.
+        dismiss();
+
+        this.refusal = refusal;
+
+        final AlertDialog shown = builder.create();
+        shown.setOnDismissListener(dismissed -> {
+            if (dialog == shown) dialog = null;
+            refuse();
+        });
+
+        dialog = shown;
+        shown.show();
+    }
+
+    /** A button: the answer it gives, and the end of the refusal. */
+    @NonNull
+    private DialogInterface.OnClickListener answering(@NonNull Runnable answer) {
+        return (dismissed, which) -> {
+            // Before answering, so the dismissal this press causes finds
+            // nothing left to refuse with.
+            refusal = null;
+            answer.run();
+        };
+    }
+
+    /** Tell the page no, if nothing has told it anything yet. */
+    private void refuse() {
+        Runnable pending = refusal;
+        refusal = null;
+        if (pending != null) pending.run();
+    }
+
+    /** Take down whatever dialog is up, answering it on the way. */
+    private void dismiss() {
+        AlertDialog shown = dialog;
+        dialog = null;
+        // `refuse` runs from the dismiss listener, so the page is answered
+        // even though nobody pressed anything.
+        if (shown != null) shown.dismiss();
+    }
+
+    /** A field with room around it, rather than flush to the dialog's edges. */
+    @NonNull
+    private ViewGroup padded(@NonNull EditText field) {
+        int padding = (int) TypedValue.applyDimension(
+            TypedValue.COMPLEX_UNIT_DIP,
+            PROMPT_PADDING_DP,
+            activity.getResources().getDisplayMetrics()
+        );
+
+        FrameLayout room = new FrameLayout(activity);
+        room.setPadding(padding, 0, padding, 0);
+        room.addView(field, new FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.MATCH_PARENT,
+            FrameLayout.LayoutParams.WRAP_CONTENT
+        ));
+        return room;
     }
 }

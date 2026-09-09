@@ -30,4 +30,15 @@
         <item name="android:background">@color/nsiteWindow</item>
         <item name="android:windowBackground">@color/nsiteWindow</item>
     </style>
+
+    <!--
+        A dialog a site opened with `alert`, `confirm` or `prompt`. See
+        NsiteChromeClient.
+
+        Stated here rather than left to the theme of the activity the dialog is
+        built against, which is a splash screen — AppTheme.NsiteLaunch, whose
+        whole business is the flat colour a site's window comes up on and which
+        says nothing about what a dialog in it should look like.
+    -->
+    <style name="NsiteDialog" parent="Theme.AppCompat.DayNight.Dialog.Alert" />
 </resources>

@@ -25,6 +25,7 @@ import { getNsiteSubdomain } from '@/lib/nsiteSubdomain';
  */
 export function NsiteNative({
   event,
+  name,
   pubkey,
   onRpc,
   onLoad,
@@ -90,6 +91,10 @@ export function NsiteNative({
 
       await NsiteWebView.open({
         siteId: getNsiteSubdomain(event),
+        // What a dialog the site opens is titled with. Derived from the same
+        // event as everything else here, so it never arrives late and never
+        // reopens the window on its own.
+        name,
         files: Object.fromEntries(buildManifest(event)),
         servers: resolveServers(event),
         // A site in its own WebView can register a service worker, and the
@@ -112,7 +117,7 @@ export function NsiteNative({
       void NsiteWebView.close();
       for (const listener of listeners) void listener.remove();
     };
-  }, [event, pubkey]);
+  }, [event, name, pubkey]);
 
   // A share, or a notification's path, turning up after the site is loaded.
   // The window never closed, so there is nothing to reopen — the site is

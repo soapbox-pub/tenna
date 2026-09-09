@@ -123,15 +123,39 @@ export function readSiteChrome(html: string): {
   const viewport = doc.querySelector('meta[name="viewport" i]')?.getAttribute('content') ?? '';
   const edgeToEdge = /viewport-fit\s*=\s*cover/i.test(viewport);
 
-  // `theme-color` may be declared more than once, keyed by a `media` query.
-  // Prefer an unconditional one; otherwise take the first declaration.
-  const candidates = [...doc.querySelectorAll('meta[name="theme-color" i]')];
-  const chosen = candidates.find((el) => !el.getAttribute('media')) ?? candidates[0];
+  // `theme-color` may be declared more than once, each keyed by a `media`
+  // query, and the first declaration whose query matches is the one that
+  // counts. An unconditional one matches everything, but only from where it
+  // stands: a site that names a dark colour ahead of it is naming the dark one
+  // for a dark device, and taking the unconditional one anyway would hand back
+  // a colour the site declared for somebody else's screen.
+  //
+  // The queries are evaluated against this document, which shares a device and
+  // a colour scheme with the frame — `matchMedia` inside a nested browsing
+  // context answers no differently.
+  const chosen = [...doc.querySelectorAll('meta[name="theme-color" i]')].find((el) => {
+    const media = el.getAttribute('media');
+    return !media || matchesMedia(media);
+  });
 
   return {
     edgeToEdge,
     themeColor: sanitizeCssColor(chosen?.getAttribute('content') ?? null),
   };
+}
+
+/** Whether a media query from a site's markup holds here and now. */
+function matchesMedia(query: string): boolean {
+  if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return false;
+  // A query that doesn't parse is `not all`, which matches nothing — the same
+  // answer as a query that parses and doesn't hold, and the right one either
+  // way. No browser throws here, but this one runs on strings from a Nostr
+  // event, so it is not the place to find out.
+  try {
+    return window.matchMedia(query).matches;
+  } catch {
+    return false;
+  }
 }
 
 /**

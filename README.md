@@ -109,6 +109,25 @@ android/app/src/main/java/pub/soapbox/tenna/
 `AGENTS.md` documents the conventions this codebase is written to; `NAPP.md` is
 the reference for nsite authors.
 
+### CI and releases
+
+ngit-ci watches `.ngit/act/workflows/` and runs them with `act`; results appear
+on gitworkshop.dev against the commit. There are three:
+
+| | |
+| --- | --- |
+| `test.yml` | Every push and Nostr PR. `npm run test` — typecheck, lint, unit tests, production build — plus `npm audit`. |
+| `deploy-nsite.yml` | Every push to `main`. Builds the client and publishes it as the nsite described by `.nsite/config.json`, through `scripts/nsite-deploy.sh`. Tenna serves itself the way it serves everything else. |
+| `release.yml` | Every `vX.Y.Z` tag. Builds the signed Android APK — version and versionCode derived from the tag, never committed — and publishes it to Zapstore from `zapstore.yaml`. |
+
+Cutting a release is `git tag vX.Y.Z && git push origin main vX.Y.Z`: the tag
+builds the APK, and the push to `main` republishes the nsite from the same
+commit.
+
+Each workflow names the secrets it needs in its header. The ngit-ci operator
+provisions them against this repo's alias, and injects them only on
+maintainer-authored triggers — there is no default token.
+
 ## Stack
 
 React 19, TypeScript, Vite, TailwindCSS 4, shadcn/ui,

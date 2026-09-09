@@ -1,0 +1,62 @@
+# Zapstore listing for the Android APK, published by .ngit/act/workflows/release.yml.
+#
+# `version` and `release_source` are NOT here: the release job derives the
+# version from the git tag and prepends both to a temp copy of this file, so a
+# release can never disagree with the tag it was cut from.
+#
+# `icon` is build output (scripts/generate-icons.mjs rasterises it from
+# public/logo.svg, and `npm run build` runs it), which is why the publish step
+# comes after the build in that workflow.
+
+repository: https://nostrhub.io/npub1q3sle0kvfsehgsuexttt3ugjd8xdklxfwwkh559wxckmzddywnws6cd26p/tenna
+
+name: Tenna
+
+summary: An nsite browser. A home screen for the apps that live on Nostr.
+
+description: |
+  Tenna is a browser for nsites — websites published to Nostr instead of to a
+  host. There is no server to go down and no domain to expire: a site is a
+  signed manifest listing every file by path and hash, and the files themselves
+  are content-addressed blobs on Blossom. Tenna finds the manifest, fetches the
+  blobs, verifies them, and serves the site to itself.
+
+  The home screen is a wall of tiles, and everything on it is yours. Sites sit
+  beside your installed apps in whatever order you drag them into, each with a
+  channel number counted down the wall. Add them from a catalog, from the people
+  you follow, or by pasting an naddr, an npub, a nostr: URI, or a gateway URL.
+
+  Tenna holds your keys; the sites never do. Each site gets a NIP-07
+  `window.nostr` that proxies back to Tenna, which asks you before it signs.
+  Permissions are remembered per site and per event kind, and revoked from the
+  shield menu at any time.
+
+  Every site runs as the top-level document of its own WebView on its own
+  origin, so it is a real secure context — service workers, crypto.subtle, the
+  lot — with its own task in the recents switcher. Sites can also hold push
+  subscriptions open while closed, and take a place in the OS share sheet.
+
+tags:
+  - nostr
+  - nsite
+  - browser
+  - launcher
+  - blossom
+  - decentralized
+
+license: AGPL-3.0-or-later
+
+icon: ./public/icons/icon-512.png
+
+supported_nips:
+  - "01"  # Basic protocol: events, filters, subscriptions
+  - "02"  # Follow list (the sites published by people you follow)
+  - "04"  # Legacy encryption, proxied to sites through window.nostr
+  - "05"  # DNS-based identifiers
+  - "07"  # Browser extension signing — what Tenna injects into every site
+  - "19"  # Bech32 identifiers (npub, nevent, naddr, nprofile)
+  - "42"  # Relay authentication
+  - "44"  # Versioned encryption, proxied to sites through window.nostr
+  - "46"  # Nostr remote signing / bunker
+  - "65"  # Relay list metadata
+  - "5A"  # nsites: kind 15128 / 35128 / 5128 manifests

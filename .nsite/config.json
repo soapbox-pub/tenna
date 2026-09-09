@@ -1,0 +1,20 @@
+{
+  "$schema": "https://nsyte.run/schemas/config.schema.json",
+  "relays": [
+    "wss://relay.ditto.pub",
+    "wss://relay.dreamith.to",
+    "wss://relay.primal.net"
+  ],
+  "id": "tenna",
+  "servers": [
+    "https://blossom.ditto.pub",
+    "https://blossom.dreamith.to",
+    "https://blossom.primal.net"
+  ],
+  "fallback": "/index.html",
+  "publishRelayList": false,
+  "publishServerList": false,
+  "title": "Tenna",
+  "description": "An nsite browser — a home screen for the apps that live on Nostr. Pick a channel.",
+  "source": "https://gitworkshop.dev/npub1q3sle0kvfsehgsuexttt3ugjd8xdklxfwwkh559wxckmzddywnws6cd26p/git.shakespeare.diy/tenna"
+}

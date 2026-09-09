@@ -1,0 +1,45 @@
+name: Test
+
+# Typecheck / lint / unit tests / production build for the Tenna web client.
+# ngit-ci watches .ngit/act/workflows/ and runs these with `act` (GitHub
+# Actions-compatible syntax) in a Linux container per job. Results surface on
+# gitworkshop.dev against the commit.
+#
+# Runs on every push and on every Nostr PR (kinds 1618/1619). Tag pushes are
+# handled by release.yml, so they are excluded here.
+#
+# `["*", "**"]`, not `["**"]`. On GitHub the two patterns split the space —
+# `*` matches a branch with no `/`, `**` matches one with — so naming only
+# `**` already excludes `main`. ngit-ci is stricter still: its matcher
+# (`ref_matches_pattern`) special-cases a bare `*` to true, handles a
+# `<prefix>/**` suffix, and otherwise treats a trailing `*` as a literal
+# prefix — so a bare `**` reduces to `starts_with("*")` and matches NO ref at
+# all. Keep both patterns: the pair is correct on GitHub, and the `*` is what
+# actually matches here.
+
+on:
+  push:
+    branches: ["*", "**"]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - run: npm ci
+
+      # tsc + eslint + vitest + production build (see package.json "test").
+      - run: npm run test
+
+      # Fail on known high/critical advisories in dependencies. Tenna holds
+      # nsec keys in localStorage and hands every nsite a `window.nostr`, so a
+      # vulnerable transitive dependency is a key-theft primitive, not a
+      # nuisance — see the security model in AGENTS.md.
+      - run: npm audit --audit-level=high

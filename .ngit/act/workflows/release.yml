@@ -1,0 +1,366 @@
+name: Release
+
+# Builds the signed Android APK for a version tag (vX.Y.Z) and publishes it to
+# Zapstore. The web client is published separately, by deploy-nsite.yml on the
+# push to main that carries the same commit.
+#
+# ── One job on purpose ───────────────────────────────────────────────────────
+# The build and the publish stay in ONE job: act's local artifact server
+# round-trips a multi-file wildcard upload back as a 3-byte stub (digests match
+# on upload, but the download is empty), so handing the APK to a second job via
+# upload/download-artifact feeds zsp an empty file. Building and publishing in
+# one job keeps the real signed APK on disk the whole time. Results and
+# artifacts surface on gitworkshop.dev against the tagged commit.
+#
+# ── Runner image ─────────────────────────────────────────────────────────────
+# ngit-ci maps `ubuntu-latest` to whatever image the coordinator was configured
+# with (NGIT_CI_ACT_PLATFORMS). A coordinator shared with a sibling repo may
+# already bake the JDK/Node toolcaches, the Android SDK and the zsp binary; a
+# stock act image bakes none of them. Every step below therefore uses what is
+# baked when it is there and installs it when it is not — a stale or minimal
+# image costs time, not a failed release.
+#
+# ── Version ──────────────────────────────────────────────────────────────────
+# The version is carried by the git tag, never a committed field:
+#   VERSION_NAME = tag minus leading "v"   (v1.2.0 -> 1.2.0)
+#   VERSION_CODE = major*1_000_000 + minor*1_000 + patch, derived from the tag.
+# NOT `git rev-list --count HEAD`: ngit-ci shallow-fetches only the tagged
+# commit (git fetch --depth=1 origin <oid>), so the count is always 1 and every
+# release would get the same versionCode — which Play and every updater treat
+# as "not an update".
+#
+# ── Secrets (provisioned by the ngit-ci operator for this repo's alias) ──────
+# Injected ONLY on maintainer-authored triggers (a tag push by a maintainer
+# qualifies), and ONLY for secrets the operator has provisioned for this repo.
+# There is no GITHUB_TOKEN and nothing is injected by default. Ask the operator
+# to set, keyed to this repo's #ALIAS:
+#   ANDROID_KEYSTORE_BASE64  base64 of the JKS upload keystore (alias: upload)
+#   KEYSTORE_PASSWORD        keystore store password
+#   KEY_PASSWORD             upload key password (== store password; PKCS12
+#                            uses a single password, so the two must match)
+#   ZAPSTORE_BUNKER_URL      bunker:// URL of the NIP-46 signer that publishes
+#   ZAPSTORE_CLIENT_KEY      the client secret key that bunker session was
+#                            established with (hex or nsec). Both halves are
+#                            needed: the URL's one-time `secret=` is long spent,
+#                            and what actually authorizes signing is this key,
+#                            which the bunker already approved.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  android:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        # ngit-ci shallow-fetches the tagged commit regardless of fetch-depth;
+        # the version is derived from the tag, so depth doesn't matter here.
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      # android/variables.gradle builds against compileSdk 36. If the
+      # coordinator's image bakes the SDK (ANDROID_HOME with installed
+      # platforms), use it; otherwise install it here. The check is on
+      # `platforms/`, not on ANDROID_HOME alone: setup-android and the baked
+      # images both export the variable, but an empty SDK root fails Gradle
+      # with a far less obvious "SDK location not found".
+      - name: Look for a baked Android SDK
+        id: sdk
+        run: |
+          set -eu
+          if [ -n "${ANDROID_HOME:-}" ] && [ -d "${ANDROID_HOME}/platforms" ] \
+             && [ -n "$(ls -A "${ANDROID_HOME}/platforms" 2>/dev/null)" ]; then
+            echo "using the Android SDK baked into the runner image at $ANDROID_HOME"
+            ls "$ANDROID_HOME/platforms"
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "no usable Android SDK in the image; installing one"
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: android-actions/setup-android@v3
+        if: ${{ steps.sdk.outputs.present != 'true' }}
+        with:
+          packages: "platform-tools platforms;android-36 build-tools;36.0.0"
+
+      - name: Derive version
+        id: version
+        run: |
+          set -eu
+          TAG="${GITHUB_REF_NAME}"
+          VERSION_NAME="${TAG#v}"
+          # Scheme: major*1_000_000 + minor*1_000 + patch. minor and patch each
+          # support up to 999, and the result is monotonic with semver and
+          # independent of checkout depth.
+          IFS='.' read -r MAJOR MINOR PATCH <<< "$VERSION_NAME"
+          case "${MAJOR:-}${MINOR:-}${PATCH:-}" in
+            ""|*[!0-9]*)
+              echo "Tag $TAG is not vMAJOR.MINOR.PATCH; cannot derive a versionCode." >&2
+              exit 1
+              ;;
+          esac
+          VERSION_CODE="$(( MAJOR * 1000000 + MINOR * 1000 + PATCH ))"
+          echo "name=$VERSION_NAME" >> "$GITHUB_OUTPUT"
+          echo "code=$VERSION_CODE" >> "$GITHUB_OUTPUT"
+          echo "Building $VERSION_NAME (code $VERSION_CODE) from tag $TAG"
+
+      - name: Stamp version into android/app/build.gradle
+        env:
+          VERSION_NAME: ${{ steps.version.outputs.name }}
+          VERSION_CODE: ${{ steps.version.outputs.code }}
+        run: |
+          set -eu
+          sed -i "s/versionCode [0-9]*/versionCode ${VERSION_CODE}/" android/app/build.gradle
+          sed -i "s/versionName \"[^\"]*\"/versionName \"${VERSION_NAME}\"/" android/app/build.gradle
+          grep -nE "versionCode|versionName" android/app/build.gradle
+
+      - name: Configure release signing
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          set -eu
+          : "${ANDROID_KEYSTORE_BASE64:?Set the ANDROID_KEYSTORE_BASE64 secret.}"
+          : "${KEYSTORE_PASSWORD:?Set the KEYSTORE_PASSWORD secret.}"
+
+          rm -f android/key.properties android/app/my-upload-key.jks android/app/my-upload-key.keystore
+          umask 077
+
+          # Decode the JKS and migrate JKS -> PKCS12 for Gradle. PKCS12 uses a
+          # single password, so key and store passwords must match (that is the
+          # KEY_PASSWORD == KEYSTORE_PASSWORD invariant).
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 -d > android/app/my-upload-key.jks
+          keytool -importkeystore \
+            -srckeystore android/app/my-upload-key.jks \
+            -destkeystore android/app/my-upload-key.keystore \
+            -deststoretype pkcs12 \
+            -srcstorepass "$KEYSTORE_PASSWORD" \
+            -deststorepass "$KEYSTORE_PASSWORD" \
+            -srcalias upload \
+            -destalias upload \
+            -noprompt
+          rm android/app/my-upload-key.jks
+
+          cat > android/key.properties <<EOF
+          storePassword=$KEYSTORE_PASSWORD
+          keyPassword=${KEY_PASSWORD:-$KEYSTORE_PASSWORD}
+          keyAlias=upload
+          storeFile=my-upload-key.keystore
+          EOF
+
+      - name: Build web assets and sync into Capacitor
+        run: |
+          set -eu
+          npm ci
+          # `npm run build` also rasterises the launcher icons from
+          # public/logo.svg into android/app/src/main/res/ (they are build
+          # output, gitignored), so the APK's icon comes from this step and not
+          # from the checkout.
+          npm run build
+          test -f dist/index.html || { echo "the build produced no dist/index.html" >&2; ls -la dist || true; exit 1; }
+          npx cap sync android
+
+      - name: Build signed release APK
+        run: |
+          set -eu
+          cd android
+          chmod +x gradlew
+          ./gradlew assembleRelease --no-daemon
+
+      - name: Collect and name the artifact
+        id: artifacts
+        env:
+          VERSION_NAME: ${{ steps.version.outputs.name }}
+        run: |
+          set -eu
+          out="$RUNNER_TEMP/tenna-android-v$VERSION_NAME"
+          mkdir -p "$out"
+          cp android/app/build/outputs/apk/release/app-release.apk "$out/Tenna-v$VERSION_NAME.apk"
+          ls -lh "$out"
+          echo "dir=$out" >> "$GITHUB_OUTPUT"
+
+      # The APK is signed now; remove the keystore and the password file. Runs
+      # even when the build failed, so a failed release never leaves signing
+      # material in the working tree act binds into the next job.
+      - name: Remove release signing material
+        if: ${{ always() }}
+        run: |
+          rm -f android/key.properties android/app/my-upload-key.jks android/app/my-upload-key.keystore
+
+      # Before the Zapstore publish, so the APK is downloadable from the run
+      # even if Zapstore rejects it. Upload is safe here — act's broken
+      # artifact path is cross-job DOWNLOAD (see the header), not same-job
+      # upload.
+      - name: Upload the APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: tenna-android-v${{ steps.version.outputs.name }}
+          path: ${{ steps.artifacts.outputs.dir }}/Tenna-v${{ steps.version.outputs.name }}.apk
+
+      # zsp may be baked into the coordinator's image. `command -v` is enough
+      # here (unlike nsyte in deploy-nsite.yml, where an old binary silently
+      # emitted legacy event kinds): zsp's publish surface has been stable, and
+      # a version too old to publish fails loudly rather than succeeding wrong.
+      #
+      # The download is by RELEASE ASSET, not `go install`, so no Go toolchain
+      # is needed on a stock act image. Note that the two version spaces are
+      # not the same: zsp has git tags with no GitHub release (v0.4.12, which a
+      # sibling repo pins for `go install`, publishes no binaries), so only a
+      # tag that appears in the releases list can go here.
+      - name: Install zsp
+        run: |
+          set -eu
+          ZSP_VERSION=0.4.17
+          if command -v zsp >/dev/null 2>&1; then
+            echo "using the zsp baked into the runner image"
+            zsp --version || true
+            exit 0
+          fi
+          curl -fsSL --http1.1 --retry 5 --retry-delay 5 --retry-all-errors \
+            --connect-timeout 20 --max-time 600 \
+            "https://github.com/zapstore/zsp/releases/download/v${ZSP_VERSION}/zsp-${ZSP_VERSION}-linux-amd64" \
+            -o /usr/local/bin/zsp
+          chmod +x /usr/local/bin/zsp
+          zsp --version
+
+      - name: Publish to Zapstore
+        # Bounded at the step level because act enforces a STEP's
+        # `timeout-minutes` but only debug-logs a JOB's. A publish that hangs
+        # past the coordinator's run-level timeout loses the logs of every job
+        # the run has already finished, which is the one failure mode that
+        # leaves nothing to debug with.
+        timeout-minutes: 20
+        env:
+          SIGN_WITH: ${{ secrets.ZAPSTORE_BUNKER_URL }}
+          ZAPSTORE_CLIENT_KEY: ${{ secrets.ZAPSTORE_CLIENT_KEY }}
+          VERSION_NAME: ${{ steps.version.outputs.name }}
+          ARTIFACT_DIR: ${{ steps.artifacts.outputs.dir }}
+          RELAY_URLS: wss://relay.zapstore.dev,wss://relay.ditto.pub,wss://relay.dreamith.to,wss://relay.primal.net
+        run: |
+          set -eu
+          : "${SIGN_WITH:?Set the ZAPSTORE_BUNKER_URL secret.}"
+          : "${ZAPSTORE_CLIENT_KEY:?Set the ZAPSTORE_CLIENT_KEY secret.}"
+
+          # zsp takes exactly ONE Blossom server, and the URL it is given is the
+          # one it writes into the file-metadata event, so it has to be a server
+          # that is up NOW: the first of the client's configured servers
+          # (.nsite/config.json, the same list every nsite deploy uses) to
+          # answer a Blossom-level probe. An outage on one mirror then moves the
+          # APK to the next instead of failing the publish.
+          servers="$(node -e 'process.stdout.write(JSON.parse(require("fs").readFileSync(".nsite/config.json","utf8")).servers.join(","))')"
+          live="$(scripts/live-hosts.sh "$servers")"
+          BLOSSOM_URL="${live%%,*}"
+          if [ -z "$BLOSSOM_URL" ]; then
+            echo "No configured Blossom server is reachable; cannot publish to Zapstore." >&2
+            exit 1
+          fi
+          export BLOSSOM_URL
+          echo "Using Blossom server $BLOSSOM_URL"
+
+          apk_path="$ARTIFACT_DIR/Tenna-v$VERSION_NAME.apk"
+          test -f "$apk_path"
+
+          # Guard against a truncated/empty APK reaching zsp: a real signed APK
+          # is several MB and must be a valid ZIP. Fail loudly here rather than
+          # letting zsp die on an unreadable archive.
+          apk_size="$(stat -c%s "$apk_path")"
+          if [ "$apk_size" -lt 1000000 ]; then
+            echo "APK at $apk_path is only ${apk_size} bytes — expected a multi-MB signed APK. Aborting." >&2
+            exit 1
+          fi
+          unzip -l "$apk_path" >/dev/null 2>&1 || {
+            echo "APK at $apk_path is not a valid ZIP/APK archive. Aborting." >&2
+            exit 1
+          }
+
+          # Restore the persistent NIP-46 client key so the bunker recognizes
+          # this workflow as the same application across runs. zsp reads it from
+          # ~/.config/zsp/bunker-keys/<bunker-pubkey>.key.
+          #
+          # Kept out of the traced subshell below on purpose: the key only ever
+          # needs to reach a file, never the log, so it is handled here before
+          # `set -x` is turned on rather than fenced with an inline toggle.
+          bunker_pubkey="${SIGN_WITH#bunker://}"
+          bunker_pubkey="${bunker_pubkey%%\?*}"
+          # Report (don't silently `set -e`-exit) if the scheme wasn't stripped.
+          if [ "$bunker_pubkey" = "$SIGN_WITH" ]; then
+            echo "SIGN_WITH does not look like a bunker:// URL (no scheme stripped); cannot derive bunker pubkey." >&2
+            exit 1
+          fi
+          umask 077
+          mkdir -p ~/.config/zsp/bunker-keys
+          printf '%s\n' "$ZAPSTORE_CLIENT_KEY" > ~/.config/zsp/bunker-keys/"$bunker_pubkey".key
+
+          # The config prep and zsp invocation below are traced to the console.
+          # Streamed live (`tee`, not redirect-then-print): the failure mode
+          # here is a hang, and a buffered trace is no trace at all when the
+          # step never returns. The copy stays on the runner and is NOT
+          # uploaded anywhere — a trace can capture more than intended, and it
+          # has no business on a public store.
+          out="${RUNNER_TEMP:-/tmp}/zsp-output.txt"
+          release_config="$(mktemp "${RUNNER_TEMP:-/tmp}/zapstore-release.XXXXXX.yaml")"
+          set +e
+          (
+            set -x
+            zsp --version || true
+
+            cp zapstore.yaml "$release_config"
+            sed -i "1i release_source: $apk_path" "$release_config"
+            sed -i "1i version: $VERSION_NAME" "$release_config"
+            # zsp resolves the config's relative asset paths (icon,
+            # release_notes) against the CONFIG'S directory, not the repo root.
+            # The config now lives in a temp dir, so `icon: ./public/...` would
+            # resolve under $RUNNER_TEMP and zsp fails "no such file or
+            # directory". Rewrite them to absolute paths off the checkout ($PWD
+            # is the repo root here, which is why `cp zapstore.yaml` works).
+            repo_root="$PWD"
+            sed -i "s#^icon: \./#icon: $repo_root/#" "$release_config"
+            sed -i "s#^release_notes: \./#release_notes: $repo_root/#" "$release_config"
+            cat "$release_config"
+
+            # --json is a GLOBAL flag and MUST precede `publish`; after it, it
+            # is silently ignored and zsp exits 1 with no message.
+            # --quiet auto-confirms the "Ready to Publish" prompt — without it
+            # zsp tries to open /dev/tty for a yes/no and dies in the headless
+            # container ("could not open a new TTY"). zsp's own CI/CD example is
+            # exactly `zsp --json publish --quiet ...`.
+            #
+            # Bounded with `timeout`: zsp talks to a NIP-46 bunker and to the
+            # RELAY_URLS/BLOSSOM_URL hosts, and it has no internal deadline of
+            # its own. If any of them accepts the TCP connection and then never
+            # answers, zsp waits indefinitely — which exhausts any coordinator
+            # ceiling rather than failing. 900s is many times what a healthy
+            # publish takes, so this fires on a stalled dependency and never on
+            # a merely slow one.
+            timeout --signal=TERM --kill-after=30 900 \
+            zsp --json publish \
+              --quiet \
+              --skip-metadata \
+              --skip-preview \
+              "$release_config"
+          ) 2>&1 | tee "$out"
+          zsp_rc=${PIPESTATUS[0]}
+          set -e
+          rm -f "$release_config"
+          echo "=== zsp publish sequence finished (rc=$zsp_rc) ==="
+          # 124 = timeout sent TERM; 137 = it had to follow up with KILL.
+          if [ "$zsp_rc" -eq 124 ] || [ "$zsp_rc" -eq 137 ]; then
+            echo "zsp exceeded the 900s publish deadline and was killed. This is" >&2
+            echo "almost always an unreachable dependency, not a slow upload —" >&2
+            echo "check the bunker signer and each host in RELAY_URLS/BLOSSOM_URL." >&2
+          fi
+          exit "$zsp_rc"

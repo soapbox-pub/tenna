@@ -1,5 +1,16 @@
 apply plugin: 'com.android.application'
 
+// Release signing material, written by .ngit/act/workflows/release.yml from
+// the ANDROID_KEYSTORE_BASE64 / KEYSTORE_PASSWORD / KEY_PASSWORD secrets and
+// deleted again in the same job. Absent in a normal checkout, which is why
+// every read of it is guarded: `assembleDebug` and the emulator must keep
+// working without it, and only `assembleRelease` needs it to exist.
+def keystorePropertiesFile = rootProject.file("key.properties")
+def keystoreProperties = new Properties()
+if (keystorePropertiesFile.exists()) {
+    keystoreProperties.load(new FileInputStream(keystorePropertiesFile))
+}
+
 android {
     namespace = "pub.soapbox.tenna"
     compileSdk = rootProject.ext.compileSdkVersion
@@ -16,8 +27,19 @@ android {
             ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
+    signingConfigs {
+        release {
+            if (keystorePropertiesFile.exists()) {
+                keyAlias keystoreProperties['keyAlias']
+                keyPassword keystoreProperties['keyPassword']
+                storeFile file(keystoreProperties['storeFile'])
+                storePassword keystoreProperties['storePassword']
+            }
+        }
+    }
     buildTypes {
         release {
+            signingConfig signingConfigs.release
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }

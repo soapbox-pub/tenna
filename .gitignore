@@ -43,3 +43,9 @@ yarn.lock
 .env
 .env.*
 !.env.example
+
+# Android release signing material. The CI job writes these from secrets and
+# removes them again; a stray local copy must never be committable.
+/android/key.properties
+/android/app/*.jks
+/android/app/*.keystore

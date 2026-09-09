@@ -3,7 +3,6 @@ package pub.soapbox.tenna;
 import android.animation.Animator;
 import android.animation.AnimatorListenerAdapter;
 import android.annotation.SuppressLint;
-import android.app.Activity;
 import android.content.Context;
 import android.content.pm.ApplicationInfo;
 import android.content.res.Configuration;
@@ -13,7 +12,6 @@ import android.util.Log;
 import android.util.TypedValue;
 import android.view.View;
 import android.view.ViewGroup;
-import android.view.Window;
 import android.webkit.WebResourceError;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebResourceResponse;
@@ -24,12 +22,9 @@ import android.widget.FrameLayout;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
-import androidx.core.graphics.ColorUtils;
 import androidx.core.graphics.Insets;
 import androidx.core.view.ViewCompat;
-import androidx.core.view.WindowCompat;
 import androidx.core.view.WindowInsetsCompat;
-import androidx.core.view.WindowInsetsControllerCompat;
 import androidx.webkit.JavaScriptReplyProxy;
 import androidx.webkit.WebMessageCompat;
 import androidx.webkit.WebViewCompat;
@@ -122,14 +117,12 @@ public class NsiteWebViewPlugin extends Plugin {
     private boolean edgeToEdge = true;
 
     /**
-     * The colour the site says is behind the system bars, once it has said it.
+     * Who draws the clock and the gesture pill while this site is up.
      *
-     * Kept because the bars have to be put back to it after a permission
-     * prompt has had them, and because there is nothing else to ask: the site
-     * declares this once, in the document, and Tenna is the browser that has
-     * to act on it.
+     * Made with the frame and released with it, because what the bars should
+     * look like is a question about the pixels in it.
      */
-    @Nullable private Integer barColor;
+    @Nullable private NsiteBarAppearance barAppearance;
 
     /**
      * Whether the shutoff animation is already playing.
@@ -187,7 +180,6 @@ public class NsiteWebViewPlugin extends Plugin {
 
             host = siteHost;
             edgeToEdge = true;
-            barColor = null;
             fileServer = new NsiteFileServer(
                 files,
                 servers,
@@ -228,6 +220,7 @@ public class NsiteWebViewPlugin extends Plugin {
 
             container = frame;
             webView = view;
+            barAppearance = new NsiteBarAppearance(getActivity(), frame);
 
             observeInsets(frame);
 
@@ -324,6 +317,9 @@ public class NsiteWebViewPlugin extends Plugin {
                 WindowInsetsCompat.Type.systemBars() | WindowInsetsCompat.Type.displayCutout()
             );
             layoutForSafeArea();
+            // The strips read for the bars' own contrast are the strips the
+            // bars cover, so a rotation moves them with the cutout.
+            if (barAppearance != null) barAppearance.setSafeArea(safeArea);
             return insets;
         });
         ViewCompat.requestApplyInsets(view);
@@ -350,16 +346,19 @@ public class NsiteWebViewPlugin extends Plugin {
     /** Take what the site's document asked for, once it has been read. */
     private void applySiteChrome(NsiteSiteChrome siteChrome) {
         edgeToEdge = siteChrome.edgeToEdge;
-        barColor = siteChrome.themeColor(prefersDark());
+        Integer themeColor = siteChrome.themeColor(prefersDark());
 
         ViewGroup frame = container;
-        if (frame != null && !siteChrome.edgeToEdge && barColor != null) {
+        if (frame != null && !siteChrome.edgeToEdge && themeColor != null) {
             // The strips left by the letterbox read as part of the site rather
             // than as a black border around it.
-            frame.setBackgroundColor(barColor);
+            frame.setBackgroundColor(themeColor);
         }
 
-        applyBarAppearance();
+        // The opening answer for the system bars, until the site has painted
+        // something to read instead. See NsiteBarAppearance.
+        if (barAppearance != null) barAppearance.declared(themeColor);
+
         layoutForSafeArea();
     }
 
@@ -387,70 +386,6 @@ public class NsiteWebViewPlugin extends Plugin {
         return night == Configuration.UI_MODE_NIGHT_YES;
     }
 
-    /**
-     * Draw the clock and the gesture pill for whatever is behind them.
-     *
-     * This is the other half of {@code theme-color}, and the half that has been
-     * missing: a page declares the colour of the chrome beside it, and the
-     * browser picks the foreground that can be read on it. Chrome does this for
-     * its toolbar and for an installed web app's status bar, and a site in its
-     * own window here is in exactly that position — Tenna has no bar of its own
-     * over the site to be the answer instead.
-     *
-     * <p>Applied whether or not the site draws under the bars. A letterboxed
-     * site has its theme colour painted behind them by the frame; an
-     * edge-to-edge one is painting there itself, and its {@code theme-color} is
-     * the only account of what it is painting.
-     *
-     * <p>A site that declares nothing gets Tenna's own bars, which is right for
-     * what it gets shown against: the letterbox it is given is black.
-     */
-    private void applyBarAppearance() {
-        WindowInsetsControllerCompat bars = insetsController();
-        if (bars == null) return;
-
-        boolean darkIcons = barColor != null && wantsDarkIcons(barColor);
-        bars.setAppearanceLightStatusBars(darkIcons);
-        bars.setAppearanceLightNavigationBars(darkIcons);
-    }
-
-    /**
-     * Put the bars back to Tenna's own, which are white on a dark app.
-     *
-     * For the shutoff, which plays over the channel wall, and for the
-     * permission prompts, which are drawn by React underneath the site.
-     */
-    private void restoreBarAppearance() {
-        WindowInsetsControllerCompat bars = insetsController();
-        if (bars == null) return;
-
-        bars.setAppearanceLightStatusBars(false);
-        bars.setAppearanceLightNavigationBars(false);
-    }
-
-    @Nullable
-    private WindowInsetsControllerCompat insetsController() {
-        Activity activity = getActivity();
-        if (activity == null) return null;
-        Window window = activity.getWindow();
-        if (window == null) return null;
-        return WindowCompat.getInsetsController(window, window.getDecorView());
-    }
-
-    /**
-     * Whether black icons read better than white ones on a given colour.
-     *
-     * Contrast rather than a luminance threshold, because a threshold is only
-     * ever standing in for this question. A colour with any transparency in it
-     * is composited over black first — that is what is behind it either way,
-     * the letterbox having started there.
-     */
-    private static boolean wantsDarkIcons(int color) {
-        int opaque = ColorUtils.compositeColors(color, Color.BLACK);
-        return ColorUtils.calculateContrast(Color.BLACK, opaque)
-            >= ColorUtils.calculateContrast(Color.WHITE, opaque);
-    }
-
     @PluginMethod
     public void close(PluginCall call) {
         getActivity().runOnUiThread(() -> {
@@ -463,8 +398,9 @@ public class NsiteWebViewPlugin extends Plugin {
 
             // The picture is leaving, and what it collapses onto is Tenna's.
             // Waiting for the view to be destroyed would leave the site's bars
-            // over half a second of somebody else's screen.
-            restoreBarAppearance();
+            // over half a second of somebody else's screen — and the shutoff
+            // is half a second of pixels that are no longer the site's.
+            if (barAppearance != null) barAppearance.suspend();
 
             // Approximates the `crt-off` keyframes the React layer uses: the
             // picture collapses to a line, then to a point, then goes out.
@@ -524,8 +460,10 @@ public class NsiteWebViewPlugin extends Plugin {
             }
             // The bars belong to whatever is on screen. While the prompt is up
             // that is React's, which is dark; afterwards it is the site again.
-            if (concealed) restoreBarAppearance();
-            else applyBarAppearance();
+            if (barAppearance != null) {
+                if (concealed) barAppearance.suspend();
+                else barAppearance.resume();
+            }
             call.resolve();
         });
     }
@@ -540,19 +478,19 @@ public class NsiteWebViewPlugin extends Plugin {
         ViewGroup frame = container;
         NsiteFileServer server = fileServer;
         String served = host;
+        NsiteBarAppearance bars = barAppearance;
         webView = null;
         container = null;
         fileServer = null;
         replyProxy = null;
         host = null;
+        barAppearance = null;
         shuttingDown = false;
 
         // Nothing of the site's outlives it, the bars included. `close` has
-        // usually done this already; the paths that skip the shutoff have not.
-        if (barColor != null) {
-            barColor = null;
-            restoreBarAppearance();
-        }
+        // usually given them back already; the paths that skip the shutoff
+        // have not, and the draw listener has to come off the view either way.
+        if (bars != null) bars.release();
 
         if (server != null && served != null) NsiteFileServers.unregister(served, server);
 
@@ -645,6 +583,9 @@ public class NsiteWebViewPlugin extends Plugin {
                 // picture, not before it.
                 ViewGroup frame = container;
                 if (frame != null) frame.animate().alpha(1f).setDuration(600).start();
+                // There are pixels now, so what the site said about its colour
+                // stops being the only thing to go on.
+                if (barAppearance != null) barAppearance.watch();
             }
         });
     }

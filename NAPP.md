@@ -287,7 +287,7 @@ Three answers, in order:
    `"purpose": "monochrome"`. Read when the site is opened from the channel
    wall, and kept, so it is there for a notification that arrives with the site
    closed.
-3. **Tenna's own television**, for a site that publishes neither.
+3. **Tenna's own sun**, for a site that publishes neither.
 
 ```json
 {

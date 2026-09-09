@@ -35,6 +35,7 @@ yarn.lock
 /public/apple-touch-icon.png
 /public/icons/
 /android/app/src/main/res/mipmap-*/ic_launcher*.png
+/android/app/src/main/res/drawable-*/ic_stat_napp.png
 /android/app/src/main/res/values/ic_launcher_background.xml
 /ios/App/App/Assets.xcassets/AppIcon.appiconset/AppIcon-512@2x.png
 

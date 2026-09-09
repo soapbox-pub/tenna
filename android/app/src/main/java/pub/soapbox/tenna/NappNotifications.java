@@ -566,8 +566,8 @@ final class NappNotifications {
      * The site's own mark in the status bar, or Tenna's where it has none.
      *
      * The notification's {@code badge} first, then the monochrome icon the
-     * site declares in its web app manifest, then the television. A badge
-     * still being fetched shows the next one down and arrives on the repost.
+     * site declares in its web app manifest, then Tenna's sun. A badge still
+     * being fetched shows the next one down and arrives on the repost.
      */
     private static void smallIcon(
         NotificationCompat.Builder builder,

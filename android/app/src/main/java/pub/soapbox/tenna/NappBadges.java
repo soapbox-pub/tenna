@@ -16,8 +16,7 @@ import androidx.core.graphics.drawable.IconCompat;
  * itself, such as a device's notification bar". That is Android's small icon
  * exactly, and it is the one place a site can put its own mark on the system
  * rather than borrowing Tenna's. Every notification used to wear
- * {@code ic_stat_napp}, so a shade with three sites in it was three
- * televisions.
+ * {@code ic_stat_napp}, so a shade with three sites in it was three suns.
  *
  * Three answers, in order:
  *

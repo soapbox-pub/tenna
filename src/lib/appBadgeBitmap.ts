@@ -7,9 +7,9 @@ import { resolveIcon, type IconCandidate, type NsiteApp } from '@/hooks/useNsite
  * all the artwork contributes is a shape. The web app manifest has a
  * declaration for exactly that — `purpose: "monochrome"` — and it is the only
  * artwork a site publishes that is drawn to be one, so it is the only artwork
- * used here. A site that declares none keeps Tenna's television, which is
- * honest: better a mark that says "some site" than a full-colour tile
- * flattened into a smudge.
+ * used here. A site that declares none keeps Tenna's sun, which is honest:
+ * better a mark that says "some site" than a full-colour tile flattened into
+ * a smudge.
  *
  * What comes back is the shape and its alpha, at a size worth downscaling
  * from. The white is painted on natively, at the density of the screen the

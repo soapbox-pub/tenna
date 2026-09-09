@@ -52,6 +52,15 @@ const BACKGROUND = "#150609";
  * `legacy` and `round` are 48dp icons drawn whole — no mask, so the only
  * question is how much air looks right — and `touch` is what iOS puts behind
  * its own rounded rect, which crops far less than a circle does.
+ *
+ * `status` is the notification icon, and it is a keyline rather than a mask:
+ * nothing crops a 24dp status bar icon, but everything beside it is a system
+ * icon drawn to Material's keylines, and a mark that ignores them is the one
+ * that looks wrong in the row. 20dp is the circle keyline, which is the one a
+ * ten-rayed sun is measured by — its tips describe a circle, whatever the
+ * decagon between them does. No step further in this time: the step the
+ * launcher gets is for tips pressing against a mask, and there is no mask
+ * here.
  */
 const ART = {
   adaptive: 60 / 108,
@@ -59,6 +68,7 @@ const ART = {
   legacy: 0.74,
   round: 0.66,
   touch: 0.76,
+  status: 20 / 24,
 };
 
 /** Android density buckets, and the multiplier each one applies to a dp. */
@@ -71,6 +81,7 @@ const DENSITIES = [
 ];
 
 const MIPMAP = "android/app/src/main/res/mipmap";
+const DRAWABLE = "android/app/src/main/res/drawable";
 const IOS_APPICON = "ios/App/App/Assets.xcassets/AppIcon.appiconset";
 
 const TRANSPARENT = { r: 0, g: 0, b: 0, alpha: 0 };
@@ -138,12 +149,14 @@ async function disc(art, canvas, fraction) {
 }
 
 /**
- * Which of the logo's colours are drawn in the themed icon, and which are
- * holes punched through it.
+ * Which of the logo's colours are drawn in the one-bit icons, and which are
+ * holes punched through them.
  *
  * Android 13's launcher throws the colour away and tints what is left with
  * the user's wallpaper, so a themed icon is a one-bit drawing and has to be
- * designed as one rather than derived. Reducing the artwork by some rule
+ * designed as one rather than derived. The status bar does the same to a
+ * notification icon and has been doing it far longer, so both are drawn from
+ * this one stencil. Reducing the artwork by some rule
  * about brightness gets a silhouette, but the rule decides where the holes
  * fall, and here it fell in the wrong place: the pupil and the iris came out
  * as one solid hub inside a thin ring, which is a gear and not an eye.
@@ -196,8 +209,19 @@ async function stencil() {
   return Object.entries(MONO).reduce((svg, [from, to]) => svg.replaceAll(from, to), source);
 }
 
-/** The stencil as an alpha channel, which is all a themed icon really is. */
-async function monochrome(art, canvas, fraction) {
+/**
+ * The stencil as an alpha channel over a flat colour, which is all a one-bit
+ * icon really is.
+ *
+ * `colour` shows through only where nothing tints it, which for a themed
+ * launcher icon is nowhere — black is the convention there and it never gets
+ * drawn. A notification icon is tinted too, on every Android this app runs
+ * on, but the shape is laid down white anyway: it is what the standard asks a
+ * badge to be, it is what {@code NappImages.stencil} paints a site's own mark,
+ * and a stencil that is only white because something tinted it is one bad
+ * assumption away from being a black hole in a black status bar.
+ */
+async function flat(art, canvas, fraction, colour) {
   const shape = await sun(art, canvas, fraction);
 
   // Flattening onto black turns both kinds of nothing — the holes, which are
@@ -207,7 +231,7 @@ async function monochrome(art, canvas, fraction) {
     .toColourspace("b-w")
     .toBuffer();
 
-  return sharp({ create: { width: canvas, height: canvas, channels: 3, background: "#000000" } })
+  return sharp({ create: { width: canvas, height: canvas, channels: 3, background: colour } })
     .joinChannel(alpha)
     .png()
     .toBuffer();
@@ -283,6 +307,7 @@ async function outputs() {
       `${MIPMAP}-${density}/ic_launcher_round.png`,
       `${MIPMAP}-${density}/ic_launcher_foreground.png`,
       `${MIPMAP}-${density}/ic_launcher_monochrome.png`,
+      `${DRAWABLE}-${density}/ic_stat_napp.png`,
     );
   }
 
@@ -350,10 +375,18 @@ async function main() {
   // The adaptive layers are drawn on the 108dp canvas the launcher masks; the
   // legacy pair are 48dp icons drawn whole, which is why they carry their own
   // background and their own rounding.
+  //
+  // `ic_stat_napp` is the mark a notification wears when the site it came from
+  // has none of its own, and it is a bitmap rather than the vector it used to
+  // be for the same reason everything else here is generated: the sun's
+  // silhouette comes from a wide stroke around a compound shape, which no
+  // amount of `<path>` in a VectorDrawable expresses without redrawing the
+  // logo by hand — and a second copy of the logo is a copy that goes stale.
 
   for (const [density, scale] of DENSITIES) {
     const adaptive = Math.round(108 * scale);
     const legacy = Math.round(48 * scale);
+    const status = Math.round(24 * scale);
 
     written.push(
       await emit(
@@ -362,10 +395,14 @@ async function main() {
       ),
       await emit(
         `${MIPMAP}-${density}/ic_launcher_monochrome.png`,
-        await monochrome(stamp, adaptive, ART.adaptive),
+        await flat(stamp, adaptive, ART.adaptive, "#000000"),
       ),
       await emit(`${MIPMAP}-${density}/ic_launcher.png`, await tile(art, legacy, ART.legacy)),
       await emit(`${MIPMAP}-${density}/ic_launcher_round.png`, await disc(art, legacy, ART.round)),
+      await emit(
+        `${DRAWABLE}-${density}/ic_stat_napp.png`,
+        await flat(stamp, status, ART.status, "#ffffff"),
+      ),
     );
   }
 

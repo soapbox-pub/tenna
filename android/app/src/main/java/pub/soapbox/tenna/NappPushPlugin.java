@@ -108,6 +108,56 @@ public class NappPushPlugin extends Plugin {
     }
 
     /**
+     * Turn a site's notifications off, or back on.
+     *
+     * The user's answer rather than the site's, so it is kept away from the
+     * subscriptions a site replaces at will and outlives them — see
+     * {@link NappMuted}. Turning them off takes down whatever the site has in
+     * the shade and drops the relays that were being held open for it; turning
+     * them back on brings those relays up again, against the subscriptions the
+     * site set before it was muted — starting from now, not from where they
+     * left off.
+     */
+    @PluginMethod
+    public void setMuted(PluginCall call) {
+        String siteId = call.getString("siteId");
+        Boolean muted = call.getBoolean("muted");
+
+        if (siteId == null || muted == null) {
+            call.reject("siteId and muted are required");
+            return;
+        }
+
+        NappMuted.set(getContext(), siteId, muted);
+
+        if (muted) {
+            NappNotifications.cancelAll(getContext(), siteId);
+        } else {
+            // Coming back to the present rather than to wherever the site's
+            // subscriptions last got to. See NappSubscriptions#skipToNow.
+            NappSubscriptions.skipToNow(getContext(), siteId);
+        }
+
+        NappPushService.sync(getContext());
+
+        call.resolve();
+    }
+
+    /** Whether the user has turned a site's notifications off. */
+    @PluginMethod
+    public void getMuted(PluginCall call) {
+        String siteId = call.getString("siteId");
+        if (siteId == null) {
+            call.reject("siteId is required");
+            return;
+        }
+
+        JSObject result = new JSObject();
+        result.put("muted", NappMuted.isMuted(getContext(), siteId));
+        call.resolve(result);
+    }
+
+    /**
      * Ask for the OS notification permission, if the OS has one to ask for.
      *
      * Before Android 13 notifications need no permission; there, and when

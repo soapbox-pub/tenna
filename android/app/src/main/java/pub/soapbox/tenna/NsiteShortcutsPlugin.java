@@ -563,6 +563,10 @@ public class NsiteShortcutsPlugin extends Plugin {
             Collections.singletonList(NsiteSites.key(siteId))
         );
         NappNotifications.cancelAll(context, siteId);
+        // An answer about a site nothing is left of. Kept any longer it would
+        // silence the site were it ever put back, months later, with nothing
+        // on screen to say why.
+        NappMuted.forget(context, siteId);
     }
 
     /**

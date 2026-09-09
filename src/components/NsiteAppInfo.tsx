@@ -14,7 +14,9 @@ import {
   DialogContent,
   DialogTitle,
 } from '@/components/ui/dialog';
+import { Label } from '@/components/ui/label';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Switch } from '@/components/ui/switch';
 import { useAuthor } from '@/hooks/useAuthor';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useNsiteAllowance } from '@/hooks/useNsiteAllowance';
@@ -22,7 +24,7 @@ import { useNsiteBrowserAllowance } from '@/hooks/useNsiteBrowserAllowance';
 import type { NsiteApp } from '@/hooks/useNsiteApp';
 import type { UseNsitePinResult } from '@/hooks/useNsitePin';
 import { useToast } from '@/hooks/useToast';
-import { impactMedium, notificationError } from '@/lib/haptics';
+import { impactLight, impactMedium, notificationError } from '@/lib/haptics';
 import { NappPush, supportsNappPush } from '@/lib/nappPushPlugin';
 import { NativeApps, supportsNativeApps } from '@/lib/nativeAppsPlugin';
 import {
@@ -343,6 +345,57 @@ export function NsiteAppInfo({
     });
   };
 
+  /**
+   * Whether the user wants to hear from this site at all.
+   *
+   * A different question from the site's permission to send, and asked the
+   * other way round: the permission is off until the site asks and is
+   * granted, and this is on until somebody turns it off. So a site that has
+   * never sent a notification still has a switch here, already on, and
+   * turning it off now settles the matter before the site ever asks.
+   *
+   * The answer lives on the native side, where the listening is done — see
+   * `NappMuted`. Undefined until it has been read, and drawn as a gap the
+   * size of the switch rather than as a switch that flicks itself over a
+   * moment after the screen opens.
+   */
+  const notifiable = supportsNappPush();
+  const [muted, setMuted] = useState<boolean>();
+
+  useEffect(() => {
+    if (!notifiable) return;
+    let disposed = false;
+
+    NappPush.getMuted({ siteId })
+      .then((result) => {
+        if (!disposed) setMuted(result.muted);
+      })
+      .catch(() => {
+        // Nothing stored, or nothing to ask. On is the answer either way.
+        if (!disposed) setMuted(false);
+      });
+
+    return () => {
+      disposed = true;
+    };
+  }, [notifiable, siteId]);
+
+  const handleNotifications = (enabled: boolean) => {
+    const previous = muted;
+    impactLight();
+    setMuted(!enabled);
+
+    NappPush.setMuted({ siteId, muted: !enabled }).catch(() => {
+      setMuted(previous);
+      notificationError();
+      toast({
+        title: 'Could not change that',
+        description: 'Notifications are as they were.',
+        variant: 'destructive',
+      });
+    });
+  };
+
   const handleRemove = (perm: NsitePermission) => {
     if (!user) return;
     removeNsitePermission(siteId, user.pubkey, perm.type, perm.kind);
@@ -520,6 +573,44 @@ export function NsiteAppInfo({
         </div>
 
         <div className="flex flex-col gap-2 px-4 pb-safe-offset-8">
+          {/* Above the permissions, as it is on the screen this imitates, and
+              for the same reason: it is the one thing on the page a person
+              might have come here to change. */}
+          {notifiable && (
+            <section className="rounded-2xl bg-white/[0.06] px-5 py-4">
+              <div className="flex min-h-9 items-center justify-between gap-4">
+                <Label
+                  htmlFor="nsite-notifications"
+                  className="min-w-0 text-lg font-medium text-white"
+                >
+                  Notifications
+                </Label>
+
+                {muted === undefined ? (
+                  <Skeleton
+                    aria-hidden="true"
+                    className="h-7 w-12 shrink-0 rounded-full bg-white/10"
+                  />
+                ) : (
+                  <Switch
+                    id="nsite-notifications"
+                    checked={!muted}
+                    onCheckedChange={handleNotifications}
+                    className={cn(
+                      'h-7 w-12 shrink-0',
+                      'data-[state=checked]:bg-[#FEF960] data-[state=unchecked]:bg-white/20',
+                      'focus-visible:border-transparent focus-visible:ring-2 focus-visible:ring-[#FEF960] focus-visible:ring-offset-2 focus-visible:ring-offset-[#1B080C]',
+                      // The thumb is the page's own background rather than the
+                      // theme's, since this screen is one colour whatever the
+                      // theme says — and white on the yellow would not read.
+                      '[&_[data-slot=switch-thumb]]:size-6! [&_[data-slot=switch-thumb]]:bg-[#1B080C]!',
+                    )}
+                  />
+                )}
+              </div>
+            </section>
+          )}
+
           <section className="rounded-2xl bg-white/[0.06] px-5 py-4">
             <div className="flex min-h-9 items-center justify-between gap-3">
               <h3 className="text-lg font-medium text-white">Permissions</h3>

@@ -25,6 +25,20 @@ export interface NappPushPlugin {
   get(options: { siteId: string }): Promise<{ subscriptions: string }>;
 
   /**
+   * Turn a site's notifications off, or back on.
+   *
+   * The user's answer, not the site's: it is kept apart from the
+   * subscriptions a site replaces at will, and outlives them. Muting takes
+   * down whatever the site has in the shade and drops the relays held open
+   * for it; unmuting brings them back up against the subscriptions the site
+   * had already set.
+   */
+  setMuted(options: { siteId: string; muted: boolean }): Promise<void>;
+
+  /** Whether the user has turned a site's notifications off. */
+  getMuted(options: { siteId: string }): Promise<{ muted: boolean }>;
+
+  /**
    * Ask the OS for permission to post notifications.
    *
    * Resolves at once where none is needed or it was already given. `granted`

@@ -191,6 +191,15 @@ final class NappNotifications {
             return false;
         }
 
+        // Nothing should be listening for a muted site in the first place, but
+        // a worker is woken for other reasons too — a tap on an older
+        // notification, say — and anything it posts from there is still a
+        // notification the user said they did not want.
+        if (NappMuted.isMuted(context, siteId)) {
+            Log.i(TAG, "Notifications are off for " + siteId + "; dropping one");
+            return false;
+        }
+
         NsiteSites.Record record = NsiteSites.load(context, siteId);
         if (record == null) {
             Log.i(TAG, "No record for " + siteId + "; dropping its notification");

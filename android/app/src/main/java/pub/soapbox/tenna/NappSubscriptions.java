@@ -87,6 +87,15 @@ final class NappSubscriptions {
         return fileFor(context, siteId).exists();
     }
 
+    /**
+     * Every site there is something to listen for on behalf of.
+     *
+     * Sites the user has muted are left out rather than listened to and
+     * dropped later: a relay held open for notifications nobody will see is
+     * the phone's battery spent on nothing. Their records stay on disk, so
+     * turning notifications back on picks up where they were — see
+     * {@link NappMuted}.
+     */
     @NonNull
     static List<Record> all(@NonNull Context context) {
         List<Record> records = new ArrayList<>();
@@ -94,7 +103,9 @@ final class NappSubscriptions {
         if (files == null) return records;
         for (File file : files) {
             Record record = read(file);
-            if (record != null && record.subscriptions.length() > 0) records.add(record);
+            if (record == null || record.subscriptions.length() == 0) continue;
+            if (NappMuted.isMuted(context, record.siteId)) continue;
+            records.add(record);
         }
         return records;
     }
@@ -178,6 +189,38 @@ final class NappSubscriptions {
         } catch (IOException | JSONException ignored) {
             // The floor stays where it was; the dedupe in the service covers
             // the repeat.
+        }
+    }
+
+    /**
+     * Treat everything up to now as already delivered, for every one of a
+     * site's subscriptions.
+     *
+     * For a site whose notifications are being turned back on. The floor a
+     * subscription resumes from is where it last got to, and a site muted for
+     * a week would otherwise come back with a week of relay history behind it
+     * — which the user would meet as a week of notifications arriving at once,
+     * about things they had said they did not want to hear about.
+     */
+    static synchronized void skipToNow(@NonNull Context context, @NonNull String siteId) {
+        File file = fileFor(context, siteId);
+        Record record = read(file);
+        if (record == null) return;
+
+        long now = System.currentTimeMillis() / 1000;
+
+        try {
+            JSONObject json = new JSONObject(new String(readFully(file), StandardCharsets.UTF_8));
+            JSONObject seen = json.optJSONObject("seen");
+            if (seen == null) seen = new JSONObject();
+            for (int i = 0; i < record.subscriptions.length(); i++) {
+                seen.put(String.valueOf(i), Math.max(now, record.seenAt(i)));
+            }
+            json.put("seen", seen);
+            write(file, json.toString().getBytes(StandardCharsets.UTF_8));
+        } catch (IOException | JSONException ignored) {
+            // The floors stay where they were, and the site comes back with
+            // whatever the relays still hold. Worth no more than that.
         }
     }
 

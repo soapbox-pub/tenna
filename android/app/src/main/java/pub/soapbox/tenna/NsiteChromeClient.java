@@ -8,6 +8,7 @@ import android.net.Uri;
 import android.provider.MediaStore;
 import android.util.Log;
 import android.util.TypedValue;
+import android.view.View;
 import android.view.ViewGroup;
 import android.webkit.JsPromptResult;
 import android.webkit.JsResult;
@@ -87,11 +88,24 @@ final class NsiteChromeClient extends WebChromeClient {
         void handle(int resultCode, @Nullable Intent data);
     }
 
+    /**
+     * Where a site's fullscreen video goes, and where it comes back from.
+     *
+     * The view itself is Chromium's; all that is asked here is somewhere to
+     * put it. Which frame that is matters — see {@link #onShowCustomView} —
+     * and the frame belongs to the plugin, so it answers this.
+     */
+    interface Stage {
+        /** Show {@code view} over the site, or take away whatever is there. */
+        void present(@Nullable View view);
+    }
+
     /** Room around the field in a `prompt`, in dp. */
     private static final int PROMPT_PADDING_DP = 20;
 
     private final Activity activity;
     private final Launcher launcher;
+    private final Stage stage;
 
     /** What the site is called, for the dialogs it opens. */
     @Nullable private final String siteName;
@@ -105,14 +119,19 @@ final class NsiteChromeClient extends WebChromeClient {
     /** What that dialog answers with if it leaves the screen unanswered. */
     @Nullable private Runnable refusal;
 
+    /** How to give a fullscreen view back, or null when nothing is up. */
+    @Nullable private CustomViewCallback fullscreen;
+
     NsiteChromeClient(
         @NonNull Activity activity,
         @Nullable String siteName,
-        @NonNull Launcher launcher
+        @NonNull Launcher launcher,
+        @NonNull Stage stage
     ) {
         this.activity = activity;
         this.siteName = siteName;
         this.launcher = launcher;
+        this.stage = stage;
     }
 
     /**
@@ -123,10 +142,14 @@ final class NsiteChromeClient extends WebChromeClient {
      * nobody's; answering now is what keeps that from being a leak. A dialog
      * has to come down for a plainer reason besides — a window left on screen
      * after the activity it belongs to is gone is a leak the system reports.
+     *
+     * Called before the frame and the system bars are given back, so that a
+     * site closed mid-video is a site that returns them.
      */
     void release() {
         answer(null);
         dismiss();
+        onHideCustomView();
     }
 
     // -----------------------------------------------------------------------
@@ -327,6 +350,40 @@ final class NsiteChromeClient extends WebChromeClient {
         ValueCallback<Uri[]> callback = pending;
         pending = null;
         if (callback != null) callback.onReceiveValue(files);
+    }
+
+    // -----------------------------------------------------------------------
+    // Fullscreen
+    // -----------------------------------------------------------------------
+
+    /**
+     * Take a site's video fullscreen.
+     *
+     * The view Chromium hands over goes into the site's own frame, not the
+     * activity's content view. The frame is what a permission prompt conceals,
+     * what the shutoff animates and what the window is torn down with, and a
+     * video outside it would survive all three — which is how Capacitor's own
+     * chrome client behaves, and is wrong here for the same reason the rest of
+     * this class is not Capacitor's.
+     */
+    @Override
+    public void onShowCustomView(View view, CustomViewCallback callback) {
+        // Chromium doesn't nest these, but if it ever did the earlier view is
+        // the stale one and has to be given back rather than stranded.
+        if (fullscreen != null) onHideCustomView();
+
+        fullscreen = callback;
+        stage.present(view);
+    }
+
+    @Override
+    public void onHideCustomView() {
+        CustomViewCallback callback = fullscreen;
+        fullscreen = null;
+
+        stage.present(null);
+        // Last, because it lets Chromium free the view that was just removed.
+        if (callback != null) callback.onCustomViewHidden();
     }
 
     // -----------------------------------------------------------------------

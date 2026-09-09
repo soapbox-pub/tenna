@@ -14,6 +14,7 @@ import android.util.Log;
 import android.util.TypedValue;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.Window;
 import android.webkit.WebResourceError;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebResourceResponse;
@@ -28,7 +29,9 @@ import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.core.graphics.Insets;
 import androidx.core.view.ViewCompat;
+import androidx.core.view.WindowCompat;
 import androidx.core.view.WindowInsetsCompat;
+import androidx.core.view.WindowInsetsControllerCompat;
 import androidx.webkit.JavaScriptReplyProxy;
 import androidx.webkit.WebMessageCompat;
 import androidx.webkit.WebViewCompat;
@@ -122,6 +125,9 @@ public class NsiteWebViewPlugin extends Plugin {
 
     /** Who is waiting on the activity that launcher started. */
     @Nullable private NsiteChromeClient.ResultHandler activityResult;
+
+    /** The site's fullscreen video, while one is up. See {@link #presentFullscreen}. */
+    @Nullable private View fullscreenView;
 
     /**
      * Where the system bars and the cutout are, in pixels.
@@ -423,6 +429,66 @@ public class NsiteWebViewPlugin extends Plugin {
         }
     }
 
+    /**
+     * Put a site's fullscreen video over it, or take it away again.
+     *
+     * Into the site's own frame rather than the activity's content view, so
+     * that it is concealed by the same prompt, animated by the same shutoff
+     * and destroyed with the same window as the site under it. The site is
+     * hidden while it is up: the video is opaque and covers it anyway, and a
+     * page still painting behind one is work nobody sees.
+     *
+     * The system bars go with it. A video filling the screen is the one thing
+     * a site puts up that the clock has no business sitting on, and the
+     * appearance machinery is suspended for as long — there is nothing to read
+     * a contrast against, and a revealed bar over a letterbox wants Tenna's
+     * own icons anyway.
+     */
+    private void presentFullscreen(@Nullable View view) {
+        ViewGroup frame = container;
+
+        if (fullscreenView != null && frame != null) frame.removeView(fullscreenView);
+        fullscreenView = view;
+
+        if (view != null && frame != null) {
+            frame.addView(view, new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT
+            ));
+        }
+
+        if (webView != null) {
+            webView.setVisibility(view != null ? View.INVISIBLE : View.VISIBLE);
+        }
+
+        if (barAppearance != null) {
+            if (view != null) barAppearance.suspend();
+            else barAppearance.resume();
+        }
+
+        setSystemBarsHidden(view != null);
+    }
+
+    /**
+     * Take the system bars away for a fullscreen video, or give them back.
+     *
+     * Hidden by swipe rather than for good: a video with no way to reach the
+     * clock or the back gesture is a video the user is stuck in.
+     */
+    private void setSystemBarsHidden(boolean hidden) {
+        Window window = getActivity().getWindow();
+        WindowInsetsControllerCompat controller =
+            WindowCompat.getInsetsController(window, window.getDecorView());
+
+        if (hidden) {
+            controller.setSystemBarsBehavior(
+                WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
+            controller.hide(WindowInsetsCompat.Type.systemBars());
+        } else {
+            controller.show(WindowInsetsCompat.Type.systemBars());
+        }
+    }
+
     /** Take what the site's document asked for, once it has been read. */
     private void applySiteChrome(NsiteSiteChrome siteChrome) {
         edgeToEdge = siteChrome.edgeToEdge;
@@ -517,6 +583,18 @@ public class NsiteWebViewPlugin extends Plugin {
         getActivity().runOnUiThread(() -> {
             JSObject result = new JSObject();
 
+            // A fullscreen video is what back means while one is up, even
+            // though it is not a history entry. Leaving it to `canGoBack`
+            // would close the whole window from under a video on a site with
+            // nowhere else to go.
+            NsiteChromeClient chrome = chromeClient;
+            if (fullscreenView != null && chrome != null) {
+                chrome.onHideCustomView();
+                result.put("moved", true);
+                call.resolve(result);
+                return;
+            }
+
             WebView view = webView;
             boolean moved = view != null && view.canGoBack();
             if (moved) view.goBack();
@@ -555,9 +633,11 @@ public class NsiteWebViewPlugin extends Plugin {
     }
 
     private void destroyWebView() {
-        // First, before anything else is taken apart: a window closed with a
-        // picker still up leaves Chromium blocked on a chooser nobody will
-        // ever answer. See NsiteChromeClient.
+        // First, and while the frame and the bars are still here to give back:
+        // anything the site left open is taken down and answered. A window
+        // closed with a picker up otherwise leaves Chromium blocked on a
+        // chooser nobody will reply to, and one closed mid-video leaves the
+        // system bars hidden over whatever comes next. See NsiteChromeClient.
         NsiteChromeClient chrome = chromeClient;
         chromeClient = null;
         if (chrome != null) chrome.release();
@@ -574,6 +654,7 @@ public class NsiteWebViewPlugin extends Plugin {
         host = null;
         siteName = null;
         barAppearance = null;
+        fullscreenView = null;
         shuttingDown = false;
 
         // Nothing of the site's outlives it, the bars included. `close` has
@@ -634,7 +715,7 @@ public class NsiteWebViewPlugin extends Plugin {
         // file chooser — it drops the request on the floor, which is a site
         // whose upload button does nothing when it is pressed.
         NsiteChromeClient chrome = new NsiteChromeClient(
-            getActivity(), siteName, this::startForResult);
+            getActivity(), siteName, this::startForResult, this::presentFullscreen);
         chromeClient = chrome;
         view.setWebChromeClient(chrome);
 

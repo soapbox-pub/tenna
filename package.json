@@ -4,9 +4,10 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "npm i --silent && vite",
-    "build": "npm i --silent && vite build -l error && cp dist/index.html dist/404.html && echo 'Project built successfully!'",
-    "test": "npm i --silent && tsc --noEmit && eslint --cache && vitest run --reporter=dot --silent && vite build -l error && cp dist/index.html dist/404.html && echo 'All tests passed!'"
+    "dev": "npm i --silent && npm run -s icons && vite",
+    "build": "npm i --silent && npm run -s icons && vite build -l error && cp dist/index.html dist/404.html && echo 'Project built successfully!'",
+    "test": "npm i --silent && npm run -s icons && tsc --noEmit && eslint --cache && vitest run --reporter=dot --silent && vite build -l error && cp dist/index.html dist/404.html && echo 'All tests passed!'",
+    "icons": "node scripts/generate-icons.mjs"
   },
   "dependencies": {
     "@capacitor/app": "^8.1.1",
@@ -68,6 +69,7 @@
     "fake-indexeddb": "^6.2.5",
     "globals": "^17.5.0",
     "jsdom": "^29.1.0",
+    "sharp": "^0.35.4",
     "tailwindcss": "^4.2.4",
     "tailwindcss-safe-area": "^1.3.0",
     "typescript": "^6.0.3",

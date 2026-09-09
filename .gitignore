@@ -29,6 +29,15 @@ yarn.lock
 # Vercel
 .vercel
 
+# Icons, rasterised from public/logo.svg by `npm run icons`. The SVG is the
+# source; these are build output, and the build makes them before it needs them.
+/public/favicon.ico
+/public/apple-touch-icon.png
+/public/icons/
+/android/app/src/main/res/mipmap-*/ic_launcher*.png
+/android/app/src/main/res/values/ic_launcher_background.xml
+/ios/App/App/Assets.xcassets/AppIcon.appiconset/AppIcon-512@2x.png
+
 # Secrets
 .env
 .env.*

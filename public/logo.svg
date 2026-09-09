@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="-512 -512 1024 1024" width="1024" height="1024">
+  <title>Tenna sun logo</title>
+  <defs>
+    <!-- Knobbed ray: tapered spoke ending in a round bulb. Points straight up. -->
+    <g id="knob-ray">
+      <path d="M-40-222L-10-378L10-378L40-222Z"/>
+      <circle cy="-378" r="42"/>
+    </g>
+    <!-- Plain ray: tapered spike with a rounded tip. -->
+    <path id="spike-ray" d="M-34-222L-14-373A14 14 0 0 1 14-373L34-222Z"/>
+    <!-- Body disc plus ten rays at 36 degree spacing, alternating knobbed and plain. -->
+    <g id="sun">
+      <circle r="240"/>
+      <use xlink:href="#knob-ray"/>
+      <use xlink:href="#spike-ray" transform="rotate(36)"/>
+      <use xlink:href="#knob-ray" transform="rotate(72)"/>
+      <use xlink:href="#spike-ray" transform="rotate(108)"/>
+      <use xlink:href="#knob-ray" transform="rotate(144)"/>
+      <use xlink:href="#spike-ray" transform="rotate(180)"/>
+      <use xlink:href="#knob-ray" transform="rotate(216)"/>
+      <use xlink:href="#spike-ray" transform="rotate(252)"/>
+      <use xlink:href="#knob-ray" transform="rotate(288)"/>
+      <use xlink:href="#spike-ray" transform="rotate(324)"/>
+    </g>
+  </defs>
+  <!-- Dark red outline: the same silhouette, expanded by a wide stroke. -->
+  <use xlink:href="#sun" fill="#ac0d09" stroke="#ac0d09" stroke-width="46" stroke-linejoin="round"/>
+  <!-- Yellow fill. -->
+  <use xlink:href="#sun" fill="#febf14"/>
+  <!-- Concentric center. -->
+  <circle r="190" fill="#c81615"/>
+  <circle r="142" fill="#fefdfd"/>
+  <circle r="96" fill="#fecf07"/>
+  <circle r="45" fill="#900301"/>
+</svg>

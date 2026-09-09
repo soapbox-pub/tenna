@@ -3,7 +3,9 @@ package pub.soapbox.tenna;
 import android.animation.Animator;
 import android.animation.AnimatorListenerAdapter;
 import android.annotation.SuppressLint;
+import android.content.ActivityNotFoundException;
 import android.content.Context;
+import android.content.Intent;
 import android.content.pm.ApplicationInfo;
 import android.content.res.Configuration;
 import android.graphics.Color;
@@ -20,6 +22,8 @@ import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.FrameLayout;
 
+import androidx.activity.result.ActivityResultLauncher;
+import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.core.graphics.Insets;
@@ -99,6 +103,18 @@ public class NsiteWebViewPlugin extends Plugin {
     @Nullable private String host;
 
     /**
+     * Everything the site's window needs that isn't its own bytes: the file
+     * chooser, and whatever else {@link NsiteChromeClient} comes to answer.
+     */
+    @Nullable private NsiteChromeClient chromeClient;
+
+    /** How an activity started for the site reaches the system. See {@link #load}. */
+    @Nullable private ActivityResultLauncher<Intent> activityLauncher;
+
+    /** Who is waiting on the activity that launcher started. */
+    @Nullable private NsiteChromeClient.ResultHandler activityResult;
+
+    /**
      * Where the system bars and the cutout are, in pixels.
      *
      * Kept because the letterbox that depends on it outlives any one inset
@@ -139,6 +155,59 @@ public class NsiteWebViewPlugin extends Plugin {
     // -----------------------------------------------------------------------
     // Lifecycle
     // -----------------------------------------------------------------------
+
+    /**
+     * Register the launcher a site's file chooser starts activities through.
+     *
+     * Here, and not where it is used, because
+     * {@code registerForActivityResult} throws once the activity it is
+     * registered against has been started — and a site is opened long after
+     * that. {@code load} is the last moment before it: Capacitor builds the
+     * bridge, and loads every plugin on it, from inside
+     * {@code BridgeActivity.onCreate}.
+     *
+     * One launcher serves every site the window ever shows. There is only ever
+     * one site up at a time, and the handler for the result travels with the
+     * intent rather than being fixed here.
+     */
+    @Override
+    public void load() {
+        activityLauncher = getBridge().registerForActivityResult(
+            new ActivityResultContracts.StartActivityForResult(),
+            result -> {
+                NsiteChromeClient.ResultHandler handler = activityResult;
+                activityResult = null;
+                if (handler != null) handler.handle(result.getResultCode(), result.getData());
+            }
+        );
+    }
+
+    /**
+     * Start an activity on the site's behalf, reporting whether anything took
+     * it.
+     *
+     * An implicit intent with nothing to answer it throws rather than
+     * returning, and asking {@code resolveActivity} first would only move the
+     * question to package visibility — this app is shown a deliberately narrow
+     * slice of the device (see the manifest's {@code <queries>}). Catching is
+     * both simpler and true whatever the reason.
+     */
+    private boolean startForResult(
+        @NonNull Intent intent,
+        @NonNull NsiteChromeClient.ResultHandler handler
+    ) {
+        ActivityResultLauncher<Intent> launcher = activityLauncher;
+        if (launcher == null) return false;
+
+        activityResult = handler;
+        try {
+            launcher.launch(intent);
+            return true;
+        } catch (ActivityNotFoundException e) {
+            activityResult = null;
+            return false;
+        }
+    }
 
     @PluginMethod
     @SuppressLint("SetJavaScriptEnabled")
@@ -436,6 +505,7 @@ public class NsiteWebViewPlugin extends Plugin {
     public void goBack(PluginCall call) {
         getActivity().runOnUiThread(() -> {
             JSObject result = new JSObject();
+
             WebView view = webView;
             boolean moved = view != null && view.canGoBack();
             if (moved) view.goBack();
@@ -474,6 +544,13 @@ public class NsiteWebViewPlugin extends Plugin {
     }
 
     private void destroyWebView() {
+        // First, before anything else is taken apart: a window closed with a
+        // picker still up leaves Chromium blocked on a chooser nobody will
+        // ever answer. See NsiteChromeClient.
+        NsiteChromeClient chrome = chromeClient;
+        chromeClient = null;
+        if (chrome != null) chrome.release();
+
         WebView view = webView;
         ViewGroup frame = container;
         NsiteFileServer server = fileServer;
@@ -540,6 +617,13 @@ public class NsiteWebViewPlugin extends Plugin {
         if (debuggable) {
             WebView.setWebContentsDebuggingEnabled(true);
         }
+
+        // Without one of these the WebView doesn't fall back to anything for a
+        // file chooser — it drops the request on the floor, which is a site
+        // whose upload button does nothing when it is pressed.
+        NsiteChromeClient chrome = new NsiteChromeClient(getActivity(), this::startForResult);
+        chromeClient = chrome;
+        view.setWebChromeClient(chrome);
 
         view.setWebViewClient(new WebViewClient() {
             @Override

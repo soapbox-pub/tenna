@@ -54,15 +54,17 @@ export function LoginArea({ className }: LoginAreaProps) {
         <AccountSwitcher onAddAccountClick={() => setAuthDialogOpen(true)} />
       ) : (
         /*
-          The wall's own yellow rather than the default surface colour — it is
-          the brightest thing on a dark screen, which is what the one way in
-          should be, and it carries enough contrast against the near-black it
-          sits on to take dark text. The focus ring is white so that it stays
-          visible against the fill rather than blending into it.
+          The theme's accent rather than a surface colour — Tenna's own is the
+          yellow of the sun in the logo, and under somebody's theme it is
+          whatever their `primary` is. Either way it is the brightest thing on
+          the screen, which is what the one way in should be, and the text on
+          it is whichever of the theme's other two colours reads there. The
+          focus ring is the ink, so it stays visible against the fill rather
+          than blending into it.
         */
         <Button
           onClick={handleJoin}
-          className="flex items-center gap-2 px-5 py-2 rounded-full bg-[#FEF960] text-[#150609] font-semibold transition-all hover:bg-[#FFFCA5] focus-visible:ring-white/80 focus-visible:border-white animate-scale-in"
+          className="flex items-center gap-2 px-5 py-2 rounded-full bg-primary text-primary-foreground font-semibold transition-all hover:brightness-110 focus-visible:ring-foreground/80 focus-visible:border-foreground animate-scale-in"
         >
           <span className="truncate">Join</span>
         </Button>

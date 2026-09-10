@@ -93,8 +93,8 @@ function Publisher({ pubkey }: { pubkey: string }) {
   if (author.isPending) {
     return (
       <div className="flex items-center gap-2" aria-hidden="true">
-        <Skeleton className="size-6 rounded-full bg-white/10" />
-        <Skeleton className="h-4 w-28 bg-white/10" />
+        <Skeleton className="size-6 rounded-full bg-foreground/10" />
+        <Skeleton className="h-4 w-28 bg-foreground/10" />
       </div>
     );
   }
@@ -105,12 +105,12 @@ function Publisher({ pubkey }: { pubkey: string }) {
     <div className="flex max-w-full items-center gap-2">
       <Avatar size="sm" className="shrink-0">
         <AvatarImage src={metadata?.picture} alt="" />
-        <AvatarFallback className="bg-white/10 text-white/80">
+        <AvatarFallback className="bg-foreground/10 text-foreground/80">
           {name.slice(0, 1).toUpperCase()}
         </AvatarFallback>
       </Avatar>
 
-      <span className="min-w-0 truncate text-base text-white/70">{name}</span>
+      <span className="min-w-0 truncate text-base text-foreground/70">{name}</span>
     </div>
   );
 }
@@ -158,11 +158,11 @@ function InfoAction({
       <span
         className={cn(
           'flex size-16 items-center justify-center rounded-full transition-colors',
-          'group-focus-visible:ring-2 group-focus-visible:ring-[#FEF960] group-focus-visible:ring-offset-2 group-focus-visible:ring-offset-[#1B080C]',
+          'group-focus-visible:ring-2 group-focus-visible:ring-primary group-focus-visible:ring-offset-2 group-focus-visible:ring-offset-card',
           destructive
-            ? 'bg-[#F96C91]/15 text-[#F96C91] group-hover:bg-[#F96C91]/25'
-            : 'bg-white/10 text-white group-hover:bg-white/15',
-          disabled && 'bg-white/5 text-white/30 group-hover:bg-white/5',
+            ? 'bg-destructive/15 text-destructive group-hover:bg-destructive/25'
+            : 'bg-foreground/10 text-foreground group-hover:bg-foreground/15',
+          disabled && 'bg-foreground/5 text-foreground/30 group-hover:bg-foreground/5',
         )}
       >
         <Icon aria-hidden={true} className="size-6" />
@@ -170,7 +170,7 @@ function InfoAction({
       <span
         className={cn(
           'whitespace-nowrap text-center text-sm font-medium leading-tight',
-          disabled ? 'text-white/40' : 'text-white/90',
+          disabled ? 'text-foreground/40' : 'text-foreground/90',
         )}
       >
         {label}
@@ -248,7 +248,7 @@ function AddressRow({
         // this.
         onPointerMove={release}
         aria-label={`Copy ${uri}`}
-        className="min-w-0 flex-1 truncate rounded-lg px-2 py-3 text-left font-mono text-xs text-white/70 outline-none transition-colors hover:bg-white/5 hover:text-white/90 focus-visible:ring-2 focus-visible:ring-[#FEF960]"
+        className="min-w-0 flex-1 truncate rounded-lg px-2 py-3 text-left font-mono text-xs text-foreground/70 outline-none transition-colors hover:bg-foreground/5 hover:text-foreground/90 focus-visible:ring-2 focus-visible:ring-primary"
       >
         {copied ? 'Copied' : middleEllipsis(uri, 34)}
       </button>
@@ -258,7 +258,7 @@ function AddressRow({
         onClick={() => onOpen(uri)}
         aria-label={`Open ${uri}`}
         title="Open"
-        className="flex size-9 shrink-0 items-center justify-center rounded-full text-white/50 outline-none transition-colors hover:bg-white/10 hover:text-white focus-visible:ring-2 focus-visible:ring-[#FEF960]"
+        className="flex size-9 shrink-0 items-center justify-center rounded-full text-foreground/50 outline-none transition-colors hover:bg-foreground/10 hover:text-foreground focus-visible:ring-2 focus-visible:ring-primary"
       >
         <ExternalLink aria-hidden="true" className="size-5" />
       </button>
@@ -495,7 +495,7 @@ export function NsiteAppInfo({
           // middle.
           'inset-0 max-h-none w-full max-w-none translate-x-0 translate-y-0 sm:max-w-none',
           'flex flex-col gap-0 overflow-y-auto overscroll-contain rounded-none border-0 p-0',
-          'bg-[#1B080C] text-white',
+          'bg-card text-card-foreground',
           // A system screen does not offer to select its own labels. Without
           // this, holding a finger anywhere on the page raises the WebView's
           // Copy/Share/Select all bar over it, which is the one thing that
@@ -508,10 +508,10 @@ export function NsiteAppInfo({
       >
         {/* Stays put while the page scrolls, so the way back is never off the
             top of a long permission list. */}
-        <header className="sticky top-0 z-10 flex items-center gap-3 bg-[#1B080C]/95 px-4 pb-3 pt-safe-offset-3 backdrop-blur">
+        <header className="sticky top-0 z-10 flex items-center gap-3 bg-card/95 px-4 pb-3 pt-safe-offset-3 backdrop-blur">
           <DialogClose
             aria-label="Back"
-            className="flex size-11 shrink-0 items-center justify-center rounded-full text-white/90 outline-none transition-colors hover:bg-white/10 focus-visible:ring-2 focus-visible:ring-[#FEF960]"
+            className="flex size-11 shrink-0 items-center justify-center rounded-full text-foreground/90 outline-none transition-colors hover:bg-foreground/10 focus-visible:ring-2 focus-visible:ring-primary"
           >
             <ArrowLeft aria-hidden="true" className="size-6" />
           </DialogClose>
@@ -577,11 +577,11 @@ export function NsiteAppInfo({
               for the same reason: it is the one thing on the page a person
               might have come here to change. */}
           {notifiable && (
-            <section className="rounded-2xl bg-white/[0.06] px-5 py-4">
+            <section className="rounded-2xl bg-foreground/[0.06] px-5 py-4">
               <div className="flex min-h-9 items-center justify-between gap-4">
                 <Label
                   htmlFor="nsite-notifications"
-                  className="min-w-0 text-lg font-medium text-white"
+                  className="min-w-0 text-lg font-medium text-foreground"
                 >
                   Notifications
                 </Label>
@@ -589,7 +589,7 @@ export function NsiteAppInfo({
                 {muted === undefined ? (
                   <Skeleton
                     aria-hidden="true"
-                    className="h-7 w-12 shrink-0 rounded-full bg-white/10"
+                    className="h-7 w-12 shrink-0 rounded-full bg-foreground/10"
                   />
                 ) : (
                   <Switch
@@ -598,12 +598,13 @@ export function NsiteAppInfo({
                     onCheckedChange={handleNotifications}
                     className={cn(
                       'h-7 w-12 shrink-0',
-                      'data-[state=checked]:bg-[#FEF960] data-[state=unchecked]:bg-white/20',
-                      'focus-visible:border-transparent focus-visible:ring-2 focus-visible:ring-[#FEF960] focus-visible:ring-offset-2 focus-visible:ring-offset-[#1B080C]',
-                      // The thumb is the page's own background rather than the
-                      // theme's, since this screen is one colour whatever the
-                      // theme says — and white on the yellow would not read.
-                      '[&_[data-slot=switch-thumb]]:size-6! [&_[data-slot=switch-thumb]]:bg-[#1B080C]!',
+                      'data-[state=checked]:bg-primary data-[state=unchecked]:bg-foreground/20',
+                      'focus-visible:border-transparent focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-card',
+                      // The thumb is whatever reads on the accent it sits in,
+                      // which the theme already had to decide — white on
+                      // Tenna's yellow would not read, and neither would the
+                      // page's own colour on somebody's pale primary.
+                      '[&_[data-slot=switch-thumb]]:size-6! [&_[data-slot=switch-thumb]]:bg-primary-foreground!',
                     )}
                   />
                 )}
@@ -611,14 +612,14 @@ export function NsiteAppInfo({
             </section>
           )}
 
-          <section className="rounded-2xl bg-white/[0.06] px-5 py-4">
+          <section className="rounded-2xl bg-foreground/[0.06] px-5 py-4">
             <div className="flex min-h-9 items-center justify-between gap-3">
-              <h3 className="text-lg font-medium text-white">Permissions</h3>
+              <h3 className="text-lg font-medium text-foreground">Permissions</h3>
               {hasPermissions && (
                 <Button
                   variant="ghost"
                   size="sm"
-                  className="h-9 shrink-0 px-3 text-sm text-[#F96C91] hover:bg-white/10 hover:text-[#F96C91]"
+                  className="h-9 shrink-0 px-3 text-sm text-destructive hover:bg-foreground/10 hover:text-destructive"
                   onClick={handleClearAll}
                 >
                   Revoke all
@@ -635,19 +636,19 @@ export function NsiteAppInfo({
                 device's are shown whether or not anyone is signed in, since
                 that is what they are keyed on. */}
             {!hasPermissions ? (
-              <p className="mt-1 text-base text-white/55">
+              <p className="mt-1 text-base text-foreground/55">
                 {user
                   ? 'Nothing granted yet. What you allow this app to do will be listed here.'
                   : 'Nothing granted yet. Sign in to also see what this app may do with your identity.'}
               </p>
             ) : (
-              <ul className="-mx-2 mt-2 divide-y divide-white/10">
+              <ul className="-mx-2 mt-2 divide-y divide-border">
                 {browserPermissions.map((perm) => (
                   <li key={perm.type} className="flex items-center gap-3 px-2 py-3">
-                    <span className="min-w-0 flex-1 truncate text-base text-white/90">
+                    <span className="min-w-0 flex-1 truncate text-base text-foreground/90">
                       {getBrowserPermissionLabel(perm.type)}
                       {!perm.allowed && (
-                        <span className="text-white/45"> — refused</span>
+                        <span className="text-foreground/45"> — refused</span>
                       )}
                     </span>
 
@@ -656,7 +657,7 @@ export function NsiteAppInfo({
                       onClick={() => handleRemoveBrowser(perm)}
                       aria-label={`Forget ${getBrowserPermissionLabel(perm.type)}`}
                       title="Forget"
-                      className="flex size-9 shrink-0 items-center justify-center rounded-full text-white/50 outline-none transition-colors hover:bg-white/10 hover:text-[#F96C91] focus-visible:ring-2 focus-visible:ring-[#FEF960]"
+                      className="flex size-9 shrink-0 items-center justify-center rounded-full text-foreground/50 outline-none transition-colors hover:bg-foreground/10 hover:text-destructive focus-visible:ring-2 focus-visible:ring-primary"
                     >
                       <X className="size-5" />
                     </button>
@@ -668,7 +669,7 @@ export function NsiteAppInfo({
                     key={`${perm.type}-${perm.kind}`}
                     className="flex items-center gap-3 px-2 py-3"
                   >
-                    <span className="min-w-0 flex-1 truncate text-base text-white/90">
+                    <span className="min-w-0 flex-1 truncate text-base text-foreground/90">
                       {getPermissionLabel(perm.type, perm.kind)}
                     </span>
 
@@ -677,7 +678,7 @@ export function NsiteAppInfo({
                       onClick={() => handleRemove(perm)}
                       aria-label={`Revoke ${getPermissionLabel(perm.type, perm.kind)}`}
                       title="Revoke"
-                      className="flex size-9 shrink-0 items-center justify-center rounded-full text-white/50 outline-none transition-colors hover:bg-white/10 hover:text-[#F96C91] focus-visible:ring-2 focus-visible:ring-[#FEF960]"
+                      className="flex size-9 shrink-0 items-center justify-center rounded-full text-foreground/50 outline-none transition-colors hover:bg-foreground/10 hover:text-destructive focus-visible:ring-2 focus-visible:ring-primary"
                     >
                       <X className="size-5" />
                     </button>
@@ -693,12 +694,12 @@ export function NsiteAppInfo({
               be four lines of base32 and the ends are the parts that mean
               anything — the scheme at the front, and at the back the tail that
               names the site. */}
-          <section className="rounded-2xl bg-white/[0.06] px-5 py-4">
-            <h3 className="flex min-h-9 items-center text-lg font-medium text-white">
+          <section className="rounded-2xl bg-foreground/[0.06] px-5 py-4">
+            <h3 className="flex min-h-9 items-center text-lg font-medium text-foreground">
               Addresses
             </h3>
 
-            <ul className="-mx-2 mt-1 divide-y divide-white/10">
+            <ul className="-mx-2 mt-1 divide-y divide-border">
               {addresses.map((uri) => (
                 <AddressRow key={uri} uri={uri} onOpen={handleOpenUri} />
               ))}

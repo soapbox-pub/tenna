@@ -57,6 +57,31 @@ Permissions are remembered per (user, site), and per event kind for signing, so
 allowing a site to publish a note is not allowing it to publish anything else.
 They are reviewed and revoked from the shield menu over the site.
 
+## The face it wears
+
+Tenna has colours of its own — a dark red screen, a yellow sun — and gives them
+up the moment the signed-in user has some. A Ditto **profile theme** is a
+replaceable kind `16767` carrying three colours, up to two font files, and a
+picture for the background: what a visitor to that person's profile sees.
+Tenna is not a profile, but it is the thing standing between them and every
+site they open, and it has no reason to insist.
+
+So the whole palette is three colours and everything else is derived from them,
+the body and heading fonts come off the wire, and the picture goes behind the
+wall in place of Tenna's own weather. Whether the app reads light or dark is
+the theme's own answer — its text against its background — and the status bar
+follows. It is read on login and kept, so the next cold start opens in it
+rather than changing into it a second later. Signing out, or in as somebody
+else, puts Tenna back in its own.
+
+A theme is a stranger's event reaching a stylesheet, which is a thing this app
+does nowhere else. Colours must be `#rrggbb` exactly; URLs must be plain
+`https:` and hold no character that could close a `url()`; every value is set
+through CSSOM rather than written as CSS text; and fonts are fetched as bytes
+and handed to `FontFace` under names of Tenna's own choosing, so no string from
+an event is ever parsed as a stylesheet — which is also why `font-src` in the
+CSP is still `'self'`.
+
 ## What Android adds
 
 Two things a site cannot get from a browser tab: **notifications while it is

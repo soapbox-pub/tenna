@@ -19,7 +19,7 @@ export function AppRouter() {
   // The question is asked before the first paint because the answer decides
   // what the app *is*; rendering the channel wall for a frame and then
   // replacing it would flash a home screen the user never asked for.
-  if (pending) return <div className="min-h-screen bg-[#150609]" />;
+  if (pending) return <div className="min-h-screen bg-background" />;
   if (launch) return <NsiteApp launch={launch} />;
 
   return (

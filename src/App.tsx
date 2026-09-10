@@ -11,6 +11,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { NostrLoginProvider } from '@nostrify/react/login';
 import { AppProvider } from '@/components/AppProvider';
+import { ThemeBackground } from '@/components/ThemeBackground';
 import { AppConfig } from '@/contexts/AppContext';
 import { APP_RELAYS } from '@/lib/appRelays';
 import { secureStorage } from '@/lib/secureStorage';
@@ -35,7 +36,10 @@ const queryClient = new QueryClient({
 const defaultConfig: AppConfig = {
   // Tenna's chrome is dark at every screen, so the theme has to agree: it
   // drives the shadcn surfaces and, on native, the system bar icon style.
+  // A logged-in user's own Ditto theme overrules it — see `profileTheme`.
   theme: "dark",
+  // Nobody's theme until somebody signs in and turns out to have published one.
+  profileTheme: null,
   relayMetadata: APP_RELAYS,
   blossomServerMetadata: {
     servers: [
@@ -52,6 +56,12 @@ export function App() {
   return (
     <UnheadProvider head={head}>
       <AppProvider storageKey="nostr:app-config" defaultConfig={defaultConfig}>
+        {/*
+          The wallpaper a theme brings with it, under everything and outside
+          the router — it is behind the wall, behind a dialog, and behind the
+          screen the app paints while it works out what this launch is.
+        */}
+        <ThemeBackground />
         <QueryClientProvider client={queryClient}>
           {/*
             Logins go to the Keychain on iOS and the KeyStore on Android, not
@@ -72,7 +82,7 @@ export function App() {
           <NostrLoginProvider
             storageKey='nostr:login'
             storage={secureStorage}
-            fallback={<div className="min-h-screen bg-[#150609]" />}
+            fallback={<div className="min-h-screen bg-background" />}
           >
             <NostrProvider>
               <NostrSync />

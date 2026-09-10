@@ -62,7 +62,7 @@ function AndroidBadge() {
   return (
     <span
       aria-hidden="true"
-      className="absolute -bottom-[3%] -right-[3%] flex size-[32%] items-center justify-center rounded-full bg-white ring-2 ring-[#150609]"
+      className="absolute -bottom-[3%] -right-[3%] flex size-[32%] items-center justify-center rounded-full bg-white ring-2 ring-background"
     >
       <AndroidMark className="h-auto w-[58%] text-[#3DDC84]" />
     </span>

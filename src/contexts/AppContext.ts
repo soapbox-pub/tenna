@@ -1,5 +1,7 @@
 import { createContext } from "react";
 
+import type { DittoTheme } from "@/lib/dittoTheme";
+
 export type Theme = "dark" | "light" | "system";
 
 export interface RelayMetadata {
@@ -17,8 +19,33 @@ export interface BlossomServerMetadata {
   updatedAt: number;
 }
 
+/**
+ * The Ditto profile theme (kind 16767) Tenna is wearing, and whose it is.
+ *
+ * Kept beside the relay and Blossom lists rather than in a query, because it
+ * decides what colour the first frame of a cold start is. A theme read off a
+ * relay after paint is a theme the user watches the app change into.
+ *
+ * `theme` is null once it is known that the user has none — which is a
+ * different thing from `profileTheme` itself being null, meaning nobody is
+ * signed in or nobody has been asked yet.
+ */
+export interface ThemeMetadata {
+  /** Whose theme this is. Another account gets its own, never this one. */
+  pubkey: string;
+  /** The parsed event, or null where the user has published no theme. */
+  theme: DittoTheme | null;
+  /** Unix timestamp of the kind 16767 this came from, or 0 for "none found". */
+  updatedAt: number;
+}
+
 export interface AppConfig {
-  /** Current theme */
+  /**
+   * Whether the app draws light or dark.
+   *
+   * Only consulted while no profile theme is on: a theme names its own
+   * background and its own text colour, which settles the question outright.
+   */
   theme: Theme;
   /** NIP-65 relay list metadata */
   relayMetadata: RelayMetadata;
@@ -30,6 +57,8 @@ export interface AppConfig {
    * are used.
    */
   useAppBlossomServers: boolean;
+  /** The logged-in user's Ditto theme, or null when Tenna wears its own. */
+  profileTheme: ThemeMetadata | null;
 }
 
 export interface AppContextType {

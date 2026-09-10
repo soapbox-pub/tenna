@@ -126,12 +126,14 @@ export function AppIconPending({
 export function AddAppTile({ onSelect }: { onSelect: () => void }) {
   return (
     <TileButton name="Add app" title="Add an app" onSelect={onSelect}>
-      <TileFace background="rgba(255,255,255,0.09)">
+      {/* A wash of the theme's own ink rather than a colour, so the empty
+          slot is a hole in the wallpaper whatever the wallpaper is. */}
+      <TileFace background="color-mix(in oklab, var(--foreground) 9%, transparent)">
         <span className="absolute inset-0 flex items-center justify-center">
           <Plus
             aria-hidden="true"
             strokeWidth={1.5}
-            className="h-1/2 w-1/2 text-white/70 transition-colors group-hover:text-white group-focus-visible:text-white"
+            className="h-1/2 w-1/2 text-foreground/70 transition-colors group-hover:text-foreground group-focus-visible:text-foreground"
           />
         </span>
       </TileFace>

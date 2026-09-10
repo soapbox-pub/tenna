@@ -65,8 +65,8 @@ function NsiteRow({
       disabled={added}
       className={cn(
         'flex w-full items-center gap-3 rounded-2xl px-3 py-2 text-left transition-colors',
-        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FEF960]',
-        added ? 'cursor-default opacity-50' : 'hover:bg-white/10 active:bg-white/15',
+        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
+        added ? 'cursor-default opacity-50' : 'hover:bg-foreground/10 active:bg-foreground/15',
       )}
     >
       {/* The site's tile, at the size of a row — the same squircle, the same
@@ -97,25 +97,25 @@ function NsiteRow({
           fit, the publisher's first: an app is picked here by its own name,
           and the publisher is what tells two of the same name apart. */}
       <span className="flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden">
-        <span className="min-w-0 truncate text-base font-medium text-white/95">{name}</span>
+        <span className="min-w-0 truncate text-base font-medium text-foreground/95">{name}</span>
 
         {by && (
           <>
-            <span className="shrink-0 text-sm text-white/45">by</span>
+            <span className="shrink-0 text-sm text-foreground/45">by</span>
 
             <Avatar className="size-5 shrink-0">
               <AvatarImage src={metadata?.picture} alt="" />
-              <AvatarFallback className="bg-white/10 text-[0.625rem] text-white/80">
+              <AvatarFallback className="bg-foreground/10 text-[0.625rem] text-foreground/80">
                 {by.slice(0, 1).toUpperCase()}
               </AvatarFallback>
             </Avatar>
 
-            <span className="min-w-0 shrink-[3] truncate text-sm text-white/55">{by}</span>
+            <span className="min-w-0 shrink-[3] truncate text-sm text-foreground/55">{by}</span>
           </>
         )}
       </span>
 
-      {added && <Check aria-hidden="true" className="size-5 shrink-0 text-white/50" />}
+      {added && <Check aria-hidden="true" className="size-5 shrink-0 text-foreground/50" />}
     </button>
   );
 }
@@ -172,7 +172,7 @@ export function NsitePicker({ addedUris, onAdd }: NsitePickerProps) {
       <div className="relative">
         <Search
           aria-hidden="true"
-          className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-white/40"
+          className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-foreground/40"
         />
         <Input
           value={search}
@@ -183,26 +183,26 @@ export function NsitePicker({ addedUris, onAdd }: NsitePickerProps) {
           autoCapitalize="none"
           autoCorrect="off"
           spellCheck={false}
-          className="border-white/15 bg-black/40 pl-9 text-white placeholder:text-white/40"
+          className="pl-9 placeholder:text-foreground/40"
         />
       </div>
 
       <div className="h-[46vh] min-h-56 overflow-y-auto overscroll-contain">
         {loading && (
-          <div className="flex h-full items-center justify-center text-white/60">
+          <div className="flex h-full items-center justify-center text-foreground/60">
             <Loader2 aria-hidden="true" className="size-5 animate-spin" />
             <span className="sr-only">Looking</span>
           </div>
         )}
 
         {!loading && failed && (
-          <p role="alert" className="px-3 py-8 text-center text-sm text-[#F96C91]">
+          <p role="alert" className="px-3 py-8 text-center text-sm text-destructive">
             Could not reach the relay. Check your connection and try again.
           </p>
         )}
 
         {!loading && !failed && results.length === 0 && (
-          <p className="px-3 py-8 text-center text-sm text-white/60">
+          <p className="px-3 py-8 text-center text-sm text-foreground/60">
             {address.isAddress
               ? 'No site was found at that address.'
               : catalog?.length

@@ -25,14 +25,14 @@ interface NsiteTopBarProps {
  */
 export function NsiteTopBar({ title, app, onBack }: NsiteTopBarProps) {
   return (
-    <div className="shrink-0 border-b border-white/10 bg-black px-safe pt-safe">
+    <div className="shrink-0 border-b border-border bg-background px-safe pt-safe">
       <div className="flex h-12 items-center gap-1 px-1">
         <button
           type="button"
           onClick={onBack}
           aria-label="Back"
           title="Back"
-          className="flex size-10 shrink-0 items-center justify-center rounded-full text-white/90 outline-none transition-colors hover:bg-white/10 focus-visible:ring-2 focus-visible:ring-[#FEF960]"
+          className="flex size-10 shrink-0 items-center justify-center rounded-full text-foreground/90 outline-none transition-colors hover:bg-foreground/10 focus-visible:ring-2 focus-visible:ring-primary"
         >
           <ChevronLeft className="size-6" />
         </button>
@@ -61,7 +61,7 @@ export function NsiteTopBar({ title, app, onBack }: NsiteTopBarProps) {
             )}
           </span>
 
-          <span className="truncate text-sm font-medium text-white">{title}</span>
+          <span className="truncate text-sm font-medium text-foreground">{title}</span>
         </div>
 
         {/* Empty, and the same size as the way out, so that the identity is

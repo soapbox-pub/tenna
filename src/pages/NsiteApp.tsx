@@ -74,7 +74,7 @@ export function NsiteApp({ launch }: NsiteAppProps) {
         <WhiteNoise className="h-full w-full" />
         <div className="crt-scanlines absolute inset-0 opacity-40" />
         <div className="crt-rollbar absolute inset-0" />
-        <span className="crt-osd absolute bottom-safe-offset-8 left-1/2 max-w-[80vw] -translate-x-1/2 truncate font-crt text-3xl uppercase tracking-widest text-[#7CFC9B]">
+        <span className="crt-osd absolute bottom-safe-offset-8 left-1/2 max-w-[80vw] -translate-x-1/2 truncate font-crt text-3xl uppercase tracking-widest text-osd">
           {name}
         </span>
       </div>

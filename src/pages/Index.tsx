@@ -8,13 +8,20 @@ import { LoginArea } from '@/components/auth/LoginArea';
 import { NativeAppIcon } from '@/components/NativeAppIcon';
 import { NsiteSharePicker } from '@/components/NsiteSharePicker';
 import { NsiteViewer } from '@/components/NsiteViewer';
+import { useAppContext } from '@/hooks/useAppContext';
 import { usePendingShare } from '@/hooks/useNsiteShare';
 import { useWall } from '@/hooks/useWall';
 import { useWallDrag } from '@/hooks/useWallDrag';
 import { impactMedium } from '@/lib/haptics';
 import { parseWallUri } from '@/lib/wallUri';
 
-/** Decorative star field scattered behind the apps. */
+/**
+ * Decorative star field scattered behind the apps.
+ *
+ * Literal colours, and deliberately: this is Tenna's own weather, drawn in
+ * Tenna's own palette. It is not shown at all under somebody's theme — see
+ * the wallpaper note below.
+ */
 const STARS: Array<{ top: string; left: string; color: string; delay: string; size: string }> = [
   { top: '8%', left: '6%', color: '#FEF960', delay: '0s', size: 'text-xl' },
   { top: '14%', left: '88%', color: '#F96C91', delay: '0.7s', size: 'text-sm' },
@@ -65,29 +72,42 @@ const Index = () => {
 
   const empty = wall.uris.length === 0;
 
+  // Whether the wall is wearing somebody's theme. Its background is theirs
+  // then — a flat colour, or the picture `ThemeBackground` draws — and Tenna's
+  // own red glow and star field stay off it. Three colours is all a theme has
+  // to spend, and a decoration built out of two other hexes over the top of
+  // them would be Tenna talking over it.
+  const { config } = useAppContext();
+  const themed = !!config.profileTheme?.theme;
+
   // A site's channel is its place among the sites, counted down the wall.
   // Counted here, over the stored list, so that a site still loading holds
   // its number and the ones after it don't shift when it arrives.
   let channel = 0;
 
   return (
-    <main className="relative min-h-screen overflow-hidden bg-[#150609] text-white">
+    // No background of its own: `body` paints the theme's, and anything opaque
+    // here would cover the wallpaper a theme brings. See `ThemeBackground`.
+    <main className="relative min-h-screen overflow-hidden text-foreground">
       {/* Wallpaper */}
-      <div
-        aria-hidden="true"
-        className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_top,rgba(250,43,56,0.28),transparent_60%),radial-gradient(ellipse_at_bottom_left,rgba(172,210,222,0.16),transparent_55%)]"
-      />
-
-      {STARS.map((star, i) => (
-        <span
-          key={i}
+      {!themed && (
+        <div
           aria-hidden="true"
-          className={`pointer-events-none absolute select-none motion-safe:animate-[twinkle_2.4s_ease-in-out_infinite] ${star.size}`}
-          style={{ top: star.top, left: star.left, color: star.color, animationDelay: star.delay }}
-        >
-          ✦
-        </span>
-      ))}
+          className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_top,rgba(250,43,56,0.28),transparent_60%),radial-gradient(ellipse_at_bottom_left,rgba(172,210,222,0.16),transparent_55%)]"
+        />
+      )}
+
+      {!themed &&
+        STARS.map((star, i) => (
+          <span
+            key={i}
+            aria-hidden="true"
+            className={`pointer-events-none absolute select-none motion-safe:animate-[twinkle_2.4s_ease-in-out_infinite] ${star.size}`}
+            style={{ top: star.top, left: star.left, color: star.color, animationDelay: star.delay }}
+          >
+            ✦
+          </span>
+        ))}
 
       {/*
         The container stops well short of the viewport, because past a certain
@@ -180,8 +200,8 @@ const Index = () => {
         </div>
 
         {empty && (
-          <div className="mx-auto max-w-md rounded-xl border border-dashed border-white/20 px-8 py-12 text-center">
-            <p className="mx-auto max-w-sm text-white/70">
+          <div className="mx-auto max-w-md rounded-xl border border-dashed border-foreground/20 px-8 py-12 text-center">
+            <p className="mx-auto max-w-sm text-foreground/70">
               No apps here yet. Press the plus to add one.
             </p>
           </div>

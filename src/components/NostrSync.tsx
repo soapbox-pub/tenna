@@ -3,6 +3,7 @@ import { useNostr } from '@nostrify/react';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useAppContext } from '@/hooks/useAppContext';
 import { parseBlossomServerList } from '@/lib/appBlossom';
+import { DITTO_THEME_KIND, parseDittoTheme } from '@/lib/dittoTheme';
 
 /**
  * NostrSync - Syncs user's Nostr data
@@ -11,6 +12,7 @@ import { parseBlossomServerList } from '@/lib/appBlossom';
  * Currently syncs:
  * - NIP-65 relay list (kind 10002)
  * - BUD-03 Blossom server list (kind 10063)
+ * - Ditto profile theme (kind 16767)
  */
 export function NostrSync() {
   const { nostr } = useNostr();
@@ -96,6 +98,75 @@ export function NostrSync() {
 
     syncBlossomServersFromNostr();
   }, [user, config.blossomServerMetadata.updatedAt, nostr, updateConfig]);
+
+  // The face Tenna wears. Read on the same terms as the two lists above, and
+  // kept in the config for the same reason: it decides what colour the first
+  // frame of the next cold start is, and a theme fetched after paint is a
+  // theme the user watches the app change into.
+  const themePubkey = config.profileTheme?.pubkey;
+  const themeUpdatedAt = config.profileTheme?.updatedAt;
+  const hasTheme = !!config.profileTheme;
+
+  useEffect(() => {
+    // Nobody signed in, so nobody's theme. Tenna goes back to its own.
+    if (!user) {
+      if (hasTheme) updateConfig((current) => ({ ...current, profileTheme: null }));
+      return;
+    }
+
+    // Somebody else is signed in now. Cleared before the relay is asked rather
+    // than after it answers: an account switch that leaves the app in the last
+    // person's colours for a second is the one outcome worth a frame of
+    // Tenna's own.
+    if (hasTheme && themePubkey !== user.pubkey) {
+      updateConfig((current) => ({ ...current, profileTheme: null }));
+      return;
+    }
+
+    const syncThemeFromNostr = async () => {
+      try {
+        const events = await nostr.query(
+          [{ kinds: [DITTO_THEME_KIND], authors: [user.pubkey], limit: 1 }],
+          { signal: AbortSignal.timeout(5000) },
+        );
+
+        const event = events[0];
+
+        // Nothing came back. That is "no theme" for a user who has never
+        // published one, and "the relay didn't answer" for everyone else, and
+        // there is no telling the two apart — `NPool.query` returns partial
+        // results on a timeout rather than failing. So a miss never takes a
+        // theme away, only fails to bring a new one, which is the same rule
+        // `useAuthor` applies to a profile. The cost is that a theme deleted
+        // outright stays until it is replaced.
+        if (!event) {
+          if (!hasTheme) {
+            updateConfig((current) => ({
+              ...current,
+              profileTheme: { pubkey: user.pubkey, theme: null, updatedAt: 0 },
+            }));
+          }
+          return;
+        }
+
+        if (event.created_at <= (themeUpdatedAt ?? 0)) return;
+
+        // A theme that doesn't parse — a missing colour, a font behind a URL
+        // that isn't https — is no theme rather than half a theme applied over
+        // half of Tenna's.
+        const theme = parseDittoTheme(event);
+
+        updateConfig((current) => ({
+          ...current,
+          profileTheme: { pubkey: user.pubkey, theme, updatedAt: event.created_at },
+        }));
+      } catch (error) {
+        console.error('Failed to sync profile theme from Nostr:', error);
+      }
+    };
+
+    syncThemeFromNostr();
+  }, [user, hasTheme, themePubkey, themeUpdatedAt, nostr, updateConfig]);
 
   return null;
 }

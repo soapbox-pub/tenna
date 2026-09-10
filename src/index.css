@@ -53,6 +53,9 @@
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-ring: var(--sidebar-ring);
 
+  /* The on-screen display: channel numbers and site names over the picture. */
+  --color-osd: var(--osd);
+
   --radius-lg: var(--radius);
   --radius-md: calc(var(--radius) - 2px);
   --radius-sm: calc(var(--radius) - 4px);
@@ -89,36 +92,94 @@
   }
 }
 
+/*
+ * Tenna is three colours and a typeface.
+ *
+ * Not a decision about how to write a stylesheet — it is the shape of a Ditto
+ * profile theme (kind 16767), which carries a background, a text colour, a
+ * primary, and font files for body and title. Tenna wears the logged-in
+ * user's, so everything the app draws has to be expressible in those terms or
+ * it is a colour that would sit in a theme without belonging to it.
+ *
+ * So the whole shadcn palette below is derived from the handful of `--theme-*`
+ * properties at the top, and applying a theme is overwriting those and nothing
+ * else. The values here are Tenna's own: the dark red of a tube with nothing on
+ * it, white, and the yellow of the sun in the logo. See `lib/dittoTheme.ts`.
+ */
 :root {
+  --theme-background: #150609;
+  --theme-text: #ffffff;
+  --theme-primary: #fef960;
+  /*
+   * What reads on the primary. A theme has only three colours to spend, so
+   * this is whichever of the other two carries more contrast against it —
+   * decided when the theme is applied, since CSS cannot ask.
+   */
+  --theme-on-primary: var(--theme-background);
+
+  /*
+   * A theme's fonts are named in front of this stack rather than instead of
+   * it, so a glyph its file hasn't got is still drawn — and so a file that
+   * never arrives changes nothing. See `loadThemeFonts`.
+   */
+  --theme-font-stack: ui-sans-serif, system-ui, sans-serif, "Apple Color Emoji",
+    "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+  --theme-font-body: var(--theme-font-stack);
+  --theme-font-title: var(--theme-font-body);
+
   --radius: 0.75rem;
 
-  --background: hsl(0 0% 100%);
-  --foreground: hsl(222.2 84% 4.9%);
+  --background: var(--theme-background);
+  --foreground: var(--theme-text);
 
-  --card: hsl(0 0% 100%);
-  --card-foreground: hsl(222.2 84% 4.9%);
+  /*
+   * Surfaces are the background lifted toward the ink, which is the one rule
+   * that holds whichever way round a theme is: a card separates from the page
+   * by moving toward what is written on it. The two steps are small — 3% and
+   * 6% in oklab — and land within a shade of the hexes Tenna used to hardcode
+   * for its dialogs and its long-press menus.
+   */
+  --card: color-mix(in oklab, var(--theme-background) 97%, var(--theme-text));
+  --card-foreground: var(--theme-text);
 
-  --popover: hsl(0 0% 100%);
-  --popover-foreground: hsl(222.2 84% 4.9%);
+  --popover: color-mix(in oklab, var(--theme-background) 94%, var(--theme-text));
+  --popover-foreground: var(--theme-text);
 
-  --primary: hsl(222.2 47.4% 11.2%);
-  --primary-foreground: hsl(210 40% 98%);
+  --primary: var(--theme-primary);
+  --primary-foreground: var(--theme-on-primary);
 
-  --secondary: hsl(210 40% 96.1%);
-  --secondary-foreground: hsl(222.2 47.4% 11.2%);
+  /*
+   * Fills are translucent ink rather than a mixed colour, so they read the
+   * same over a card, over the page, and over whatever picture a theme puts
+   * behind the wall. This is what every `bg-white/10` in the app used to be.
+   */
+  --secondary: color-mix(in oklab, var(--theme-text) 10%, transparent);
+  --secondary-foreground: var(--theme-text);
 
-  --muted: hsl(210 40% 96.1%);
-  --muted-foreground: hsl(215.4 16.3% 46.9%);
+  --muted: color-mix(in oklab, var(--theme-text) 6%, transparent);
+  --muted-foreground: color-mix(in oklab, var(--theme-text) 60%, var(--theme-background));
 
-  --accent: hsl(210 40% 96.1%);
-  --accent-foreground: hsl(222.2 47.4% 11.2%);
+  --accent: color-mix(in oklab, var(--theme-text) 12%, transparent);
+  --accent-foreground: var(--theme-text);
 
-  --destructive: hsl(0 84.2% 60.2%);
-  --destructive-foreground: hsl(210 40% 98%);
+  /*
+   * A theme carries no colour for things going wrong, so this one is Tenna's
+   * whatever else changes.
+   */
+  --destructive: #f96c91;
+  --destructive-foreground: var(--theme-background);
 
-  --border: hsl(214.3 31.8% 91.4%);
-  --input: hsl(214.3 31.8% 91.4%);
-  --ring: hsl(222.2 84% 4.9%);
+  --border: color-mix(in oklab, var(--theme-text) 12%, transparent);
+  --input: color-mix(in oklab, var(--theme-text) 15%, transparent);
+  --ring: var(--theme-primary);
+
+  /*
+   * Phosphor green, for the channel number and the site's name burned over the
+   * picture while it tunes in. A theme takes this too — its primary, since the
+   * OSD is the most on-screen thing there is and the accent is what a theme
+   * has to spend on one.
+   */
+  --osd: #7cfc9b;
 
   --chart-1: hsl(12 76% 61%);
   --chart-2: hsl(173 58% 39%);
@@ -126,60 +187,24 @@
   --chart-4: hsl(43 74% 66%);
   --chart-5: hsl(27 87% 67%);
 
-  --sidebar: hsl(0 0% 98%);
-  --sidebar-foreground: hsl(240 5.3% 26.1%);
-  --sidebar-primary: hsl(240 5.9% 10%);
-  --sidebar-primary-foreground: hsl(0 0% 98%);
-  --sidebar-accent: hsl(240 4.8% 95.9%);
-  --sidebar-accent-foreground: hsl(240 5.9% 10%);
-  --sidebar-border: hsl(220 13% 91%);
-  --sidebar-ring: hsl(217.2 91.2% 59.8%);
+  --sidebar: var(--card);
+  --sidebar-foreground: var(--card-foreground);
+  --sidebar-primary: var(--primary);
+  --sidebar-primary-foreground: var(--primary-foreground);
+  --sidebar-accent: var(--accent);
+  --sidebar-accent-foreground: var(--accent-foreground);
+  --sidebar-border: var(--border);
+  --sidebar-ring: var(--ring);
 }
 
-.dark {
-  --background: hsl(222.2 84% 4.9%);
-  --foreground: hsl(210 40% 98%);
-
-  --card: hsl(222.2 84% 4.9%);
-  --card-foreground: hsl(210 40% 98%);
-
-  --popover: hsl(222.2 84% 4.9%);
-  --popover-foreground: hsl(210 40% 98%);
-
-  --primary: hsl(210 40% 98%);
-  --primary-foreground: hsl(222.2 47.4% 11.2%);
-
-  --secondary: hsl(217.2 32.6% 17.5%);
-  --secondary-foreground: hsl(210 40% 98%);
-
-  --muted: hsl(217.2 32.6% 17.5%);
-  --muted-foreground: hsl(215 20.2% 65.1%);
-
-  --accent: hsl(217.2 32.6% 17.5%);
-  --accent-foreground: hsl(210 40% 98%);
-
-  --destructive: hsl(0 62.8% 30.6%);
-  --destructive-foreground: hsl(210 40% 98%);
-
-  --border: hsl(217.2 32.6% 17.5%);
-  --input: hsl(217.2 32.6% 17.5%);
-  --ring: hsl(212.7 26.8% 83.9%);
-
-  --chart-1: hsl(220 70% 50%);
-  --chart-2: hsl(160 60% 45%);
-  --chart-3: hsl(30 80% 55%);
-  --chart-4: hsl(280 65% 60%);
-  --chart-5: hsl(340 75% 55%);
-
-  --sidebar: hsl(240 5.9% 10%);
-  --sidebar-foreground: hsl(240 4.8% 95.9%);
-  --sidebar-primary: hsl(224.3 76.3% 48%);
-  --sidebar-primary-foreground: hsl(0 0% 100%);
-  --sidebar-accent: hsl(240 3.7% 15.9%);
-  --sidebar-accent-foreground: hsl(240 4.8% 95.9%);
-  --sidebar-border: hsl(240 3.7% 15.9%);
-  --sidebar-ring: hsl(217.2 91.2% 59.8%);
-}
+/*
+ * There is no second palette under `.dark`. The colours come from the theme
+ * either way, and whether that reads as light or dark is a fact about the
+ * theme's own background rather than a switch beside it. The class is still
+ * set on `<html>` — `AppProvider` puts it there — because two things downstream
+ * ask: the `dark:` variants inside the shadcn primitives, and the native status
+ * bar, which has to pick black or white icons. See `lib/nativeBootstrap.ts`.
+ */
 
 @layer base {
   *,
@@ -192,6 +217,22 @@
 
   body {
     @apply bg-background text-foreground;
+    font-family: var(--theme-font-body);
+  }
+
+  /*
+   * A theme's second font. Ditto spends it on the one line of large type a
+   * profile page has — the display name — and Tenna's equivalent is its
+   * headings, of which there are a handful: the title of a dialog, and the
+   * name of an app on its info screen. Where a theme names only one font,
+   * this resolves to that one. The CRT's own VT323 is left out of all of it:
+   * the channel number burned over a tuning picture is an effect rather than
+   * something the app is writing.
+   */
+  h1,
+  h2,
+  h3 {
+    font-family: var(--theme-font-title);
   }
 }
 

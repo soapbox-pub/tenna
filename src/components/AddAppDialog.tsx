@@ -19,9 +19,9 @@ interface AddAppDialogProps {
   onAdd: (uri: string) => void;
 }
 
-const TAB_LIST = 'w-full bg-white/5 p-1';
+const TAB_LIST = 'w-full bg-foreground/5 p-1';
 const TAB =
-  'text-white/60 data-[state=active]:bg-white/12 data-[state=active]:text-white focus-visible:ring-[#FEF960]/60';
+  'text-foreground/60 data-[state=active]:bg-foreground/12 data-[state=active]:text-foreground focus-visible:ring-primary/60';
 
 /**
  * The two places something on the wall can come from.
@@ -44,10 +44,10 @@ export function AddAppDialog({ open, onOpenChange, addedUris, onAdd }: AddAppDia
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="border-white/10 bg-[#1B080C] text-white sm:max-w-md">
+      <DialogContent className="bg-card text-card-foreground sm:max-w-md">
         <DialogHeader>
           <DialogTitle>Add an app</DialogTitle>
-          <DialogDescription className="text-white/70">
+          <DialogDescription className="text-foreground/70">
             {native
               ? 'Put a Nostr site or one of this device\u2019s own apps on your wall.'
               : 'Put a Nostr site on your wall.'}

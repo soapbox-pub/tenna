@@ -174,7 +174,7 @@ export function NsiteViewer({
               {ch && (
                 <span
                   className={cn(
-                    'crt-osd absolute left-safe-offset-6 font-crt text-4xl text-[#7CFC9B]',
+                    'crt-osd absolute left-safe-offset-6 font-crt text-4xl text-osd',
                     // Only a site without a bar has the status bar to clear.
                     topBar ? 'top-5' : 'top-safe-offset-5',
                   )}
@@ -184,7 +184,7 @@ export function NsiteViewer({
               )}
               {/* A `d` tag could never be longer than the screen; a `title`
                   tag can, so the name is cut rather than run off both edges. */}
-              <span className="crt-osd absolute bottom-safe-offset-8 left-1/2 max-w-[80vw] -translate-x-1/2 truncate font-crt text-3xl uppercase tracking-widest text-[#7CFC9B]">
+              <span className="crt-osd absolute bottom-safe-offset-8 left-1/2 max-w-[80vw] -translate-x-1/2 truncate font-crt text-3xl uppercase tracking-widest text-osd">
                 {name}
               </span>
             </div>

@@ -97,6 +97,11 @@ export function TileArtwork({
           )}
         />
       ) : (
+        // White rather than the theme's ink, and everywhere else in the app
+        // that a letter or a glyph sits on a tile. This one is written on the
+        // site's own colour — a mid-saturation gradient off its name, which
+        // nobody's theme has any say in — so it takes the ink that reads on
+        // that rather than the ink that reads on Tenna.
         <span className="absolute inset-0 flex items-center justify-center text-3xl font-semibold leading-none text-white/95 sm:text-4xl">
           {getTileInitial(name)}
         </span>
@@ -199,12 +204,12 @@ export function TileButton({
       <TileFrame className="motion-safe:transition-transform motion-safe:duration-200 group-hover:-translate-y-1 group-active:scale-95 group-focus-visible:-translate-y-1">
         <span
           aria-hidden="true"
-          className="app-squircle absolute -inset-[3px] bg-[#FEF960] opacity-0 transition-opacity group-focus-visible:opacity-100"
+          className="app-squircle absolute -inset-[3px] bg-primary opacity-0 transition-opacity group-focus-visible:opacity-100"
         />
         {children}
       </TileFrame>
 
-      <span className="w-full truncate px-0.5 text-center text-xs text-white/90 drop-shadow-[0_1px_3px_rgba(0,0,0,0.9)] sm:text-sm">
+      <span className="w-full truncate px-0.5 text-center text-xs text-foreground/90 drop-shadow-[0_1px_3px_rgba(0,0,0,0.9)] sm:text-sm">
         {name}
       </span>
     </button>

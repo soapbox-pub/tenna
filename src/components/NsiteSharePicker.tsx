@@ -134,7 +134,7 @@ export function NsiteSharePicker({ share, onDismiss, onHandOff }: NsiteSharePick
                 <span className="relative block aspect-square w-full drop-shadow-[0_6px_12px_rgba(0,0,0,0.55)] motion-safe:transition-transform motion-safe:duration-200 group-hover:-translate-y-1 group-active:scale-95 group-focus-visible:-translate-y-1">
                   <span
                     aria-hidden="true"
-                    className="app-squircle absolute -inset-[3px] bg-[#FEF960] opacity-0 transition-opacity group-focus-visible:opacity-100"
+                    className="app-squircle absolute -inset-[3px] bg-primary opacity-0 transition-opacity group-focus-visible:opacity-100"
                   />
                   <span
                     className="app-squircle absolute inset-0 overflow-hidden"

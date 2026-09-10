@@ -66,8 +66,18 @@ export interface NsiteWebViewPlugin {
   /** Step back through the site's history. `moved` is false if it had nowhere to go. */
   goBack(): Promise<{ moved: boolean }>;
 
-  /** Hide the site's pixels without unloading it. */
-  setConcealed(options: { concealed: boolean }): Promise<void>;
+  /**
+   * Hide the site's pixels without unloading it.
+   *
+   * Pass `still` to be handed a picture of the last frame on the way out, as a
+   * `data:` URL. React draws that where the site was, so a prompt over the
+   * site still looks like a prompt over the site — while what is behind it is
+   * an image, incapable of reacting to anything.
+   *
+   * Absent from the result if there was nothing to draw, or if the device
+   * couldn't. Neither is worth failing a permission prompt over.
+   */
+  setConcealed(options: { concealed: boolean; still?: boolean }): Promise<{ still?: string }>;
 
   /**
    * Answer a request previously raised as `nsiteMedia`.

@@ -1,6 +1,6 @@
 import { App } from '@capacitor/app';
 import type { PluginListenerHandle } from '@capacitor/core';
-import { useEffect, useMemo, useRef } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 import type { NsiteFrameProps } from '@/components/nsite/types';
 import { supportsNappPush } from '@/lib/nappPushPlugin';
@@ -13,9 +13,11 @@ import { getNsiteSubdomain } from '@/lib/nsiteSubdomain';
 /**
  * Renders an nsite in a native WebView of its own.
  *
- * Nothing is drawn here. The site's pixels belong to a native view layered
- * over the whole Capacitor WebView, so this component is only the lifecycle:
- * it opens the view, relays signer calls, and closes it again.
+ * Almost nothing is drawn here. The site's pixels belong to a native view
+ * layered over the whole Capacitor WebView, so this component is mostly the
+ * lifecycle: it opens the view, relays signer calls, and closes it again. The
+ * one exception is the still it paints while the site is concealed, which is
+ * the site's own last frame handed back across the bridge.
  *
  * What that buys is the safe area. The site is its own top-level document, so
  * `viewport-fit=cover` and `env(safe-area-inset-*)` resolve to the real device
@@ -42,6 +44,12 @@ export function NsiteNative({
   const onMediaRef = useRef(onMedia);
   const onLoadRef = useRef(onLoad);
   const onCloseRef = useRef(onRequestClose);
+  // A picture of the site, held for as long as the site itself is hidden.
+  const [still, setStill] = useState<string | null>(null);
+  // Read by the back handler, which is registered once and outlives any one
+  // prompt.
+  const concealedRef = useRef(concealed);
+  useEffect(() => { concealedRef.current = concealed; }, [concealed]);
   // A notification's path is the same thing to the native side as a GET
   // share: the URL the site opens on. Only the reason for it differs.
   //
@@ -148,8 +156,28 @@ export function NsiteNative({
     });
   }, [entry, event]);
 
+  // Concealment, and the picture left in the site's place while it lasts.
+  //
+  // The native view is above the Capacitor one, so a prompt drawn by React can
+  // only be seen once the site is hidden — and a sheet over a blank screen
+  // doesn't read as a sheet over the app the user is in. So the site's last
+  // frame comes back with the call that hides it, and gets painted here.
+  //
+  // It is only ever a picture. Nothing behind the sheet can take a press or
+  // repaint itself into something that looks like the sheet, which is the
+  // whole reason the live site goes away.
   useEffect(() => {
-    void NsiteWebView.setConcealed({ concealed: !!concealed });
+    let cancelled = false;
+
+    NsiteWebView.setConcealed({ concealed: !!concealed, still: !!concealed })
+      .then(({ still }) => {
+        if (!cancelled) setStill(concealed ? still ?? null : null);
+      })
+      .catch((err) => {
+        console.error('[NsiteNative] failed to conceal:', err);
+      });
+
+    return () => { cancelled = true; };
   }, [concealed]);
 
   // Start the shutoff as soon as the viewer does, rather than waiting for
@@ -162,12 +190,19 @@ export function NsiteNative({
   // Back belongs to the site while the site has somewhere to go — the swipe
   // from the edge walks the site's own history. Once it has none left the
   // gesture means what it means anywhere else, and leaves.
+  //
+  // Except while the site is concealed, when back belongs to whatever is
+  // covering it: the prompt takes the gesture as its answer, and a site that
+  // also walked its own history behind one would be navigating out from under
+  // a question about the page it was on.
   useEffect(() => {
     if (!onRequestClose) return;
     let handle: PluginListenerHandle | undefined;
     let disposed = false;
 
     App.addListener('backButton', () => {
+      if (concealedRef.current) return;
+
       void NsiteWebView.goBack()
         .then(({ moved }) => {
           if (!moved) onRequestClose();
@@ -186,5 +221,18 @@ export function NsiteNative({
     };
   }, [onRequestClose]);
 
-  return null;
+  // Positioned against the window rather than against whatever box this
+  // component was given, because the native view it stands in for is the
+  // window: it is added to the activity's content view and fills it.
+  if (!still) return null;
+
+  return (
+    <img
+      src={still}
+      alt=""
+      aria-hidden="true"
+      draggable={false}
+      className="pointer-events-none fixed inset-0 h-full w-full select-none object-cover"
+    />
+  );
 }

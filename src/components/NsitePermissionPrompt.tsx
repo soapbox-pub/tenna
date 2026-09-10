@@ -1,9 +1,19 @@
-import { useState } from 'react';
+import { App } from '@capacitor/app';
+import type { PluginListenerHandle } from '@capacitor/core';
+import { useCallback, useEffect, useState } from 'react';
 import { Bell, Camera, Check, KeyRound, Lock, Mic, Pen, ShieldAlert, X } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+import {
+  Drawer,
+  DrawerContent,
+  DrawerDescription,
+  DrawerFooter,
+  DrawerHeader,
+  DrawerTitle,
+} from '@/components/ui/drawer';
 import { Label } from '@/components/ui/label';
 import { getKindLabel } from '@/lib/nsitePermissions';
 import type { NsitePromptState, NsitePromptDecision } from '@/hooks/useNsiteSignerRpc';
@@ -99,8 +109,22 @@ function truncate(str: string, max: number): string {
 // ---------------------------------------------------------------------------
 
 /**
- * Overlay prompt shown when an nsite requests a signer operation that requires
- * user approval. Renders on top of the nsite iframe within the preview panel.
+ * The sheet an nsite's request for permission comes up in.
+ *
+ * A bottom sheet rather than a dialog in the middle, because of where the
+ * question comes from. The site is still there behind it — really there in an
+ * iframe, a picture of itself in a native window — and a sheet rising from the
+ * bottom edge over the app that asked reads as that app being interrupted,
+ * where a floating card reads as Tenna having replaced it. It is the same
+ * shape Android's own signer prompts use, for the same reason.
+ *
+ * It is also the shape that puts the two buttons under the thumb. The decision
+ * is at the bottom of a sheet that starts at the bottom; nothing about it
+ * requires reaching the top of the screen.
+ *
+ * Dragging it down is a no. A dismissal is never an approval, and never a
+ * remembered one either: a gesture that got away from someone must not be able
+ * to write a decision the site gets to keep.
  */
 export function NsitePermissionPrompt({
   appPicture,
@@ -114,6 +138,33 @@ export function NsitePermissionPrompt({
   const handleAllow = () => onResolve({ allowed: true, remember });
   const handleDeny = () => onResolve({ allowed: false, remember });
 
+  // Backing out of the sheet, however it is done: dragged down, escaped, or —
+  // on Android — the back gesture, which never reaches vaul. A no, and not a
+  // remembered one; see the note on the component.
+  const handleDismiss = useCallback(
+    () => onResolve({ allowed: false, remember: false }),
+    [onResolve],
+  );
+
+  // The frame under the sheet stands aside for this one while it is up, so the
+  // gesture lands here and nowhere else.
+  useEffect(() => {
+    let handle: PluginListenerHandle | undefined;
+    let disposed = false;
+
+    App.addListener('backButton', handleDismiss)
+      .then((listener) => {
+        if (disposed) void listener.remove();
+        else handle = listener;
+      })
+      .catch(() => {});
+
+    return () => {
+      disposed = true;
+      void handle?.remove();
+    };
+  }, [handleDismiss]);
+
   const icon = getPromptIcon(prompt.type);
   const title = getPromptTitle(prompt.type, prompt.kind);
   const description = getPromptDescription(prompt.type);
@@ -123,43 +174,55 @@ export function NsitePermissionPrompt({
   const eventJson = prompt.event ? JSON.stringify(prompt.event, null, 2) : null;
 
   return (
-    <div className="absolute inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm p-4">
-      <div className="w-full max-w-sm rounded-xl border bg-card shadow-lg overflow-hidden animate-in fade-in zoom-in-95 duration-200">
-        {/* Header */}
-        <div className="flex items-center gap-3 px-5 pt-5 pb-3">
-          <div className="flex items-center justify-center size-10 rounded-full bg-muted">
-            <ShieldAlert className="size-5 text-muted-foreground" />
+    <Drawer
+      open
+      onOpenChange={(open) => {
+        if (!open) handleDismiss();
+      }}
+    >
+      {/* Tall enough to be a sheet rather than a toast even when the question
+          is one line. The cap comes from the drawer's own styles, and the gap
+          it leaves at the top is the point: what shows through it is the app
+          that asked, still there, waiting on an answer. */}
+      <DrawerContent className="mx-auto min-h-[55svh] w-full max-w-lg">
+        <DrawerHeader className="flex flex-row items-center gap-3 pt-2">
+          <div className="flex size-10 shrink-0 items-center justify-center overflow-hidden rounded-full bg-muted">
+            {appPicture ? (
+              <img
+                src={appPicture}
+                alt=""
+                className="size-full object-cover"
+                decoding="async"
+              />
+            ) : (
+              <ShieldAlert className="size-5 text-muted-foreground" />
+            )}
           </div>
-          <div className="flex-1 min-w-0">
-            <p className="text-sm font-semibold truncate">{appName}</p>
-            <p className="text-xs text-muted-foreground">Permission request</p>
+          {/* Left-aligned against the drawer's own centring, which is for a
+              sheet whose header is a heading. This one is an identity beside
+              an icon, and it reads off the icon. */}
+          <div className="min-w-0 flex-1 text-left">
+            <DrawerTitle className="truncate text-base">{appName}</DrawerTitle>
+            <DrawerDescription className="text-xs">Permission request</DrawerDescription>
           </div>
-          {appPicture && (
-            <img
-              src={appPicture}
-              alt={appName}
-              className="size-8 rounded-md object-cover shrink-0"
-              decoding="async"
-            />
-          )}
-        </div>
+        </DrawerHeader>
 
-        {/* Body */}
-        <div className="px-5 pb-4 space-y-3">
-          {/* Operation */}
-          <div className="flex items-start gap-3 p-3 rounded-lg bg-muted/50">
-            <div className="shrink-0 mt-0.5">{icon}</div>
+        {/* The question, and everything the user might want to see before
+            answering it. Scrolls on its own so the buttons never move. */}
+        <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-4 pb-2">
+          <div className="flex items-start gap-3 rounded-lg bg-muted/50 p-3">
+            <div className="mt-0.5 shrink-0">{icon}</div>
             <div className="min-w-0">
               <p className="text-sm font-medium">{title}</p>
-              <p className="text-xs text-muted-foreground mt-0.5">{description}</p>
+              <p className="mt-0.5 text-xs text-muted-foreground">{description}</p>
             </div>
           </div>
 
           {/* Event content preview (signEvent only) */}
           {prompt.type === 'signEvent' && eventContent && (
             <div className="rounded-lg border bg-muted/30 p-3">
-              <p className="text-xs text-muted-foreground mb-1">Content</p>
-              <p className="text-sm break-words whitespace-pre-wrap">
+              <p className="mb-1 text-xs text-muted-foreground">Content</p>
+              <p className="whitespace-pre-wrap break-words text-sm">
                 {truncate(eventContent, 280)}
               </p>
             </div>
@@ -171,21 +234,22 @@ export function NsitePermissionPrompt({
               <CollapsibleTrigger asChild>
                 <button
                   type="button"
-                  className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+                  className="rounded text-xs text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-primary"
                 >
                   {showDetails ? 'Hide details' : 'Show details'}
                 </button>
               </CollapsibleTrigger>
               <CollapsibleContent>
-                <pre className="mt-2 rounded-lg border bg-muted/30 p-3 text-xs font-mono max-h-40 overflow-auto whitespace-pre-wrap break-all">
+                <pre className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap break-all rounded-lg border bg-muted/30 p-3 font-mono text-xs">
                   {eventJson}
                 </pre>
               </CollapsibleContent>
             </Collapsible>
           )}
+        </div>
 
-          {/* Remember checkbox */}
-          <div className="flex items-center gap-2 pt-1">
+        <DrawerFooter className="gap-3 pb-safe-offset-4">
+          <div className="flex items-center gap-2">
             <Checkbox
               id="nsite-remember"
               checked={remember}
@@ -193,32 +257,33 @@ export function NsitePermissionPrompt({
             />
             <Label
               htmlFor="nsite-remember"
-              className="text-xs text-muted-foreground cursor-pointer select-none"
+              className="cursor-pointer select-none text-xs text-muted-foreground"
             >
               Remember for this site
             </Label>
           </div>
-        </div>
 
-        {/* Actions */}
-        <div className="flex gap-2 px-5 pb-5">
-          <Button
-            variant="outline"
-            className="flex-1 gap-1.5"
-            onClick={handleDeny}
-          >
-            <X className="size-3.5" />
-            Deny
-          </Button>
-          <Button
-            className="flex-1 gap-1.5"
-            onClick={handleAllow}
-          >
-            <Check className="size-3.5" />
-            Allow
-          </Button>
-        </div>
-      </div>
-    </div>
+          <div className="flex gap-2">
+            <Button
+              variant="outline"
+              size="lg"
+              className="flex-1 gap-1.5"
+              onClick={handleDeny}
+            >
+              <X className="size-4" />
+              Deny
+            </Button>
+            <Button
+              size="lg"
+              className="flex-1 gap-1.5"
+              onClick={handleAllow}
+            >
+              <Check className="size-4" />
+              Allow
+            </Button>
+          </div>
+        </DrawerFooter>
+      </DrawerContent>
+    </Drawer>
   );
 }

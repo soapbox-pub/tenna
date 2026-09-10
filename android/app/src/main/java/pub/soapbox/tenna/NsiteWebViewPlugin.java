@@ -10,8 +10,11 @@ import android.content.Intent;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
 import android.content.res.Configuration;
+import android.graphics.Bitmap;
+import android.graphics.Canvas;
 import android.graphics.Color;
 import android.net.Uri;
+import android.util.Base64;
 import android.util.Log;
 import android.util.TypedValue;
 import android.view.View;
@@ -50,6 +53,7 @@ import com.getcapacitor.annotation.CapacitorPlugin;
 import org.json.JSONException;
 import org.json.JSONObject;
 
+import java.io.ByteArrayOutputStream;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -729,22 +733,85 @@ public class NsiteWebViewPlugin extends Plugin {
      * The prompt is drawn by React, underneath this view, so the site has to
      * get out of the way — which also means it cannot paint anything behind a
      * security decision the user is being asked to make.
+     *
+     * Which leaves nothing behind the prompt at all, and a sheet over an empty
+     * screen doesn't read as a sheet over the app. So the caller may ask for a
+     * still of the last frame on its way out: taken here, one instruction
+     * before the view is hidden, and handed back for React to paint in its
+     * place. What the user sees is the site they were on; what is actually
+     * there is a picture of it, which cannot take a press or repaint itself
+     * into something that looks like the prompt.
      */
     @PluginMethod
     public void setConcealed(PluginCall call) {
         boolean concealed = Boolean.TRUE.equals(call.getBoolean("concealed", false));
+        boolean wantsStill = Boolean.TRUE.equals(call.getBoolean("still", false));
         getActivity().runOnUiThread(() -> {
-            if (container != null) {
-                container.setVisibility(concealed ? View.INVISIBLE : View.VISIBLE);
+            JSObject result = new JSObject();
+            ViewGroup frame = container;
+
+            if (frame != null) {
+                if (concealed && wantsStill) {
+                    String still = captureStill(frame);
+                    if (still != null) result.put("still", still);
+                }
+                frame.setVisibility(concealed ? View.INVISIBLE : View.VISIBLE);
             }
+
             // The bars belong to whatever is on screen. While the prompt is up
             // that is React's, which is dark; afterwards it is the site again.
             if (barAppearance != null) {
                 if (concealed) barAppearance.suspend();
                 else barAppearance.resume();
             }
-            call.resolve();
+            call.resolve(result);
         });
+    }
+
+    /**
+     * Draw a view into a data URL, or null if there was nothing to draw.
+     *
+     * Software-rendered on purpose: `PixelCopy` would read the composited
+     * surface, but it answers on another thread, and the whole point of taking
+     * this here is that the site is hidden in the same frame it is captured
+     * in. A backdrop that arrives two frames late is a backdrop the user
+     * watches pop in.
+     *
+     * Halved and JPEG-compressed because of what it is for. This goes behind a
+     * dimmed scrim under a sheet, so it needs to survive being looked at, not
+     * being read — and it crosses the bridge as base64 text, where every pixel
+     * costs.
+     */
+    @Nullable
+    private String captureStill(View view) {
+        int width = view.getWidth();
+        int height = view.getHeight();
+        if (width <= 0 || height <= 0) return null;
+
+        Bitmap bitmap = null;
+        try {
+            bitmap = Bitmap.createBitmap(
+                Math.max(1, width / 2),
+                Math.max(1, height / 2),
+                Bitmap.Config.RGB_565
+            );
+            Canvas canvas = new Canvas(bitmap);
+            canvas.scale(0.5f, 0.5f);
+            view.draw(canvas);
+
+            ByteArrayOutputStream out = new ByteArrayOutputStream();
+            bitmap.compress(Bitmap.CompressFormat.JPEG, 70, out);
+            return "data:image/jpeg;base64,"
+                + Base64.encodeToString(out.toByteArray(), Base64.NO_WRAP);
+        } catch (Throwable t) {
+            // A site with a surface the software canvas can't reach, or a
+            // device out of memory for the bitmap. Neither is worth failing a
+            // permission prompt over: React falls back to a plain backdrop.
+            Log.w(TAG, "could not capture the site", t);
+            return null;
+        } finally {
+            if (bitmap != null) bitmap.recycle();
+        }
     }
 
     @Override

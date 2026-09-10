@@ -191,9 +191,14 @@ export function NsiteViewer({
           )}
         </div>
 
+        {/* Whose request this is, said the same way the bar over the site says
+            it. A prompt that named the site differently from the strip above
+            it would be asking about something else as far as anyone reading
+            could tell. */}
         {signerRpc.pendingPrompt && (
           <NsitePermissionPrompt
-            appName={name}
+            appName={title}
+            appPicture={app?.iconUrl ?? undefined}
             prompt={signerRpc.pendingPrompt}
             onResolve={signerRpc.resolvePrompt}
           />

@@ -7,6 +7,7 @@ import { NUser, useNostrLogin } from '@nostrify/react/login';
 import { useQueryClient } from '@tanstack/react-query';
 import { NostrStorageContext } from '@/contexts/NostrStorageContext';
 import { useAppContext } from '@/hooks/useAppContext';
+import { AndroidNativeSigner } from '@/lib/androidNativeSigner';
 import { CachingPool } from '@/lib/CachingPool';
 
 /**
@@ -129,6 +130,15 @@ const NostrProvider: React.FC<NostrProviderProps> = (props) => {
           return NUser.fromNsecLogin(currentLogin).signer;
         case 'bunker':
           return NUser.fromBunkerLogin(currentLogin, pool).signer;
+        case 'x-android-signer': {
+          // Seeded with the login's pubkey, so answering a challenge never
+          // costs a getPublicKey round trip to the signer app. Signing one
+          // still does: a relay may send AUTH unprompted, and when it does
+          // the signer app comes to the front unasked. That is the price of
+          // AUTH-gated relays working at all under NIP-55.
+          const { packageName } = currentLogin.data as { packageName: string };
+          return new AndroidNativeSigner(packageName, currentLogin.pubkey);
+        }
         case 'extension':
           return NUser.fromExtensionLogin(currentLogin).signer;
         default:

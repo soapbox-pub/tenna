@@ -31,6 +31,7 @@ import { useNostrPublish } from '@/hooks/useNostrPublish';
 import { useUploadFile } from '@/hooks/useUploadFile';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { generateSecretKey, getPublicKey, nip19 } from 'nostr-tools';
+import { AndroidSignerOptions } from './AndroidSignerOptions';
 
 interface AuthDialogProps {
   isOpen: boolean;
@@ -653,17 +654,21 @@ const AuthDialog: React.FC<AuthDialogProps> = ({ isOpen, onClose }) => {
                   </button>
                 </div>
               ) : (
-                <NsecLoginForm
-                  loginInput={loginInput}
-                  setLoginInput={setLoginInput}
-                  loginError={loginError}
-                  setLoginError={setLoginError}
-                  isLoggingIn={isLoggingIn}
-                  onSubmit={handleLogin}
-                  onFileChange={handleFileUpload}
-                  onOpenSignerApp={handleOpenSignerApp}
-                  fileInputRef={fileInputRef}
-                />
+                <>
+                  {/* Signer apps on the device. Renders nothing off Android. */}
+                  <AndroidSignerOptions onLogin={onClose} />
+                  <NsecLoginForm
+                    loginInput={loginInput}
+                    setLoginInput={setLoginInput}
+                    loginError={loginError}
+                    setLoginError={setLoginError}
+                    isLoggingIn={isLoggingIn}
+                    onSubmit={handleLogin}
+                    onFileChange={handleFileUpload}
+                    onOpenSignerApp={handleOpenSignerApp}
+                    fileInputRef={fileInputRef}
+                  />
+                </>
               )}
 
               {!connectError && !showProgressView && (

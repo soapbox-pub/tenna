@@ -7,6 +7,7 @@ import {
   useNostrLogin,
 } from '@nostrify/react/login';
 import { useAppContext } from '@/hooks/useAppContext';
+import { AndroidNativeSigner } from '@/lib/androidNativeSigner';
 import { APP_RELAYS } from '@/lib/appRelays';
 
 // NOTE: This file should not be edited except for adding new login methods.
@@ -44,6 +45,16 @@ export function useLoginActions() {
     async extension(): Promise<void> {
       const login = await NLogin.fromExtension();
       addAndActivate(login);
+    },
+    // Login with a NIP-55 signer app installed on the device (Amber, etc.)
+    //
+    // The first getPublicKey() is what raises the signer's consent prompt.
+    // Its answer is kept on the login so that later launches know whose
+    // account this is without asking the signer again.
+    async androidSigner(packageName: string): Promise<void> {
+      const signer = new AndroidNativeSigner(packageName);
+      const pubkey = await signer.getPublicKey();
+      addAndActivate(new NLogin('x-android-signer', pubkey, { packageName }));
     },
     // Login via nostrconnect:// (client-initiated NIP-46)
     // The client displays a QR code and waits for the remote signer to connect.

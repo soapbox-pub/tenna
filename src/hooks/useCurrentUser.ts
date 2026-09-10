@@ -2,6 +2,8 @@ import { type NLoginType, NUser, useNostrLogin } from '@nostrify/react/login';
 import { useNostr } from '@nostrify/react';
 import { useCallback, useMemo } from 'react';
 
+import { AndroidNativeSigner } from '@/lib/androidNativeSigner';
+
 import { useAuthor } from './useAuthor.ts';
 
 export function useCurrentUser() {
@@ -16,6 +18,14 @@ export function useCurrentUser() {
         return NUser.fromBunkerLogin(login, nostr);
       case 'extension': // Nostr login with NIP-07 browser extension
         return NUser.fromExtensionLogin(login);
+      case 'x-android-signer': { // NIP-55 signer app on the device (Amber, etc.)
+        const { packageName } = login.data as { packageName: string };
+        return new NUser(
+          login.type,
+          login.pubkey,
+          new AndroidNativeSigner(packageName, login.pubkey),
+        );
+      }
       // Other login types can be defined here
       default:
         throw new Error(`Unsupported login type: ${login.type}`);

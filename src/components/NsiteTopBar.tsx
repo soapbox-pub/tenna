@@ -1,14 +1,12 @@
 import { ChevronLeft } from 'lucide-react';
 
-import type { NsiteApp } from '@/hooks/useNsiteApp';
+import type { NsiteIdentity } from '@/hooks/useNsiteIdentity';
 import { getTileGradient, getTileInitial } from '@/lib/iconTile';
 import { cn } from '@/lib/utils';
 
 interface NsiteTopBarProps {
-  /** What to call the site. */
-  title: string;
-  /** The site's own artwork, as resolved for its tile on the wall. */
-  app?: NsiteApp;
+  /** What the site is called and what it looks like. */
+  identity: NsiteIdentity;
   /** Leave the site. */
   onBack: () => void;
 }
@@ -23,7 +21,9 @@ interface NsiteTopBarProps {
  * It also stands in for the status bar inset. The bar is what runs under the
  * clock, so the site below it starts inside the safe area with nothing to pad.
  */
-export function NsiteTopBar({ title, app, onBack }: NsiteTopBarProps) {
+export function NsiteTopBar({ identity, onBack }: NsiteTopBarProps) {
+  const { name, iconUrl, fit, background } = identity;
+
   return (
     <div className="shrink-0 border-b border-border bg-background px-safe pt-safe">
       <div className="flex h-12 items-center gap-1 px-1">
@@ -43,25 +43,25 @@ export function NsiteTopBar({ title, app, onBack }: NsiteTopBarProps) {
           <span
             aria-hidden="true"
             className="size-5 shrink-0 overflow-hidden rounded-md"
-            style={{ background: app?.background ?? getTileGradient(title) }}
+            style={{ background: background ?? getTileGradient(name) }}
           >
-            {app?.iconUrl ? (
+            {iconUrl ? (
               <img
-                src={app.iconUrl}
+                src={iconUrl}
                 alt=""
                 className={cn(
                   'h-full w-full',
-                  app.fit === 'cover' ? 'object-cover' : 'p-0.5 object-contain',
+                  fit === 'cover' ? 'object-cover' : 'p-0.5 object-contain',
                 )}
               />
             ) : (
               <span className="flex h-full w-full items-center justify-center text-[10px] font-semibold leading-none text-white">
-                {getTileInitial(title)}
+                {getTileInitial(name)}
               </span>
             )}
           </span>
 
-          <span className="truncate text-sm font-medium text-foreground">{title}</span>
+          <span className="truncate text-sm font-medium text-foreground">{name}</span>
         </div>
 
         {/* Empty, and the same size as the way out, so that the identity is

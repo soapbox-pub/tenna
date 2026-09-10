@@ -86,6 +86,9 @@ export function NsiteApp({ launch }: NsiteAppProps) {
       event={event}
       channel={launch.channel ?? undefined}
       standalone
+      // What the window is called in the recents switcher, for the sheet to
+      // fall back to if the site is one the wall has never drawn a tile for.
+      label={launch.label}
       shutoff={launch.fromWall}
       share={share.status === 'ready' ? share.delivery ?? undefined : undefined}
       openPath={openPath}

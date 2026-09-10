@@ -7,6 +7,7 @@ import { NsiteTopBar } from '@/components/NsiteTopBar';
 import { WhiteNoise } from '@/components/WhiteNoise';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useNsiteApp } from '@/hooks/useNsiteApp';
+import { nsiteIdentity, useNsiteTile } from '@/hooks/useNsiteIdentity';
 import { useNsiteSignerRpc } from '@/hooks/useNsiteSignerRpc';
 import type { NsiteShareDelivery } from '@/lib/nsiteShareTarget';
 import { getNsiteName, getNsiteSubdomain } from '@/lib/nsiteSubdomain';
@@ -25,6 +26,14 @@ interface NsiteViewerProps {
    * the back gesture, and it takes the window with it.
    */
   standalone?: boolean;
+  /**
+   * The name the window was opened under, where the caller knows it.
+   *
+   * Only a fallback, and only for a site whose manifest hasn't been read and
+   * that the wall has never drawn — a site pinned to the home screen and later
+   * taken off the wall, whose tile went with it. See `useNsiteIdentity`.
+   */
+  label?: string;
   /**
    * Whether leaving plays the shutoff first.
    *
@@ -66,6 +75,7 @@ export function NsiteViewer({
   event,
   channel,
   standalone,
+  label,
   shutoff = true,
   share,
   openPath,
@@ -79,13 +89,33 @@ export function NsiteViewer({
   const name = getNsiteName(event) ?? 'nsite';
   const siteId = useMemo(() => getNsiteSubdomain(event), [event]);
 
-  const signerRpc = useNsiteSignerRpc({ siteId, siteName: name });
+  // The site as the wall knows it, off the disk and on the first frame.
+  const tile = useNsiteTile(event, label);
 
-  // What goes in the bar, for as long as there is one. The site's own name for
-  // itself where it has one, since that is what it is called on the wall the
-  // user pressed.
-  const { data: app } = useNsiteApp(event, { enabled: !standalone });
-  const title = app?.label ?? name;
+  // Told the name the user knows the site by rather than the one its manifest
+  // event carries. It is what a remembered permission is written down under,
+  // and the name on every notification Tenna posts for the site — which lands
+  // in the shade beside a launcher shortcut already wearing it.
+  //
+  // The tile's name rather than the site's own, which may still be a round
+  // trip away: a site that asks the moment it loads must not be written down
+  // under a worse name for having asked early.
+  const signerRpc = useNsiteSignerRpc({ siteId, siteName: tile.name });
+
+  // Whether the site's own manifest is worth going and reading.
+  //
+  // Always, where there is a bar over the site to put its name and mark in. A
+  // window of its own has no bar, and a Blossom round trip to decorate nothing
+  // would only be in the way of the site itself — right up until the site asks
+  // for something, because then Tenna has to say whose request it is, and it
+  // should say what the site says rather than what was written down about it
+  // last week. Kept once fetched, so the second question costs nothing.
+  const { data: app } = useNsiteApp(event, {
+    enabled: !standalone || !!signerRpc.pendingPrompt,
+  });
+
+  const identity = useMemo(() => nsiteIdentity(app, tile), [app, tile]);
+  const title = identity.name;
 
   const topBar = useMemo(
     () => (standalone ? undefined : { title }),
@@ -134,7 +164,7 @@ export function NsiteViewer({
           if (closing && e.target === e.currentTarget) onClose();
         }}
       >
-        {topBar && <NsiteTopBar title={topBar.title} app={app} onBack={handleClose} />}
+        {topBar && <NsiteTopBar identity={identity} onBack={handleClose} />}
 
         {/* The picture: everything below the bar, and everything there is
             without one. */}
@@ -191,14 +221,13 @@ export function NsiteViewer({
           )}
         </div>
 
-        {/* Whose request this is, said the same way the bar over the site says
-            it. A prompt that named the site differently from the strip above
-            it would be asking about something else as far as anyone reading
-            could tell. */}
+        {/* Whose request this is — the same identity the bar over the site
+            shows, and the same one on the tile that opened it. A prompt that
+            named the site differently from the thing the user pressed would be
+            asking about something else as far as anyone reading could tell. */}
         {signerRpc.pendingPrompt && (
           <NsitePermissionPrompt
-            appName={title}
-            appPicture={app?.iconUrl ?? undefined}
+            identity={identity}
             prompt={signerRpc.pendingPrompt}
             onResolve={signerRpc.resolvePrompt}
           />

@@ -1,8 +1,9 @@
 import { App } from '@capacitor/app';
 import type { PluginListenerHandle } from '@capacitor/core';
 import { useCallback, useEffect, useState } from 'react';
-import { Bell, Camera, Check, KeyRound, Lock, Mic, Pen, ShieldAlert, X } from 'lucide-react';
+import { Bell, Camera, Check, KeyRound, Lock, Mic, Pen, X } from 'lucide-react';
 
+import { TileArtwork } from '@/components/Tile';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
@@ -16,6 +17,7 @@ import {
 } from '@/components/ui/drawer';
 import { Label } from '@/components/ui/label';
 import { getKindLabel } from '@/lib/nsitePermissions';
+import type { NsiteIdentity } from '@/hooks/useNsiteIdentity';
 import type { NsitePromptState, NsitePromptDecision } from '@/hooks/useNsiteSignerRpc';
 
 // ---------------------------------------------------------------------------
@@ -23,10 +25,8 @@ import type { NsitePromptState, NsitePromptDecision } from '@/hooks/useNsiteSign
 // ---------------------------------------------------------------------------
 
 interface NsitePermissionPromptProps {
-  /** App icon URL, if available. */
-  appPicture?: string;
-  /** Human-readable app name. */
-  appName: string;
+  /** What the site asking is called, and what it looks like. */
+  identity: NsiteIdentity;
   /** The pending prompt state from useNsiteSignerRpc. */
   prompt: NsitePromptState;
   /** Callback to resolve the prompt. */
@@ -127,8 +127,7 @@ function truncate(str: string, max: number): string {
  * to write a decision the site gets to keep.
  */
 export function NsitePermissionPrompt({
-  appPicture,
-  appName,
+  identity,
   prompt,
   onResolve,
 }: NsitePermissionPromptProps) {
@@ -186,23 +185,25 @@ export function NsitePermissionPrompt({
           that asked, still there, waiting on an answer. */}
       <DrawerContent className="mx-auto min-h-[55svh] w-full max-w-lg">
         <DrawerHeader className="flex flex-row items-center gap-3 pt-2">
-          <div className="flex size-10 shrink-0 items-center justify-center overflow-hidden rounded-full bg-muted">
-            {appPicture ? (
-              <img
-                src={appPicture}
-                alt=""
-                className="size-full object-cover"
-                decoding="async"
-              />
-            ) : (
-              <ShieldAlert className="size-5 text-muted-foreground" />
-            )}
-          </div>
+          {/* The site's own tile, at the size a sheet's header wants one.
+              The wall's drawing rather than a picture in a circle, because a
+              person answering this has to recognise what is asking, and what
+              they know it by is the tile they pressed. A site that ships no
+              artwork gets the same initial on the same colour it has there,
+              which is still its mark and not a warning sign. */}
+          <span aria-hidden="true" className="relative block size-10 shrink-0">
+            <TileArtwork
+              name={identity.name}
+              iconUrl={identity.iconUrl}
+              fit={identity.fit}
+              background={identity.background}
+            />
+          </span>
           {/* Left-aligned against the drawer's own centring, which is for a
               sheet whose header is a heading. This one is an identity beside
               an icon, and it reads off the icon. */}
           <div className="min-w-0 flex-1 text-left">
-            <DrawerTitle className="truncate text-base">{appName}</DrawerTitle>
+            <DrawerTitle className="truncate text-base">{identity.name}</DrawerTitle>
             <DrawerDescription className="text-xs">Permission request</DrawerDescription>
           </div>
         </DrawerHeader>

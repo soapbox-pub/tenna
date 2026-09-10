@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.2.0] - 2026-09-10
+
+On Android, Tenna can now sign in through a signer app already installed on the
+phone. The key stays in that app — Tenna never holds it — and every signature,
+including the ones sites ask for, is approved there. Any signer apps on the
+device are offered on the login screen, above the field for a key.
+
+### Added
+
+- On Android, sign in through a signer app installed on the phone. Tenna never
+  holds the key: it asks that app for a signature and the app asks you. Signer
+  apps found on the device are listed on the login screen, each under its own
+  name and icon. Relays that ask Tenna to prove who it is will bring the signer
+  app forward to approve that too.
+
 ## [0.1.0] - 2026-09-10
 
 Tenna is a browser for nsites — websites published to Nostr rather than to a

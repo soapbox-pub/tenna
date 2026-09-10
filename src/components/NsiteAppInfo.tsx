@@ -4,6 +4,7 @@ import type { NostrEvent } from '@nostrify/nostrify';
 import { ArrowLeft, Check, ExternalLink, SquarePlus, Trash2, X } from 'lucide-react';
 import { nip19 } from 'nostr-tools';
 import { useEffect, useMemo, useRef, useState, type ComponentType } from 'react';
+import { Link } from 'react-router-dom';
 
 import { TileArtwork, TileFrame } from '@/components/Tile';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -40,7 +41,7 @@ import {
   type NsiteBrowserPermission,
 } from '@/lib/nsiteBrowserPermissions';
 import { getNsiteSubdomain, NSITE_SNAPSHOT_KIND } from '@/lib/nsiteSubdomain';
-import { cn } from '@/lib/utils';
+import { cn, middleEllipsis } from '@/lib/utils';
 
 interface NsiteAppInfoProps {
   /** The NIP-5A manifest event for the site being described. */
@@ -60,20 +61,6 @@ interface NsiteAppInfoProps {
 }
 
 /**
- * Take the middle out of a string too long to show whole.
- *
- * The middle, because both ends of an nsite id carry meaning — the front is
- * what tells two sites apart at a glance, and the tail is the site's own name.
- * A trailing ellipsis would throw away the half that reads.
- */
-function middleEllipsis(text: string, max: number): string {
-  if (text.length <= max) return text;
-  const head = Math.ceil((max - 1) / 2);
-  const tail = Math.floor((max - 1) / 2);
-  return `${text.slice(0, head)}…${text.slice(-tail)}`;
-}
-
-/**
  * Who put the site out, under the site's name.
  *
  * Not a claim the site makes about itself: the manifest is signed, so the
@@ -81,6 +68,11 @@ function middleEllipsis(text: string, max: number): string {
  * only that key's own profile shown in its place. The key is always known —
  * the profile may not be, and a publisher who has never written one is still
  * named, by the npub cut short, rather than left blank.
+ *
+ * Pressing it goes to their page, which is the same question asked further:
+ * whose is this, and what else is theirs. The screen closes on the way, since
+ * this one is a page rather than a card and there would otherwise be a
+ * full-screen dialog left sitting over the one it navigated to.
  */
 function Publisher({ pubkey }: { pubkey: string }) {
   const author = useAuthor(pubkey);
@@ -99,10 +91,18 @@ function Publisher({ pubkey }: { pubkey: string }) {
     );
   }
 
-  const name = metadata?.display_name || metadata?.name || shortNpub(pubkey);
+  const npub = (() => {
+    try {
+      return nip19.npubEncode(pubkey);
+    } catch {
+      return null;
+    }
+  })();
 
-  return (
-    <div className="flex max-w-full items-center gap-2">
+  const name = metadata?.display_name || metadata?.name || (npub ? middleEllipsis(npub, 15) : 'Unknown publisher');
+
+  const face = (
+    <>
       <Avatar size="sm" className="shrink-0">
         <AvatarImage src={metadata?.picture} alt="" />
         <AvatarFallback className="bg-foreground/10 text-foreground/80">
@@ -111,17 +111,25 @@ function Publisher({ pubkey }: { pubkey: string }) {
       </Avatar>
 
       <span className="min-w-0 truncate text-base text-foreground/70">{name}</span>
-    </div>
+    </>
   );
-}
 
-/** What to call a publisher who has never said. */
-function shortNpub(pubkey: string): string {
-  try {
-    return middleEllipsis(nip19.npubEncode(pubkey), 15);
-  } catch {
-    return 'Unknown publisher';
+  // A key that won't encode has no page to go to, so it stays a label.
+  if (!npub) {
+    return <div className="flex max-w-full items-center gap-2">{face}</div>;
   }
+
+  return (
+    <DialogClose asChild>
+      <Link
+        to={`/${npub}`}
+        title={`Everything published by ${name}`}
+        className="-mx-2 flex max-w-full items-center gap-2 rounded-full px-2 py-1 outline-none transition-colors hover:bg-foreground/10 focus-visible:ring-2 focus-visible:ring-primary"
+      >
+        {face}
+      </Link>
+    </DialogClose>
+  );
 }
 
 /**

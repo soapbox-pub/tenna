@@ -41,6 +41,7 @@ export default defineConfig(
         },
       ],
       "custom/no-placeholder-comments": "error",
+      "custom/no-html-sinks": "error",
       "no-warning-comments": ["error", { terms: ["fixme"] }],
     },
   },

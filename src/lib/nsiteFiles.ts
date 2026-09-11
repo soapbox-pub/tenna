@@ -2,19 +2,41 @@
  * Resolve an nsite's files from Blossom servers using the sha256 manifest
  * embedded in its NIP-5A event (`path` tags).
  */
+import { sha256 } from '@noble/hashes/sha2.js';
+import { bytesToHex } from '@noble/hashes/utils.js';
 import type { NostrEvent } from '@nostrify/nostrify';
 
 import { APP_BLOSSOM_SERVERS } from '@/lib/appBlossom';
 import { isNsiteKind, NSITE_NAMED_KIND } from '@/lib/nsiteSubdomain';
 
 /**
+ * A blob name: lowercase hex, thirty-two bytes of it.
+ *
+ * Every sha256 in a manifest is checked against this before it is used for
+ * anything, because it is used as a path. On the web that path is the tail of
+ * a Blossom URL, where a `../` would walk out of the server's blob namespace;
+ * on Android the same string names a file in the shared cache directory, where
+ * it would walk out of the cache and into the app's private storage. Neither
+ * is a place a stranger's event tag gets to point.
+ */
+const BLOB_NAME = /^[0-9a-f]{64}$/;
+
+/** Whether a manifest's sha256 is a name a blob can actually have. */
+export function isBlobName(value: string | undefined): value is string {
+  return typeof value === 'string' && BLOB_NAME.test(value);
+}
+
+/**
  * Build the path→sha256 manifest from a nsite event's `path` tags.
  * Each path tag has the format: ["path", "/file/path", "<sha256>"]
+ *
+ * A tag whose hash is not a hash is dropped rather than refused: a manifest is
+ * a stranger's event, and one bad tag in it is no reason to lose the site.
  */
 export function buildManifest(event: NostrEvent): Map<string, string> {
   const manifest = new Map<string, string>();
   for (const tag of event.tags) {
-    if (tag[0] === 'path' && tag[1] && tag[2]) {
+    if (tag[0] === 'path' && tag[1]?.startsWith('/') && isBlobName(tag[2])) {
       manifest.set(tag[1], tag[2]);
     }
   }
@@ -28,7 +50,7 @@ export function buildManifest(event: NostrEvent): Map<string, string> {
 export function isServableNsite(event: NostrEvent): boolean {
   const named = event.kind !== NSITE_NAMED_KIND || Boolean(event.tags.find(([n]) => n === 'd')?.[1]);
   const hasIndex = event.tags.some(
-    ([name, path, sha256]) => name === 'path' && path === '/index.html' && sha256,
+    ([name, path, hash]) => name === 'path' && path === '/index.html' && isBlobName(hash),
   );
   return isNsiteKind(event.kind) && named && hasIndex;
 }
@@ -36,13 +58,19 @@ export function isServableNsite(event: NostrEvent): boolean {
 /**
  * Resolve the Blossom servers for a nsite event.
  * Prefers the `server` tags on the event; falls back to the app defaults.
+ *
+ * `https:` only. The scheme comes off a stranger's event and decides what the
+ * app does with the string: anything else is either refused by the platform
+ * anyway (the CSP on the web, the cleartext policy on Android) or is not a
+ * fetch at all, and a `server` tag naming the device's own storage is not a
+ * mirror.
  */
 export function resolveServers(event: NostrEvent): string[] {
   const eventServers = event.tags
     .filter(([name]) => name === 'server')
     .map(([, url]) => url)
     .filter((url) => {
-      try { new URL(url); return true; } catch { return false; }
+      try { return new URL(url).protocol === 'https:'; } catch { return false; }
     });
 
   return eventServers.length > 0 ? eventServers : APP_BLOSSOM_SERVERS.servers;
@@ -56,24 +84,45 @@ export function resolveServers(event: NostrEvent): string[] {
 let preferredServer: string | null = null;
 
 /**
- * Fetch a blob for the given sha256 by trying Blossom servers.
+ * Fetch the blob for a sha256, trying Blossom servers, and verify it.
  *
  * If a server previously succeeded (the "preferred" server), it is tried
  * first. On success the preferred server is reinforced; on failure we fall
  * through to the remaining servers in order.
+ *
+ * **The bytes are hashed before they are returned.** A Blossom server is named
+ * by a `server` tag on the manifest, which is the publisher's choice and not
+ * the reader's, and every blob is fetched by content address — so the one
+ * thing that makes a mirror untrusted infrastructure rather than a host is
+ * checking that what came back is what was asked for. Without it a server
+ * serves a site whatever it likes, and on Android the answer is cached under
+ * the requested name in a store every site shares, so it serves *another*
+ * site whatever it likes. A server that fails the check is treated as a server
+ * that did not have the blob, and the next one is tried.
  */
-export async function fetchFromBlossom(sha256: string, servers: string[]): Promise<Response> {
+export async function fetchFromBlossom(
+  hash: string,
+  servers: string[],
+): Promise<Uint8Array<ArrayBuffer>> {
+  if (!isBlobName(hash)) throw new Error(`Not a blob name: ${hash}`);
+
   let lastError: unknown;
 
-  async function tryServer(server: string): Promise<Response | null> {
+  async function tryServer(server: string): Promise<Uint8Array<ArrayBuffer> | null> {
     const base = server.replace(/\/+$/, '');
-    const url = `${base}/${sha256}`;
+    const url = `${base}/${hash}`;
     try {
       const res = await fetch(url);
-      if (res.ok) {
-        preferredServer = server;
-        return res;
+      if (!res.ok) return null;
+
+      const bytes = new Uint8Array(await res.arrayBuffer());
+      if (bytesToHex(sha256(bytes)) !== hash) {
+        lastError = new Error(`${base} served something other than ${hash}`);
+        return null;
       }
+
+      preferredServer = server;
+      return bytes;
     } catch (err) {
       lastError = err;
     }
@@ -81,15 +130,15 @@ export async function fetchFromBlossom(sha256: string, servers: string[]): Promi
   }
 
   if (preferredServer && servers.includes(preferredServer)) {
-    const res = await tryServer(preferredServer);
-    if (res) return res;
+    const bytes = await tryServer(preferredServer);
+    if (bytes) return bytes;
   }
 
   for (const server of servers) {
     if (server === preferredServer) continue;
-    const res = await tryServer(server);
-    if (res) return res;
+    const bytes = await tryServer(server);
+    if (bytes) return bytes;
   }
 
-  throw lastError ?? new Error(`Failed to fetch blob ${sha256} from all servers`);
+  throw lastError ?? new Error(`Failed to fetch blob ${hash} from all servers`);
 }

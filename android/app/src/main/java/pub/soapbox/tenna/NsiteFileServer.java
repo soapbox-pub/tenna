@@ -18,7 +18,10 @@ import java.io.OutputStream;
 import java.io.SequenceInputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.net.URLConnection;
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -146,9 +149,18 @@ final class NsiteFileServer {
         return new NsiteFileServer(manifest.files, manifest.servers, cacheDir(context), null);
     }
 
-    /** The one blob cache every server shares: blobs are named by content. */
+    /**
+     * The one blob cache every server shares: blobs are named by content.
+     *
+     * Versioned in the name because the guarantee changed rather than the
+     * layout. Everything in the old directory was written by a build that
+     * cached whatever a server answered with, under the name that had been
+     * asked for — so a device upgrading into this one cannot be allowed to go
+     * on reading it. A new directory is the cheapest way to say that, and what
+     * it costs is one re-download of the sites the user actually opens.
+     */
     static File cacheDir(@NonNull Context context) {
-        return new File(context.getCacheDir(), "nsite");
+        return new File(context.getCacheDir(), "nsite-v2");
     }
 
     /**
@@ -259,7 +271,15 @@ final class NsiteFileServer {
 
     /** The cached blob for a sha256, downloading it first if necessary. */
     private File blob(String sha256) throws IOException {
+        // The manifest was filtered on the way in, on both sides of the
+        // bridge, but this is the line that turns the string into a path and
+        // so it is the line that has to be sure. See NsiteBlobs.
+        if (!NsiteBlobs.isName(sha256)) throw new IOException("Not a blob name: " + sha256);
+
         File cached = new File(cacheDir, sha256);
+        if (!cached.getCanonicalFile().getParentFile().equals(cacheDir.getCanonicalFile())) {
+            throw new IOException("Blob would not be in the cache: " + sha256);
+        }
         if (cached.exists() && cached.length() > 0) return cached;
 
         IOException lastError = null;
@@ -288,16 +308,32 @@ final class NsiteFileServer {
     }
 
     /**
-     * Download a blob to a temp file and move it into place.
+     * Download a blob to a temp file, check it is the blob that was asked for,
+     * and move it into place.
      *
      * Downloading whole rather than streaming through to the WebView keeps a
      * failed or truncated transfer from being cached, and from being handed to
      * the renderer as a short file. Web assets are small; the cost is one
      * extra write of bytes that were going to disk anyway.
+     *
+     * **The bytes are hashed as they are written.** A Blossom server is named
+     * by a {@code server} tag on the manifest, which is the publisher's choice
+     * and not the reader's, so the content address is the only thing that makes
+     * a mirror untrusted infrastructure rather than a host. It matters more
+     * here than on the web, because {@link #cacheDir} is shared by every site
+     * in the app and a blob is cached under the name that was *requested*: an
+     * unverified answer would let one site's chosen server poison a file
+     * another site is made of, and hand it script at that site's origin with
+     * that site's stored permissions. A server that fails is treated as one
+     * that did not have the blob, and the next is tried.
      */
     private File download(String server, String sha256, File destination) throws IOException {
         String base = server.replaceAll("/+$", "");
-        HttpURLConnection connection = (HttpURLConnection) new URL(base + "/" + sha256).openConnection();
+        URLConnection opened = new URL(base + "/" + sha256).openConnection();
+        if (!(opened instanceof HttpURLConnection)) {
+            throw new IOException("Not an HTTP server: " + base);
+        }
+        HttpURLConnection connection = (HttpURLConnection) opened;
         connection.setConnectTimeout(15_000);
         connection.setReadTimeout(30_000);
         connection.setInstanceFollowRedirects(true);
@@ -308,18 +344,33 @@ final class NsiteFileServer {
                 throw new IOException("HTTP " + status + " from " + base);
             }
 
+            MessageDigest digest;
+            try {
+                digest = MessageDigest.getInstance("SHA-256");
+            } catch (NoSuchAlgorithmException e) {
+                throw new IOException("No SHA-256 on this device", e);
+            }
+
             File temp = File.createTempFile("nsite", null, cacheDir);
             try (InputStream in = connection.getInputStream();
                  OutputStream out = new FileOutputStream(temp)) {
                 byte[] buffer = new byte[16 * 1024];
                 int read;
                 while ((read = in.read(buffer)) != -1) {
+                    digest.update(buffer, 0, read);
                     out.write(buffer, 0, read);
                 }
             } catch (IOException e) {
                 //noinspection ResultOfMethodCallIgnored
                 temp.delete();
                 throw e;
+            }
+
+            String served = NsiteBlobs.hex(digest.digest());
+            if (!served.equals(sha256)) {
+                //noinspection ResultOfMethodCallIgnored
+                temp.delete();
+                throw new IOException(base + " served " + served + ", not " + sha256);
             }
 
             if (!temp.renameTo(destination)) {

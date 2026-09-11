@@ -125,8 +125,7 @@ export function NsiteIframe({
       }
       if (!sha256) return null;
 
-      const res = await fetchFromBlossom(sha256, servers);
-      let body = new Uint8Array(await res.arrayBuffer());
+      let body = await fetchFromBlossom(sha256, servers);
       const contentType = getMimeType(servingPath);
 
       if (CSS_BEARING_TYPES.has(contentType)) {

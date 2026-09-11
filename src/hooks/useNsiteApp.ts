@@ -163,9 +163,8 @@ export async function resolveIcon(
   const sha256 = pathname ? files.get(pathname) : undefined;
 
   if (pathname && sha256) {
-    const res = await fetchFromBlossom(sha256, servers);
-    const buffer = await res.arrayBuffer();
-    return URL.createObjectURL(new Blob([buffer], { type: getMimeType(pathname) }));
+    const bytes = await fetchFromBlossom(sha256, servers);
+    return URL.createObjectURL(new Blob([bytes], { type: getMimeType(pathname) }));
   }
 
   try {
@@ -385,8 +384,8 @@ export function useNsiteApp(event: NostrEvent, options?: { enabled?: boolean }) 
       if (!indexSha) return NOTHING;
 
       const servers = resolveServers(event);
-      const indexRes = await fetchFromBlossom(indexSha, servers);
-      const doc = new DOMParser().parseFromString(await indexRes.text(), 'text/html');
+      const indexBytes = await fetchFromBlossom(indexSha, servers);
+      const doc = new DOMParser().parseFromString(new TextDecoder().decode(indexBytes), 'text/html');
 
       const candidates = collectFromDocument(doc);
       const monochrome: IconCandidate[] = [];
@@ -404,8 +403,8 @@ export function useNsiteApp(event: NostrEvent, options?: { enabled?: boolean }) 
 
       if (manifestPath && manifestSha) {
         try {
-          const res = await fetchFromBlossom(manifestSha, servers);
-          webManifest = await res.json();
+          const bytes = await fetchFromBlossom(manifestSha, servers);
+          webManifest = JSON.parse(new TextDecoder().decode(bytes));
           const base = manifestPath.replace(/[^/]*$/, '');
           const declared = collectFromWebManifest(webManifest, base);
           candidates.push(...declared.icons);

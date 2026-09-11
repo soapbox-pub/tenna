@@ -362,17 +362,23 @@ public class NsiteWebViewPlugin extends Plugin {
             return;
         }
 
+        // Checked again on this side of the bridge. The web layer filters the
+        // same manifest with the same rule, but what arrives here is whatever
+        // was posted to the bridge, and the values become filenames — see
+        // NsiteBlobs.
         final Map<String, String> files = new HashMap<>();
         for (Iterator<String> keys = manifest.keys(); keys.hasNext(); ) {
             String path = keys.next();
             String sha256 = manifest.optString(path, null);
-            if (sha256 != null) files.put(path, sha256);
+            if (NsiteBlobs.isPath(path) && NsiteBlobs.isName(sha256)) files.put(path, sha256);
         }
 
         final List<String> servers = new ArrayList<>();
         try {
             for (Object server : serverList.toList()) {
-                if (server instanceof String) servers.add((String) server);
+                if (server instanceof String && NsiteManifest.isServer((String) server)) {
+                    servers.add((String) server);
+                }
             }
         } catch (JSONException e) {
             call.reject("Malformed servers list", e);

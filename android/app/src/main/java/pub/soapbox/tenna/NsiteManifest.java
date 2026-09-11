@@ -69,10 +69,12 @@ final class NsiteManifest {
                 if ("path".equals(name) && tag.length() >= 3) {
                     String path = tag.optString(1, "");
                     String sha256 = tag.optString(2, "");
-                    if (!path.isEmpty() && !sha256.isEmpty()) files.put(path, sha256);
+                    // A tag whose hash is not a hash is dropped rather than
+                    // refused; see NsiteBlobs for why it is checked at all.
+                    if (NsiteBlobs.isPath(path) && NsiteBlobs.isName(sha256)) files.put(path, sha256);
                 } else if ("server".equals(name)) {
                     String url = tag.optString(1, "");
-                    if (isUrl(url)) servers.add(url);
+                    if (isServer(url)) servers.add(url);
                 }
             }
 
@@ -86,11 +88,22 @@ final class NsiteManifest {
         }
     }
 
-    private static boolean isUrl(String value) {
+    /**
+     * Whether a {@code server} tag names somewhere blobs can be fetched from.
+     *
+     * {@code https:} only, as in {@code src/lib/nsiteFiles.ts}. The scheme is
+     * the publisher's to write and decides what this app does with the string:
+     * {@code http:} is refused by the platform's cleartext policy anyway, and
+     * anything else is not a fetch — {@code file:} would have the app read its
+     * own storage on the site's behalf, and a scheme whose connection is not
+     * an {@link java.net.HttpURLConnection} takes the WebView's I/O thread
+     * down with a cast.
+     */
+    static boolean isServer(String value) {
         if (value == null || value.isEmpty()) return false;
         try {
             URI uri = new URI(value);
-            return uri.getScheme() != null && uri.getHost() != null;
+            return "https".equalsIgnoreCase(uri.getScheme()) && uri.getHost() != null;
         } catch (URISyntaxException e) {
             return false;
         }

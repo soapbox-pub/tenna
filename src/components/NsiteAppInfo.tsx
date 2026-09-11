@@ -110,7 +110,10 @@ function Publisher({ pubkey }: { pubkey: string }) {
         </AvatarFallback>
       </Avatar>
 
-      <span className="min-w-0 truncate text-base text-foreground/70">{name}</span>
+      {/* Whole, however long. This is a page rather than a row: there is
+          nothing after the name competing for the line, and a publisher cut
+          short here is the one fact the screen exists to state. */}
+      <span className="min-w-0 break-words text-base text-foreground/70">{name}</span>
     </>
   );
 

@@ -40,8 +40,11 @@ On **Android** a site is the top-level document of a WebView at
 `https://<subdomain>.nsite.localhost`, and every request it makes is answered
 from the manifest inside the app. Chromium treats `*.localhost` as potentially
 trustworthy, so the site is a secure context: `crypto.subtle`, service workers,
-the lot. Given a window of its own, a site gets its own task, its own card in
-the recents switcher, and the whole screen with nothing of Tenna's over it.
+the lot. Each site is on a WebView profile of its own, so its cookies, storage
+and workers are separate from every other site's and from Tenna's, and taking
+a site off the wall deletes them. Given a window of its own, a site gets its
+own task, its own card in the recents switcher, and the whole screen with
+nothing of Tenna's over it.
 
 On the **web** a site runs in a sandboxed cross-origin iframe on a subdomain of
 `iframe.diy`, derived by HMAC from a device-local secret so that no third party

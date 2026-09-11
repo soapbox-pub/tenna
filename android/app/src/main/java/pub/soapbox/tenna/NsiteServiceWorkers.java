@@ -22,7 +22,14 @@ import androidx.webkit.WebViewFeature;
  * nothing resolves {@code *.nsite.localhost}: no site could register a worker
  * at all, and a worker is what a push notification is delivered to.
  *
- * <p><b>There is exactly one such client per process, and it is a single
+ * <p>This is the client for the default profile, which on a WebView with
+ * profiles is Tenna's own and no site's: {@link NsiteProfiles} gives every
+ * site a profile with a worker client of its own, and it is that one a site's
+ * workers reach. What is left here is the fallback — a WebView too old for
+ * profiles keeps every site in the default one, and this is what serves them,
+ * as it served them all before.
+ *
+ * <p><b>There is exactly one such client per profile, and it is a single
  * slot.</b> Capacitor sets its own from {@code Bridge}, pointed at the local
  * asset server, which answers for {@code localhost} and returns null for
  * everything else — including every nsite. Whichever is set last wins, and the

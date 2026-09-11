@@ -409,11 +409,14 @@ public class NsiteWebViewPlugin extends Plugin {
                 siteChrome -> getActivity().runOnUiThread(() -> applySiteChrome(siteChrome))
             );
             // Registered so that the site's service worker — whose fetches
-            // reach the process-wide client rather than this view's — is
-            // served from this manifest rather than from the one on disk.
+            // reach its profile's client rather than this view's — is served
+            // from this manifest rather than from the one on disk.
             NsiteFileServers.register(siteHost, fileServer);
 
             WebView view = new WebView(getContext());
+            // Before anything else is done to it: a profile can only be set on
+            // a WebView that has not been used yet. See NsiteProfiles.
+            NsiteProfiles.attach(view, siteId);
             configure(view);
             installBridge(view, origin, providerScript);
             installDownloads(view, siteHost, origin);
@@ -953,8 +956,8 @@ public class NsiteWebViewPlugin extends Plugin {
             @Override
             public WebResourceResponse shouldInterceptRequest(WebView v, WebResourceRequest request) {
                 // Everything the document itself asks for. Its worker's
-                // requests do not come through here — see NsiteServiceWorkers
-                // — but both end up in the same router.
+                // requests do not come through here — see NsiteProfiles and
+                // NsiteServiceWorkers — but both end up in the same router.
                 return NsiteRequests.serve(getContext(), request);
             }
 

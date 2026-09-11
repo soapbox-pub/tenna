@@ -73,6 +73,7 @@ final class NappWakeWebView {
     }
 
     private final Handler main = new Handler(Looper.getMainLooper());
+    private final Context context;
     private final String siteId;
     private final OnIdle onIdle;
     private final Deque<Delivery> queue = new ArrayDeque<>();
@@ -84,14 +85,21 @@ final class NappWakeWebView {
     @Nullable private Delivery inFlight;
     private int nextId = 1;
 
+    /** Whether this page is on the site's own profile. See {@link #fellBack}. */
+    private boolean isolated;
+
+    /** Whether the default profile has already been tried. */
+    private boolean retried;
+
     private final Runnable idle = this::idle;
     private final Runnable timeout = this::timedOut;
 
     @MainThread
     NappWakeWebView(@NonNull Context context, @NonNull String siteId, @NonNull OnIdle onIdle) {
+        this.context = context.getApplicationContext();
         this.siteId = siteId;
         this.onIdle = onIdle;
-        this.webView = build(context.getApplicationContext());
+        this.webView = build(true);
     }
 
     @NonNull
@@ -164,6 +172,16 @@ final class NappWakeWebView {
     }
 
     private void timedOut() {
+        if (!ready) {
+            // The page itself never came up, so there is nothing to move on
+            // to: every delivery held here is waiting on a page that will
+            // never take one. Idling is what gets them answered, since going
+            // idle is what destroys this, and destroying it empties the queue.
+            Log.w(TAG, "The wake page for " + siteId + " never came up; dropping what it held");
+            onIdle.onIdle(this);
+            return;
+        }
+
         Log.w(TAG, "Worker for " + siteId + " did not answer; moving on");
         finish();
     }
@@ -185,9 +203,11 @@ final class NappWakeWebView {
                 case "done":
                     if (message.optBoolean("delivered", true)) {
                         Log.i(TAG, "Worker for " + siteId + " handled an event");
-                    } else {
-                        Log.i(TAG, "No active worker for " + siteId + "; event dropped");
+                        finish();
+                        break;
                     }
+                    if (fellBack()) break;
+                    Log.i(TAG, "No active worker for " + siteId + "; event dropped");
                     finish();
                     break;
                 default:
@@ -198,13 +218,70 @@ final class NappWakeWebView {
         }
     }
 
+    /**
+     * Look for the worker in the store the site used to share, having found
+     * none in its own.
+     *
+     * A site that subscribed to something before Tenna gave sites profiles
+     * registered its worker in the one store everything shared, and that
+     * registration is invisible from the site's new profile — so the first
+     * event to arrive after the update would find nothing there and be
+     * dropped, and every one after it, until the day the user happened to
+     * open the site and its page registered the worker again. Which is to say
+     * notifications would stop, silently, for sites that were working.
+     *
+     * So an empty profile is not taken as an answer: the page is rebuilt on
+     * the default profile and the event delivered again, which is what the app
+     * did before profiles existed. Once. A site with no worker anywhere
+     * answers the same way twice and is then let go.
+     *
+     * This also covers the site whose worker is registered by something the
+     * user has to press, rather than on load — for which opening the window
+     * once would not have been enough either.
+     */
+    @MainThread
+    private boolean fellBack() {
+        if (!isolated || retried || destroyed) return false;
+
+        Delivery again = inFlight;
+        if (again == null) return false;
+
+        Log.i(TAG, "No worker in the store for " + siteId + "; trying the one sites shared");
+
+        retried = true;
+        main.removeCallbacks(timeout);
+        inFlight = null;
+        queue.addFirst(again);
+
+        ready = false;
+        proxy = null;
+        WebView old = webView;
+        webView = null;
+        if (old != null) old.destroy();
+
+        webView = build(false);
+        if (webView == null) {
+            // Cannot happen — the same check passed when this was made — but
+            // a queue nobody will ever read is a delivery that never settles.
+            onIdle.onIdle(this);
+        }
+        return true;
+    }
+
     // -----------------------------------------------------------------------
     // The page
     // -----------------------------------------------------------------------
 
+    /**
+     * Load the wake page, on the site's own profile or on the default one.
+     *
+     * Which it was is remembered: a page on the site's profile sees only the
+     * workers registered there, and finding none is a question rather than an
+     * answer. See {@link #fellBack}.
+     */
     @SuppressLint("SetJavaScriptEnabled")
     @Nullable
-    private WebView build(Context context) {
+    private WebView build(boolean isolate) {
         if (!WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER)) {
             Log.w(TAG, "No web message listener; cannot wake workers");
             return null;
@@ -213,6 +290,10 @@ final class NappWakeWebView {
         String origin = NsiteOrigins.originFor(siteId);
 
         WebView view = new WebView(context);
+        // Before anything else is done to it, and the site's own profile: the
+        // worker this is here to wake belongs to the store its window uses.
+        isolated = isolate && NsiteProfiles.attach(view, siteId);
+
         WebSettings settings = view.getSettings();
         settings.setJavaScriptEnabled(true);
         settings.setDomStorageEnabled(true);

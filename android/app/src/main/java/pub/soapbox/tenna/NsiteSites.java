@@ -32,7 +32,9 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 /**
  * What an nsite needs on disk to be launched in a window of its own.
@@ -217,6 +219,26 @@ final class NsiteSites {
             if (record != null) records.add(record);
         }
         return records;
+    }
+
+    /**
+     * The {@link #key} of every site with a record.
+     *
+     * The names off the directory, with nothing read or parsed. For a caller
+     * that only needs to know which sites still exist — {@link
+     * NsiteProfiles#sweep} — and runs where the cost of opening every record
+     * would be paid before the first window could be drawn.
+     */
+    @NonNull
+    static Set<String> keys(Context context) {
+        String[] names = directory(context).list((dir, name) -> name.endsWith(".json"));
+        if (names == null) return Collections.emptySet();
+
+        Set<String> keys = new HashSet<>(names.length);
+        for (String name : names) {
+            keys.add(name.substring(0, name.length() - ".json".length()));
+        }
+        return keys;
     }
 
     /** What a site said it would take from the share sheet, if anything. */

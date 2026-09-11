@@ -525,19 +525,34 @@ treats any `*.localhost` origin as potentially trustworthy, so the site is a
 secure context — `crypto.subtle`, service workers, the lot — and every request
 it makes to its own origin is answered from the manifest inside the app.
 
-Answering them takes two clients, because a service worker's fetches do not
-belong to any one WebView:
+That WebView is on a **storage profile of its own**, one per site, so a site's
+cookies, storage, cache and service workers are its own and nobody else's —
+including Tenna's, which keeps the default profile. Without it there is one
+store for the whole app, and since `nsite.localhost` is not a public suffix,
+any site could write a cookie scoped to it that every sibling would then send
+and read. A profile is not a sandbox: every WebView in the app shares one
+renderer process whatever profile it is on. See `NsiteProfiles`.
+
+Answering a site's requests takes two clients, because a service worker's
+fetches do not belong to any one WebView:
 
 - The site's own WebView client serves the document and everything the
   document asks for.
-- A single, process-wide `ServiceWorkerClient` serves everything a worker asks
+- A `ServiceWorkerClient` on the site's profile serves everything a worker asks
   for, including the fetch of the worker's own script. That is where the shim
   is appended, and it works with no window open at all — which is what lets a
   notification arrive for a site the user closed.
 
-**If you are working on this app:** that process-wide client is a single slot,
-and Capacitor claims it from `Bridge` unless
+**If you are working on this app:** that client is a single slot per profile,
+and Capacitor claims the default profile's from `Bridge` unless
 `android.resolveServiceWorkerRequests` is `false` in `capacitor.config.ts`.
 Capacitor's client answers only for `localhost` and returns nothing for
-anything else, so with it in place no nsite can register a worker and every
-notification silently goes nowhere. Leave that flag off.
+anything else, so with it in place no nsite on the default profile can register
+a worker and every notification silently goes nowhere. Leave that flag off:
+it is what a WebView too old for profiles — before 114 — still depends on.
+
+A wake page loads on its site's profile, which is where the site's window
+registered the worker. A site that subscribed before profiles existed has its
+worker in the shared store instead, so a wake page that finds nothing in the
+profile rebuilds itself on the default one and delivers there, once, rather
+than dropping the event.

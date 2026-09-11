@@ -560,9 +560,17 @@ public class NsiteShortcutsPlugin extends Plugin {
      * A site with no record cannot be served, so it must not go on being
      * offered a share it would have nowhere to put, nor leave a notification in
      * the shade whose tap would open nothing.
+     *
+     * What the site stored for itself goes too, which it could not before:
+     * everything it wrote is in a profile of its own, and the profile is what
+     * is being deleted. That is the deletion most likely to have to wait —
+     * closing a site's own window is a common way to get here, and the window
+     * is what holds the profile open — so it may happen at the next start
+     * instead. See {@link NsiteProfiles#sweep}.
      */
     private static void forgetSite(@NonNull Context context, @NonNull String siteId) {
         NsiteSites.forget(context, siteId);
+        NsiteProfiles.forget(context, siteId);
         ShortcutManagerCompat.removeDynamicShortcuts(
             context,
             Collections.singletonList(NsiteSites.key(siteId))

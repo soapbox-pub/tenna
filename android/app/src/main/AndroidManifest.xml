@@ -6,8 +6,8 @@
         login is a Keystore-wrapped secret in shared_prefs, which restores to
         another device as ciphertext nobody can open — but beside it sit the
         sites the user has opened, what each has been allowed to do with their
-        keys, what it subscribes to on which relays, and the WebView profile
-        every one of those sites has storage in. That is a reading history and
+        keys, what it subscribes to on which relays, and a WebView profile per
+        site holding everything that site stored. That is a reading history and
         a set of standing grants, and neither belongs in someone's cloud backup
         by default.
     -->

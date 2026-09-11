@@ -544,13 +544,20 @@ export function NsiteAppInfo({
             </TileFrame>
           </div>
 
-          <h2 className="max-w-full break-words text-center text-3xl font-semibold leading-tight">
+          <h2 className="w-full break-words text-center text-3xl font-semibold leading-tight">
             {name}
           </h2>
 
           {/* Closer to the name than the gap would put it, because the two are
-              one thing being read: what this is, and whose it is. */}
-          <div className="-mt-2 flex max-w-full justify-center">
+              one thing being read: what this is, and whose it is.
+
+              Full width rather than left to size itself to its contents: a
+              box that shrink-wraps a flex row containing wrappable text is
+              measured at its narrowest, and the name inside breaks at every
+              space it has with two thirds of the screen still empty beside
+              it. Given the whole width, the row takes what it needs and the
+              name wraps only when it truly cannot fit. */}
+          <div className="-mt-2 flex w-full justify-center">
             <Publisher pubkey={event.pubkey} />
           </div>
 

@@ -177,7 +177,7 @@ export function ProfilePage({ pubkey }: ProfilePageProps) {
           {author.isPending ? (
             <Skeleton className="h-8 w-48 bg-foreground/10" />
           ) : (
-            <h2 className="max-w-full break-words text-center text-3xl font-semibold leading-tight">
+            <h2 className="w-full break-words text-center text-3xl font-semibold leading-tight">
               {name ?? npub}
             </h2>
           )}
@@ -196,7 +196,10 @@ export function ProfilePage({ pubkey }: ProfilePageProps) {
           {/* `w-full` before the cap, or there isn't one: a bare `max-w-md` is
               448px, which is wider than the phone this is being read on, and
               a centred paragraph too wide for its column hangs off both edges
-              of the screen at once. */}
+              of the screen at once. Everything else in this column is given
+              its width for the same reason, from the other end — text left to
+              size itself here is measured at its narrowest and breaks a line
+              early. */}
           {about && (
             <p className="w-full max-w-md whitespace-pre-wrap break-words text-center text-base leading-relaxed text-foreground/75">
               {about}

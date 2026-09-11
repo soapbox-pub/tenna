@@ -209,7 +209,9 @@ export function TileButton({
         {children}
       </TileFrame>
 
-      <span className="w-full truncate px-0.5 text-center text-xs text-foreground/90 drop-shadow-[0_1px_3px_rgba(0,0,0,0.9)] sm:text-sm">
+      {/* The halo follows the theme rather than being black — see `tile-label`
+          in `index.css`. */}
+      <span className="tile-label w-full truncate px-0.5 text-center text-xs text-foreground/90 sm:text-sm">
         {name}
       </span>
     </button>

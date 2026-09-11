@@ -209,8 +209,15 @@ export function ProfilePage({ pubkey }: ProfilePageProps) {
 
         {/* Their apps, laid out as apps. The grid is the wall's own — as many
             columns as fit at 68px, so a tile here is the size and shape of the
-            tile it becomes when it is pressed. */}
-        <section className="rounded-2xl bg-foreground/[0.06] px-4 py-5">
+            tile it becomes when it is pressed.
+
+            A real surface rather than the 6% wash the other panels use, because
+            this one is the only place on the page where small text sits over
+            somebody else's wallpaper: a tile's name is 12px, and eight of them
+            over a photograph is where a page in a stranger's theme stops being
+            readable. Frosted rather than opaque, so their picture still shows
+            through the thing it is being read against. */}
+        <section className="rounded-2xl border border-border bg-card/70 px-4 py-5 backdrop-blur-md">
           <h3 className="px-1 pb-5 text-lg font-medium text-foreground">Apps</h3>
 
           {isLoading && (

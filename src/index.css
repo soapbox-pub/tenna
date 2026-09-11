@@ -274,6 +274,28 @@
   mask-repeat: no-repeat;
 }
 
+/*
+ * The name under a tile, which is written on whatever the wallpaper happens to
+ * be.
+ *
+ * A 12px label over somebody's photograph needs something between it and the
+ * picture, and what it gets is a halo of the theme's own background — the
+ * colour of the page the text would be sitting on if there were no picture.
+ * Black was right for as long as the only wall was Tenna's, which is a dark
+ * one with light ink on it; under a light theme the ink is near-black too, and
+ * a black glow around black letters is a smudge rather than a separation.
+ * Following the background instead, the halo is always the opposite of the ink
+ * and always lifts it off the wallpaper.
+ *
+ * Two stops: a tight one that does the separating, and a soft one that keeps
+ * the edge from reading as an outline.
+ */
+@utility tile-label {
+  text-shadow:
+    0 0 3px var(--theme-background),
+    0 1px 6px color-mix(in oklab, var(--theme-background) 80%, transparent);
+}
+
 /* CRT design language: scanlines, hum bar, OSD text, tube power transitions */
 
 .crt-scanlines {

@@ -11,7 +11,7 @@ import { nsitePointerFilter } from '@/lib/nsiteAddress';
 import { isServableNsite } from '@/lib/nsiteFiles';
 import { NsiteShortcuts, supportsNsiteWindows } from '@/lib/nsiteShortcutsPlugin';
 import { getNsiteSubdomain, hexToBase36, parseNsiteSubdomain } from '@/lib/nsiteSubdomain';
-import { APP_ID, DEFAULT_NSITES, NSITE_RELAY, TEAM_SOAPBOX_PUBKEY } from '@/lib/tenna';
+import { APP_ID, DEFAULT_NSITES, NSITE_RELAY } from '@/lib/tenna';
 import { removeTileSnapshot } from '@/lib/tileSnapshot';
 import { nativeAppUri, nsiteUri, parseWallUri, wallUriKey } from '@/lib/wallUri';
 
@@ -24,14 +24,13 @@ const LEGACY_APPS = `${APP_ID}:added-native-apps`;
 /**
  * What a wall nobody has touched starts out with.
  *
- * Three apps and then the plus. A home screen shipped full is a home screen
- * the user reads as furniture rather than as theirs; a few tiles and an
- * obvious empty slot say what the wall is for and leave the rest of it to
- * them. Every one of these can be moved or taken off, and nothing puts them
- * back.
+ * Apps, and then the plus. A starting set rather than a lineup: enough that
+ * the first screen shows what a site on a wall looks like and is worth
+ * opening, with the empty slot after it saying the rest is theirs. Every one
+ * of these can be moved or taken off, and nothing puts them back.
  */
-const DEFAULTS = DEFAULT_NSITES.map((identifier) =>
-  nsiteUri(`${hexToBase36(TEAM_SOAPBOX_PUBKEY)}${identifier}`),
+const DEFAULTS = DEFAULT_NSITES.map(({ pubkey, identifier }) =>
+  nsiteUri(`${hexToBase36(pubkey)}${identifier}`),
 );
 
 /** Only the shape survives a round trip through localStorage; check it. */

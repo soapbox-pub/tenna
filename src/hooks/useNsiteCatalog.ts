@@ -12,10 +12,11 @@ import { NSITE_CATALOG_PUBKEYS, NSITE_RELAY } from '@/lib/tenna';
 
 /**
  * The nsites Tenna offers to install — Team Soapbox's apps, the clients Nsite
- * Packagers puts on Nostr, and whatever the people the user follows publish.
+ * Packagers puts on Nostr, the publishers of the sites Tenna ships on the
+ * wall, and whatever the people the user follows publish.
  *
- * The first two are a catalog in the ordinary sense: someone packaged these to
- * be installed. Follows are not that, and are the better half of the list
+ * The named ones are a catalog in the ordinary sense: someone packaged these
+ * to be installed. Follows are not that, and are the better half of the list
  * anyway — the web a person already keeps up with is a far better guess at
  * which sites they want on their wall than anything a publisher could pick for
  * them, and it is a list nobody has to curate.

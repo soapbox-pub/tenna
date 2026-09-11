@@ -375,7 +375,12 @@ public class NsiteShortcutsPlugin extends Plugin {
         if (shareToken != null) result.put("shareToken", shareToken);
 
         // Where inside the site to open, when a notification named a place.
-        String path = intent.getStringExtra(NsiteAppActivity.EXTRA_PATH);
+        // Screened here rather than trusted and screened later: this activity
+        // is exported, so the extra is whatever the caller wrote, and
+        // `NappOptions.path` is the one rule for what a site-absolute path may
+        // be — no scheme, no host, no `//` that would make it somebody else's
+        // origin.
+        String path = NappOptions.path(intent.getStringExtra(NsiteAppActivity.EXTRA_PATH));
         if (path != null) result.put("path", path);
 
         NsiteSites.Record record = NsiteSites.load(getContext(), siteId);

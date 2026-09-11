@@ -47,6 +47,31 @@ final class NappTokens {
 
     private NappTokens() {}
 
+    /**
+     * The value that says a notification intent was built by this app.
+     *
+     * {@link NsiteAppActivity} is exported — the launcher has to be able to
+     * start a pinned site — so any app on the device can send it an intent
+     * naming a site and a notification key. Keys are derived from public
+     * values, so they can be guessed. Without this, another app could raise a
+     * {@code notificationclick} in a site's worker for a notification nobody
+     * pressed, and open the window inside which that worker is then allowed to
+     * open windows of its own.
+     *
+     * Derived from the same install secret as a site token, so it survives a
+     * restart: a notification outlives the process that posted it, and the
+     * PendingIntent it carries has to still be good afterwards.
+     */
+    @NonNull
+    static String intentNonce(@NonNull Context context) {
+        return forSite(context, "\u0000notification-intent");
+    }
+
+    /** Whether a value is this install's intent nonce. */
+    static boolean isIntentNonce(@NonNull Context context, @Nullable String value) {
+        return matches(context, "\u0000notification-intent", value);
+    }
+
     /** The token for a site: HMAC-SHA256 of its id under the install secret. */
     @NonNull
     static String forSite(@NonNull Context context, @NonNull String siteId) {

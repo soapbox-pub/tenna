@@ -1046,7 +1046,14 @@ public class NsiteWebViewPlugin extends Plugin {
      * handler anyway, and are refused here so that stays true.
      */
     private static final Set<String> UNHANDLED_SCHEMES = new HashSet<>(Arrays.asList(
-        "intent", "android-app", "file", "content", "javascript", "data", "about"
+        "intent", "android-app", "file", "content", "javascript", "data", "about",
+        // A signer app attributes a `nostrsigner:` request to the package that
+        // sent it, which here is Tenna — so a site could put an event in front
+        // of a signer the user has told to approve Tenna without asking. The
+        // answer never comes back, so there is nothing to gain but the prompt
+        // itself, and a prompt that misnames who is asking is the thing worth
+        // refusing.
+        "nostrsigner"
     ));
 
     /**
@@ -1065,7 +1072,21 @@ public class NsiteWebViewPlugin extends Plugin {
             this::startForResult,
             // A file at somebody else's origin is a link out, and goes where
             // every other link out of a site's window goes.
+            //
+            // Web schemes only, and not because the denylist would let the
+            // others through — because this is the one hand-off with no
+            // gesture behind it. `onDownloadStart` is raised for any response
+            // that says `Content-Disposition: attachment`, including one a
+            // hidden iframe asked for, so a site can reach it without the user
+            // doing anything. A download is a file, and a file is fetched over
+            // http; nothing else belongs on a path a page can take by itself.
             url -> {
+                String scheme = Uri.parse(url).getScheme();
+                scheme = scheme == null ? "" : scheme.toLowerCase(Locale.ROOT);
+                if (!"https".equals(scheme) && !"http".equals(scheme)) {
+                    Log.i(TAG, "Refused to hand the device a " + scheme + ": download");
+                    return;
+                }
                 if (!NativeApps.openUri(getContext(), url)) {
                     Log.i(TAG, "Nothing on the device answers for " + url);
                 }

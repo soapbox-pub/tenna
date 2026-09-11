@@ -7,6 +7,7 @@ import android.graphics.Bitmap;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.util.Log;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
@@ -45,6 +46,8 @@ import com.getcapacitor.BridgeActivity;
  */
 public class NsiteAppActivity extends BridgeActivity {
 
+    private static final String TAG = "NsiteAppActivity";
+
     /** The nsite subdomain this task is for. */
     static final String EXTRA_SITE_ID = "pub.soapbox.tenna.SITE_ID";
 
@@ -62,6 +65,17 @@ public class NsiteAppActivity extends BridgeActivity {
 
     /** The notification this window was opened from, for the worker's event. */
     static final String EXTRA_NOTIFICATION = "pub.soapbox.tenna.NOTIFICATION";
+
+    /**
+     * Proof that {@link #EXTRA_NOTIFICATION} was put there by this app.
+     *
+     * This activity is exported, because a pinned shortcut is started by the
+     * launcher. Everything else it accepts only decides which of the user's
+     * own sites opens and where; this one raises an event inside that site's
+     * worker and opens the window in which the worker may then open more. See
+     * {@link NappTokens#intentNonce}.
+     */
+    static final String EXTRA_NONCE = "pub.soapbox.tenna.NONCE";
 
     /** Scheme for the per-site data URI that separates one task from another. */
     private static final String TASK_SCHEME = "tenna-nsite";
@@ -110,7 +124,10 @@ public class NsiteAppActivity extends BridgeActivity {
     ) {
         Intent intent = intentFor(context, siteId, 0, false);
         if (path != null) intent.putExtra(EXTRA_PATH, path);
-        if (notification != null) intent.putExtra(EXTRA_NOTIFICATION, notification);
+        if (notification != null) {
+            intent.putExtra(EXTRA_NOTIFICATION, notification);
+            intent.putExtra(EXTRA_NONCE, NappTokens.intentNonce(context));
+        }
         return intent;
     }
 
@@ -179,7 +196,17 @@ public class NsiteAppActivity extends BridgeActivity {
         String key = intent.getStringExtra(EXTRA_NOTIFICATION);
         if (siteId == null || key == null) return;
 
+        // Only this app's own PendingIntents say a notification was pressed.
+        // Anyone can send this activity an intent; nobody else can put the
+        // nonce in it.
+        if (!NappTokens.isIntentNonce(this, intent.getStringExtra(EXTRA_NONCE))) {
+            Log.i(TAG, "Ignoring a notification event nobody here raised, for " + siteId);
+            intent.removeExtra(EXTRA_NOTIFICATION);
+            return;
+        }
+
         intent.removeExtra(EXTRA_NOTIFICATION);
+        intent.removeExtra(EXTRA_NONCE);
         NappPushService.dispatchNotificationEvent(this, siteId, "notificationclick", key, "", null);
     }
 

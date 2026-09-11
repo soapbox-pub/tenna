@@ -1,9 +1,19 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
+    <!--
+        allowBackup is off because of what this app's private storage is. The
+        login is a Keystore-wrapped secret in shared_prefs, which restores to
+        another device as ciphertext nobody can open — but beside it sit the
+        sites the user has opened, what each has been allowed to do with their
+        keys, what it subscribes to on which relays, and the WebView profile
+        every one of those sites has storage in. That is a reading history and
+        a set of standing grants, and neither belongs in someone's cloud backup
+        by default.
+    -->
     <application
         android:name=".TennaApplication"
-        android:allowBackup="true"
+        android:allowBackup="false"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
         android:roundIcon="@mipmap/ic_launcher_round"

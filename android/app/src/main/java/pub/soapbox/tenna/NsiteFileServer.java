@@ -201,6 +201,14 @@ final class NsiteFileServer {
         // /index.html means something different after the site publishes
         // again. Our own sha256 cache is the one that's safe to keep.
         headers.put("Cache-Control", "no-cache");
+        // The type is read off the manifest's path, so a site names it by
+        // choosing a file extension. Without this the renderer is free to
+        // disagree and sniff a script out of something declared otherwise.
+        headers.put("X-Content-Type-Options", "nosniff");
+        // Every site here is a sibling on `nsite.localhost`, served by this
+        // same code. Nothing one site is made of is another's to embed: no
+        // <script src> from a neighbour's origin, no images, no fonts.
+        headers.put("Cross-Origin-Resource-Policy", "same-origin");
 
         try {
             InputStream body;

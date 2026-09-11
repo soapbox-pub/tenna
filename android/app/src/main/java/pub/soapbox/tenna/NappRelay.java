@@ -39,6 +39,16 @@ final class NappRelay extends WebSocketListener {
 
     private static final String TAG = "NappRelay";
 
+    /**
+     * The longest relay frame worth parsing.
+     *
+     * A notification's whole payload is capped at 64 KiB on the way out, and
+     * an event that produces one is smaller still. This is generous against
+     * that and cheap against a relay that would rather the service ran out of
+     * memory than delivered anything.
+     */
+    private static final int MAX_FRAME_CHARS = 512 * 1024;
+
     interface Listener {
         /** An EVENT under one of our REQs. Called on an OkHttp thread. */
         void onEvent(@NonNull String relayUrl, @NonNull NappPlan.Subscription subscription, @NonNull JSONObject event);
@@ -203,6 +213,16 @@ final class NappRelay extends WebSocketListener {
 
     @Override
     public void onMessage(@NonNull WebSocket webSocket, @NonNull String text) {
+        // A relay is somebody else's server and this runs in a foreground
+        // service with no window to die quietly: a frame big enough to parse
+        // is a frame big enough to take the process out, and org.json builds
+        // the whole tree in memory. Nothing a notification is made of comes
+        // near this, so anything past it is not an event.
+        if (text.length() > MAX_FRAME_CHARS) {
+            Log.w(TAG, url + " sent " + text.length() + " characters; dropping the frame");
+            return;
+        }
+
         JSONArray message;
         try {
             message = new JSONArray(text);

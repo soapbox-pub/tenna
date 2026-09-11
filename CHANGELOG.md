@@ -1,5 +1,45 @@
 # Changelog
 
+## [0.2.1] - 2026-09-10
+
+A publisher's page now wears that publisher's own colours and lays their sites
+out as a wall of tiles. The sheet that asks permission shows the app's own icon
+and the name you know it by, rather than a shield. A new device starts with
+more on its wall, and the list of apps to add now offers your own sites
+alongside the ones you follow.
+
+### Added
+
+- A new wall starts with more on it: Ditto, Shakespeare, Armada, Birdstar,
+  NostrHub, Agora, YourSpace, Polaroids and Espy. All of them can be moved or
+  taken off, and nothing puts them back.
+- Your own sites are offered in the list of apps to add, beside the ones the
+  people you follow publish.
+
+### Changed
+
+- A publisher's page wears their theme while it is open — their colours, their
+  fonts, their picture behind it — and their sites are laid out as tiles of the
+  size and shape they take on the wall, each one ticked if it is already there.
+  The text on the page sits on frosted panels, so a name or a paragraph stays
+  readable over whatever picture a stranger chose.
+- The sheet asking to sign shows the site's own tile and the name it is known
+  by on the wall, instead of a shield and the name buried in its address. That
+  name is what a remembered permission is filed under, and what notifications
+  Tenna posts for the site are signed with, so a notification arrives wearing
+  the same name as the icon beside it.
+- A publisher's name is shown whole, wrapping if it must, instead of being cut
+  short.
+
+### Fixed
+
+- The name under a tile is legible over any wallpaper. Its halo follows the
+  theme's own background colour rather than always being black, which under a
+  light theme put a dark smudge around dark letters.
+- The "remember this" box in a permission request is a square again. It was
+  drawn as a circle, which is a radio button's shape and means the opposite
+  thing.
+
 ## [0.2.0] - 2026-09-10
 
 On Android, Tenna can now sign in through a signer app already installed on the

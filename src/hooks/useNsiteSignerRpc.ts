@@ -11,6 +11,7 @@
 import { useCallback, useRef, useState } from 'react';
 
 import { useCurrentUser } from '@/hooks/useCurrentUser';
+import { getSensitiveKindReason } from '@/lib/kindLabels';
 import { NappPush, supportsNappPush } from '@/lib/nappPushPlugin';
 import { normalizeNappSubscriptions } from '@/lib/nappSubscriptions';
 import {
@@ -145,7 +146,13 @@ export function useNsiteSignerRpc({
       // No stored decision — ask the user.
       const decision = await showPrompt(promptState);
 
-      if (decision.remember) {
+      // Some kinds are never remembered, however the prompt was answered.
+      // The sheet withholds the checkbox for these, but that is a fact about
+      // the view; this is the line that decides what gets written, so this is
+      // where it has to hold. See `SENSITIVE_KINDS`.
+      const rememberable = kind === null || getSensitiveKindReason(kind) === null;
+
+      if (decision.remember && rememberable) {
         setNsitePermission(siteId, user.pubkey, siteName, type, kind, decision.allowed);
       }
 

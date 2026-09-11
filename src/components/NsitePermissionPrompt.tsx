@@ -1,7 +1,7 @@
 import { App } from '@capacitor/app';
 import type { PluginListenerHandle } from '@capacitor/core';
 import { useCallback, useEffect, useState } from 'react';
-import { Bell, Camera, Check, KeyRound, Lock, Mic, Pen, X } from 'lucide-react';
+import { Bell, Camera, Check, KeyRound, Lock, Mic, Pen, TriangleAlert, X } from 'lucide-react';
 
 import { TileArtwork } from '@/components/Tile';
 import { Button } from '@/components/ui/button';
@@ -16,7 +16,7 @@ import {
   DrawerTitle,
 } from '@/components/ui/drawer';
 import { Label } from '@/components/ui/label';
-import { getKindLabel } from '@/lib/nsitePermissions';
+import { getKindLabel, getSensitiveKindReason } from '@/lib/kindLabels';
 import type { NsiteIdentity } from '@/hooks/useNsiteIdentity';
 import type { NsitePromptState, NsitePromptDecision } from '@/hooks/useNsiteSignerRpc';
 
@@ -172,6 +172,26 @@ export function NsitePermissionPrompt({
   const eventContent = prompt.event?.content as string | undefined;
   const eventJson = prompt.event ? JSON.stringify(prompt.event, null, 2) : null;
 
+  // The tags, which are where a signing request keeps the things a reader
+  // would actually want to know — who is addressed, what is referenced, what
+  // is being replaced — and which used to be visible only by opening the raw
+  // JSON. Content is the part a site writes for a person; tags are the part it
+  // writes for a protocol, and it is the protocol doing the surprising things.
+  const eventTags = Array.isArray(prompt.event?.tags)
+    ? (prompt.event.tags as unknown[]).filter(
+        (tag): tag is string[] =>
+          Array.isArray(tag) && tag.every((part) => typeof part === 'string'),
+      )
+    : [];
+
+  // Some kinds are not a post. Signing one rewrites who the user is, what they
+  // can prove, or what they still have — so the reason is spelled out, and the
+  // decision cannot be made once and reused. See `SENSITIVE_KINDS`.
+  const sensitive =
+    prompt.type === 'signEvent' && prompt.kind !== null
+      ? getSensitiveKindReason(prompt.kind)
+      : null;
+
   return (
     <Drawer
       open
@@ -219,6 +239,19 @@ export function NsitePermissionPrompt({
             </div>
           </div>
 
+          {/* What this kind costs, when it costs more than a post. Above the
+              content, because it is the thing to read before the thing the
+              site wrote to be read. */}
+          {sensitive && (
+            <div className="flex items-start gap-3 rounded-lg border border-amber-500/40 bg-amber-500/10 p-3">
+              <TriangleAlert
+                className="mt-0.5 size-5 shrink-0 text-amber-500"
+                aria-hidden="true"
+              />
+              <p className="min-w-0 text-xs leading-relaxed">{sensitive}</p>
+            </div>
+          )}
+
           {/* Event content preview (signEvent only) */}
           {prompt.type === 'signEvent' && eventContent && (
             <div className="rounded-lg border bg-muted/30 p-3">
@@ -226,6 +259,32 @@ export function NsitePermissionPrompt({
               <p className="whitespace-pre-wrap break-words text-sm">
                 {truncate(eventContent, 280)}
               </p>
+            </div>
+          )}
+
+          {/* The tags, plainly. One row each, name apart from value, so that
+              a `p` naming a stranger or an `e` naming somebody else's note is
+              readable without opening the JSON. */}
+          {eventTags.length > 0 && (
+            <div className="rounded-lg border bg-muted/30 p-3">
+              <p className="mb-1.5 text-xs text-muted-foreground">Tags</p>
+              <ul className="space-y-1">
+                {eventTags.slice(0, 12).map(([name, ...values], i) => (
+                  <li key={i} className="flex gap-2 text-xs">
+                    <span className="shrink-0 font-mono font-medium text-muted-foreground">
+                      {truncate(name, 16)}
+                    </span>
+                    <span className="min-w-0 break-all font-mono">
+                      {truncate(values.join(' '), 120)}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+              {eventTags.length > 12 && (
+                <p className="mt-1.5 text-xs text-muted-foreground">
+                  and {eventTags.length - 12} more
+                </p>
+              )}
             </div>
           )}
 
@@ -250,19 +309,30 @@ export function NsitePermissionPrompt({
         </div>
 
         <DrawerFooter className="gap-3 pb-safe-offset-4">
-          <div className="flex items-center gap-2">
-            <Checkbox
-              id="nsite-remember"
-              checked={remember}
-              onCheckedChange={(checked) => setRemember(checked === true)}
-            />
-            <Label
-              htmlFor="nsite-remember"
-              className="cursor-pointer select-none text-xs text-muted-foreground"
-            >
-              Remember for this site
-            </Label>
-          </div>
+          {/* A remembered decision is a question answered once for every time
+              it is asked again. That is a fair trade where the worst it buys
+              is more of the same, and not where the event rewrites who the
+              user is — so for those the offer is withdrawn rather than merely
+              discouraged, and the site asks each time. */}
+          {sensitive ? (
+            <p className="text-xs text-muted-foreground">
+              This one is asked every time.
+            </p>
+          ) : (
+            <div className="flex items-center gap-2">
+              <Checkbox
+                id="nsite-remember"
+                checked={remember}
+                onCheckedChange={(checked) => setRemember(checked === true)}
+              />
+              <Label
+                htmlFor="nsite-remember"
+                className="cursor-pointer select-none text-xs text-muted-foreground"
+              >
+                Remember for this site
+              </Label>
+            </div>
+          )}
 
           <div className="flex gap-2">
             <Button

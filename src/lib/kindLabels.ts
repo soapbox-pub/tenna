@@ -420,3 +420,39 @@ export const KIND_LABELS: Record<number, string> = {
 export function getKindLabel(kind: number, fallback?: string): string {
   return KIND_LABELS[kind] ?? fallback ?? `Kind ${kind}`;
 }
+
+// ---------------------------------------------------------------------------
+// Kinds worth stopping over
+// ---------------------------------------------------------------------------
+
+/**
+ * Why signing this kind is not like signing a note, in the second person.
+ *
+ * A permission prompt is a question about one event, but the checkbox beside
+ * it is a question about every future one — and for most kinds that is a fair
+ * trade, because the worst a remembered grant buys is more of the same. These
+ * are the kinds where it is not: the event is not a post, it is a change to
+ * who the user is, what they can prove, or what they still have.
+ *
+ * Anything named here is shown with its reason and cannot be remembered; the
+ * site must ask every time. Kinds are addressed by number rather than by
+ * NIP, since what matters is the one the site actually asked for.
+ */
+export const SENSITIVE_KINDS: Record<number, string> = {
+  0: 'Rewrites your profile — your name, picture and bio as everyone sees them.',
+  3: 'Rewrites who you follow. The list replaces the old one; anyone missing from it is unfollowed.',
+  5: 'Asks relays to delete your events. Some will, and there is no undoing it.',
+  13: 'Seals a private message under your key.',
+  1059: 'Wraps a private message addressed to someone else.',
+  10002: 'Rewrites your relay list — where your posts are published and read from.',
+  10063: 'Rewrites where your files are stored.',
+  22242: 'Proves you are you to a relay. A signed challenge is a login.',
+  24133: 'Speaks to a remote signer as you.',
+  27235: 'Signs an HTTP request as you — the same as logging in somewhere.',
+  30078: 'Rewrites application settings stored under your key.',
+};
+
+/** The reason this kind deserves a second look, or null if it is ordinary. */
+export function getSensitiveKindReason(kind: number): string | null {
+  return SENSITIVE_KINDS[kind] ?? null;
+}

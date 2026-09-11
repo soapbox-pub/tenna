@@ -362,6 +362,12 @@ public class NsiteWebViewPlugin extends Plugin {
             return;
         }
 
+        // Before it becomes a hostname. See NsiteOrigins.
+        if (!NsiteOrigins.isSiteId(siteId)) {
+            call.reject("Not a site id: " + siteId);
+            return;
+        }
+
         // Checked again on this side of the bridge. The web layer filters the
         // same manifest with the same rule, but what arrives here is whatever
         // was posted to the bridge, and the values become filenames — see
@@ -459,6 +465,11 @@ public class NsiteWebViewPlugin extends Plugin {
 
         if (siteId == null || share == null) {
             call.reject("siteId and share are required");
+            return;
+        }
+
+        if (!NsiteOrigins.isSiteId(siteId)) {
+            call.reject("Not a site id: " + siteId);
             return;
         }
 

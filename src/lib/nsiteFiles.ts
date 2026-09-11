@@ -7,7 +7,12 @@ import { bytesToHex } from '@noble/hashes/utils.js';
 import type { NostrEvent } from '@nostrify/nostrify';
 
 import { APP_BLOSSOM_SERVERS } from '@/lib/appBlossom';
-import { isNsiteKind, NSITE_NAMED_KIND } from '@/lib/nsiteSubdomain';
+import {
+  getNsiteSubdomain,
+  isNsiteKind,
+  isNsiteLabel,
+  NSITE_NAMED_KIND,
+} from '@/lib/nsiteSubdomain';
 
 /**
  * A blob name: lowercase hex, thirty-two bytes of it.
@@ -44,15 +49,26 @@ export function buildManifest(event: NostrEvent): Map<string, string> {
 }
 
 /**
- * Whether an event is an nsite that can actually be served: it needs a name to
- * be addressed by and an `/index.html` to open on.
+ * Whether an event is an nsite that can actually be served: it needs an
+ * address to be reached at and an `/index.html` to open on.
+ *
+ * The address is the test a named site can fail in a way that matters. Its
+ * subdomain is the base36 pubkey followed by the `d` tag, and the result has to
+ * be a DNS label because that is what the whole app then treats it as — so a
+ * `d` tag that is missing, overlong, or carrying anything a hostname cannot
+ * hold makes the site unaddressable, and this is the gate every list of sites
+ * passes through before one is drawn, stored or opened. See `isNsiteLabel`.
  */
 export function isServableNsite(event: NostrEvent): boolean {
-  const named = event.kind !== NSITE_NAMED_KIND || Boolean(event.tags.find(([n]) => n === 'd')?.[1]);
-  const hasIndex = event.tags.some(
+  if (!isNsiteKind(event.kind)) return false;
+  // A named site with no `d` tag has no address of its own; without this it
+  // would fall back to its author's npub and impersonate their root site.
+  if (event.kind === NSITE_NAMED_KIND && !event.tags.find(([n]) => n === 'd')?.[1]) return false;
+  if (!isNsiteLabel(getNsiteSubdomain(event))) return false;
+
+  return event.tags.some(
     ([name, path, hash]) => name === 'path' && path === '/index.html' && isBlobName(hash),
   );
-  return isNsiteKind(event.kind) && named && hasIndex;
 }
 
 /**

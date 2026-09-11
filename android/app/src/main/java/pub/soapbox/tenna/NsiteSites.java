@@ -135,6 +135,10 @@ final class NsiteSites {
         @Nullable Bitmap badge,
         @Nullable String shareTarget
     ) throws IOException {
+        if (!NsiteOrigins.isSiteId(siteId)) {
+            throw new IOException("Not a site id: " + siteId);
+        }
+
         File dir = directory(context);
         String key = key(siteId);
 
@@ -272,6 +276,11 @@ final class NsiteSites {
             String event = json.optString("event", null);
             String id = json.optString("siteId", siteId);
             if (event == null || id == null) return null;
+            // The one gate every reader of a record passes through. An id that
+            // is not a DNS label cannot be turned into an origin — see
+            // NsiteOrigins — and a record holding one was either written by a
+            // build that did not check or was not written by this app.
+            if (!NsiteOrigins.isSiteId(id)) return null;
             return new Record(
                 id,
                 json.optString("label", id),

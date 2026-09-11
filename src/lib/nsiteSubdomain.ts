@@ -25,6 +25,35 @@ export function isNsiteKind(kind: number): boolean {
 /** The fixed length of a base36-encoded 32-byte value (pubkey or event id). */
 const BASE36_LENGTH = 50;
 
+/**
+ * A DNS label, which is what a site id has to be.
+ *
+ * NIP-5A locates a site at a subdomain, so the id is a hostname label and
+ * nothing else: lowercase alphanumerics and inner hyphens, 63 characters at
+ * the outside. A root site's label is an npub and a snapshot's is `v` plus
+ * base36, both of which satisfy this by construction — but a named site's is
+ * the base36 pubkey followed by the `d` tag, and a `d` tag is arbitrary text
+ * from a stranger's event.
+ *
+ * That matters because the label is concatenated into a URL. On Android
+ * `NsiteOrigins.hostFor` builds `https://<id>.nsite.localhost` and hands it
+ * straight to `WebView.loadUrl`, which does not consult
+ * `shouldOverrideUrlLoading`: a `d` tag carrying `/`, `\`, `?`, `#` or `@`
+ * therefore names a host that is not ours at all, and the site's own window
+ * loads somebody else's page wearing the site's chrome. The same value is the
+ * origin the message listener and the document-start script are scoped to, and
+ * a malformed origin rule throws where it cannot be caught.
+ *
+ * So it is checked wherever a label enters: parsing one, and deciding whether
+ * a manifest describes a site that can be served at all.
+ */
+const LABEL = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
+
+/** Whether a string is a site id — that is, a DNS label. */
+export function isNsiteLabel(value: string): boolean {
+  return LABEL.test(value);
+}
+
 /** Encode a 32-byte hex string as base36 (50 chars, zero-padded). */
 export function hexToBase36(hex: string): string {
   let n = 0n;
@@ -69,6 +98,10 @@ export type ParsedNsiteSubdomain =
  * Returns null if the subdomain cannot be parsed.
  */
 export function parseNsiteSubdomain(subdomain: string): ParsedNsiteSubdomain | null {
+  // Before anything is read out of it: whatever this names, it has to be a
+  // label, because everything downstream puts it in a hostname. See `LABEL`.
+  if (!isNsiteLabel(subdomain)) return null;
+
   // Root site: subdomain is an npub
   if (subdomain.startsWith('npub1')) {
     try {

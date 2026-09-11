@@ -53,6 +53,7 @@ final class NsiteFileServers {
 
     /** A record was written; whatever was built from the old one is stale. */
     static void invalidate(@NonNull String siteId) {
+        if (!NsiteOrigins.isSiteId(siteId)) return;
         STORED.remove(NsiteOrigins.hostFor(siteId));
     }
 

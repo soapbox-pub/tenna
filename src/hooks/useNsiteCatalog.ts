@@ -4,6 +4,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useMemo } from 'react';
 
 import { useCacheFirstSeedMany } from '@/hooks/useCacheFirstSeed';
+import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useFollows } from '@/hooks/useFollows';
 import { buildCatalog, type NsiteCatalogEntry } from '@/lib/nsiteCatalog';
 import { isServableNsite } from '@/lib/nsiteFiles';
@@ -21,6 +22,11 @@ import { NSITE_CATALOG_PUBKEYS, NSITE_RELAY } from '@/lib/tenna';
  * which sites they want on their wall than anything a publisher could pick for
  * them, and it is a list nobody has to curate.
  *
+ * The user's own pubkey is in the list too. A contact list is who you follow,
+ * which is never yourself, and someone who publishes a site is the first
+ * person who wants it on their wall — leaving them to paste their own address
+ * back to find their own work would be the strangest gap in the list.
+ *
  * Root sites are here as well as named ones, because a root site is what a
  * person publishing for themselves ends up with: one site at their npub, no
  * `d` tag, and often no `title` either. Those are named after their author, so
@@ -33,11 +39,12 @@ import { NSITE_CATALOG_PUBKEYS, NSITE_RELAY } from '@/lib/tenna';
  */
 export function useNsiteCatalog() {
   const { nostr } = useNostr();
+  const { user } = useCurrentUser();
   const { data: follows, isLoading: followsLoading } = useFollows();
 
   const authors = useMemo(
-    () => [...new Set([...NSITE_CATALOG_PUBKEYS, ...(follows ?? [])])],
-    [follows],
+    () => [...new Set([...NSITE_CATALOG_PUBKEYS, ...(user ? [user.pubkey] : []), ...(follows ?? [])])],
+    [user, follows],
   );
 
   const queryKey = useMemo(() => ['nsite-catalog', authors], [authors]);

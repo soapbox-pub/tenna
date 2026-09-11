@@ -21,11 +21,12 @@ been dragged into. Each site also has a *channel* — its number counted down th
 wall — which is the whole of the television conceit and the only ordering Tenna
 imposes on anything.
 
-A device nobody has touched yet ships with three tiles and a plus. Tiles are
-added from a catalog of nsites published by Team Soapbox and Nsite Packagers,
-plus the sites published by everyone the logged-in user follows, or by pasting
-an address: an `naddr`, an `npub`, a `nostr:` URI, or a gateway URL. Anything
-on the wall can be taken off, and nothing puts it back.
+A device nobody has touched yet ships with a starting set of tiles and a plus.
+Tiles are added from a catalog of nsites — those published by Team Soapbox,
+Nsite Packagers, and whoever else Tenna ships on the wall, plus the logged-in
+user's own sites and the sites published by everyone they follow — or by
+pasting an address: an `naddr`, an `npub`, a `nostr:` URI, or a gateway URL.
+Anything on the wall can be taken off, and nothing puts it back.
 
 ## How a site is served
 
@@ -73,6 +74,13 @@ the theme's own answer — its text against its background — and the status ba
 follows. It is read on login and kept, so the next cold start opens in it
 rather than changing into it a second later. Signing out, or in as somebody
 else, puts Tenna back in its own.
+
+A publisher's page wears that publisher's theme for as long as it is open, read
+from the relay while it is looked at rather than kept. The page a person made
+for themselves is the right dressing for the page about them — and since their
+wallpaper is a picture chosen to be looked at rather than read on, the text
+there sits on frosted panels of the theme's own colours, with the picture
+showing through and around them.
 
 A theme is a stranger's event reaching a stylesheet, which is a thing this app
 does nowhere else. Colours must be `#rrggbb` exactly; URLs must be plain

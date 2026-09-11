@@ -95,6 +95,9 @@ final class NsiteRequests {
     /** Query parameter narrowing {@link #NOTIFICATIONS_PATH} to one tag. */
     static final String TAG_PARAM = "tag";
 
+    /** Query parameter proving the caller is the site's own worker. */
+    static final String AUTH_PARAM = "a";
+
     /** The page that submits a staged share as a form, for a POST target. */
     static final String SHARE_PATH = "/.tenna/share";
 
@@ -109,6 +112,9 @@ final class NsiteRequests {
 
     /** Placeholder in the shim source for the page it may have to serve. */
     private static final String WAKE_PAGE_PLACEHOLDER = "%%NAPP_WAKE_PAGE%%";
+
+    /** Placeholder in the shim source for the site's own token. */
+    private static final String SITE_TOKEN_PLACEHOLDER = "%%NAPP_SITE_TOKEN%%";
 
     /** Placeholder in the share page for the form it is to build. */
     private static final String SHARE_PLAN_PLACEHOLDER = "%%TENNA_SHARE_PLAN%%";
@@ -144,19 +150,24 @@ final class NsiteRequests {
 
         String path = url.getPath();
 
-        if (NOTIFICATION_PATH.equals(path)) {
-            return notification(context, siteId, url);
-        }
+        // The four paths that do something rather than serve something. A
+        // worker's fetch arrives with no WebView attached, so the host in the
+        // URL is the only thing naming a site — and a host is not proof, since
+        // any site can fetch any other site's paths. The token is. See
+        // NappTokens.
+        if (NOTIFICATION_PATH.equals(path)
+            || NOTIFICATIONS_PATH.equals(path)
+            || CLOSE_PATH.equals(path)
+            || OPEN_PATH.equals(path)) {
 
-        if (NOTIFICATIONS_PATH.equals(path)) {
-            return notifications(context, siteId, url);
-        }
+            if (!NappTokens.matches(context, siteId, query(url, AUTH_PARAM))) {
+                Log.i(TAG, "Refused an unauthenticated " + path + " for " + siteId);
+                return NsiteFileServer.Response.empty(403, "Forbidden").toWebResource();
+            }
 
-        if (CLOSE_PATH.equals(path)) {
-            return close(context, siteId, url);
-        }
-
-        if (OPEN_PATH.equals(path)) {
+            if (NOTIFICATION_PATH.equals(path)) return notification(context, siteId, url);
+            if (NOTIFICATIONS_PATH.equals(path)) return notifications(context, siteId, url);
+            if (CLOSE_PATH.equals(path)) return close(context, siteId, url);
             return open(context, siteId, url);
         }
 
@@ -192,7 +203,7 @@ final class NsiteRequests {
         }
 
         boolean workerScript = "script".equalsIgnoreCase(header(request, SERVICE_WORKER_HEADER));
-        return server.serve(url, workerScript ? shim(context) : null).toWebResource();
+        return server.serve(url, workerScript ? shim(context, siteId) : null).toWebResource();
     }
 
     /** Show a notification a worker asked for, and answer its fetch. */
@@ -446,11 +457,20 @@ final class NsiteRequests {
      * It carries the wake page inside it: a worker with a fetch handler claims
      * every navigation at its origin, including the one the push service makes
      * to reach it, so the worker has to be able to answer that request itself.
+     *
+     * And it carries the site's own token, which is why this is per site
+     * rather than one shared string. The response it goes into is readable
+     * only by the origin that asked for it, and only when the browser asked
+     * for it as a worker script — see {@link NappTokens}.
      */
     @Nullable
-    static synchronized String shim(@NonNull Context context) {
+    static synchronized String shim(@NonNull Context context, @NonNull String siteId) {
         load(context);
-        return shim;
+        if (shim == null) return null;
+        return shim.replace(
+            SITE_TOKEN_PLACEHOLDER,
+            JSONObject.quote(NappTokens.forSite(context, siteId))
+        );
     }
 
     @Nullable

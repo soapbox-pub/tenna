@@ -34,6 +34,18 @@
   var WAKE_PATH = '/.napp/wake';
   var WAKE_PAGE = %%NAPP_WAKE_PAGE%%;
 
+  /**
+   * What proves to the host that a call on the paths below came from this
+   * site's own worker.
+   *
+   * Stamped in when this script was served, which only happens for a fetch the
+   * browser marked as a worker script fetch, and into a response only this
+   * origin can read. Held in the closure so the site's own code — which runs
+   * in this same worker — cannot read it off the global and hand it on. See
+   * NappTokens.
+   */
+  var AUTH = %%NAPP_SITE_TOKEN%%;
+
   /** Where the host answers each thing a worker can do. See NsiteRequests. */
   var NOTIFICATION_PATH = '/.napp/notification';
   var NOTIFICATIONS_PATH = '/.napp/notifications';
@@ -63,13 +75,11 @@
 
   /** Ask the host something. Never throws; the caller decides what a failure means. */
   function host(path, query) {
-    var url = path;
-    var first = true;
+    var url = path + '?a=' + encodeURIComponent(AUTH);
     for (var name in query) {
       if (!Object.prototype.hasOwnProperty.call(query, name)) continue;
       if (query[name] === undefined || query[name] === null) continue;
-      url += (first ? '?' : '&') + name + '=' + encodeURIComponent(query[name]);
-      first = false;
+      url += '&' + name + '=' + encodeURIComponent(query[name]);
     }
     return fetch(url, { cache: 'no-store' });
   }
@@ -135,7 +145,7 @@
       }
       // A GET, and not a POST: the host answers this from
       // `shouldInterceptRequest`, which is never given a request body.
-      return fetch(NOTIFICATION_PATH + '?p=' + payload, { cache: 'no-store' }).then(function (res) {
+      return host(NOTIFICATION_PATH, { p: payload }).then(function (res) {
         if (!res.ok) throw new Error('Notification refused');
       });
     };

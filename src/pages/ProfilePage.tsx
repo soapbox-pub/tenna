@@ -18,6 +18,18 @@ import { cn, middleEllipsis } from '@/lib/utils';
 import { nsiteUri, parseWallUri } from '@/lib/wallUri';
 
 /**
+ * What the page's text is read against.
+ *
+ * Frosted rather than opaque: this page wears the publisher's theme, and their
+ * wallpaper is the point of it — but a wallpaper is a picture somebody chose
+ * to look at rather than to read on, and a stranger's is one nobody here had
+ * any say in. It could be a photograph, it could be the same value as the ink.
+ * So the words sit on a surface the theme's own colours guarantee, and the
+ * picture goes on showing through it and around it.
+ */
+const PANEL = 'rounded-2xl border border-border bg-card/70 backdrop-blur-md';
+
+/**
  * The lineup, laid out as the wall lays one out: columns that fit at 68px and
  * share out what's left, capped so a wide screen gets more apps across rather
  * than bigger ones. Written once for the tiles and the skeletons that stand in
@@ -162,62 +174,63 @@ export function ProfilePage({ pubkey }: ProfilePageProps) {
           />
         )}
 
-        <div className="flex flex-col items-center gap-4 px-1 pb-8 pt-4">
-          {author.isPending ? (
-            <Skeleton className="size-24 rounded-full bg-foreground/10" />
-          ) : (
-            <Avatar className="size-24 ring-4 ring-background/60">
-              <AvatarImage src={picture} alt="" />
-              <AvatarFallback className="bg-foreground/10 text-3xl text-foreground/80">
-                {(name ?? npub).slice(0, 1).toUpperCase()}
-              </AvatarFallback>
-            </Avatar>
-          )}
+        {/* Who they are, on a surface of its own. Everything here is text
+            somebody has to read — a name, a key, a paragraph about themselves —
+            and a page that wears a stranger's theme has a photograph behind it
+            that nobody chose with reading in mind. Their wallpaper is still the
+            page, around the panels and blurred through them; what it stops
+            being is the paper. */}
+        <section className={cn(PANEL, 'mt-4 px-5 py-6')}>
+          <div className="flex flex-col items-center gap-4">
+            {author.isPending ? (
+              <Skeleton className="size-24 rounded-full bg-foreground/10" />
+            ) : (
+              <Avatar className="size-24 ring-4 ring-card/70">
+                <AvatarImage src={picture} alt="" />
+                <AvatarFallback className="bg-foreground/10 text-3xl text-foreground/80">
+                  {(name ?? npub).slice(0, 1).toUpperCase()}
+                </AvatarFallback>
+              </Avatar>
+            )}
 
-          {author.isPending ? (
-            <Skeleton className="h-8 w-48 bg-foreground/10" />
-          ) : (
-            <h2 className="w-full break-words text-center text-3xl font-semibold leading-tight">
-              {name ?? npub}
-            </h2>
-          )}
+            {author.isPending ? (
+              <Skeleton className="h-8 w-48 bg-foreground/10" />
+            ) : (
+              <h2 className="w-full break-words text-center text-3xl font-semibold leading-tight">
+                {name ?? npub}
+              </h2>
+            )}
 
-          {/* The key, under whatever the profile called itself. A name is a
-              claim anybody could make and reuse; this is the thing that was
-              signed, and the only line on the page nobody can borrow. It is
-              left off where there is no name, since then the heading above is
-              already this. */}
-          {name && (
-            <p title={fullNpub} className="-mt-2 max-w-full truncate font-mono text-sm text-foreground/50">
-              {npub}
-            </p>
-          )}
+            {/* The key, under whatever the profile called itself. A name is a
+                claim anybody could make and reuse; this is the thing that was
+                signed, and the only line on the page nobody can borrow. It is
+                left off where there is no name, since then the heading above is
+                already this. */}
+            {name && (
+              <p title={fullNpub} className="-mt-2 max-w-full truncate font-mono text-sm text-foreground/65">
+                {npub}
+              </p>
+            )}
 
-          {/* `w-full` before the cap, or there isn't one: a bare `max-w-md` is
-              448px, which is wider than the phone this is being read on, and
-              a centred paragraph too wide for its column hangs off both edges
-              of the screen at once. Everything else in this column is given
-              its width for the same reason, from the other end — text left to
-              size itself here is measured at its narrowest and breaks a line
-              early. */}
-          {about && (
-            <p className="w-full max-w-md whitespace-pre-wrap break-words text-center text-base leading-relaxed text-foreground/75">
-              {about}
-            </p>
-          )}
-        </div>
+            {/* `w-full` before the cap, or there isn't one: a bare `max-w-md`
+                is 448px, which is wider than the phone this is being read on,
+                and a centred paragraph too wide for its column hangs off both
+                edges of the screen at once. Everything else in this column is
+                given its width for the same reason, from the other end — text
+                left to size itself here is measured at its narrowest and
+                breaks a line early. */}
+            {about && (
+              <p className="w-full max-w-md whitespace-pre-wrap break-words text-center text-base leading-relaxed text-foreground/80">
+                {about}
+              </p>
+            )}
+          </div>
+        </section>
 
         {/* Their apps, laid out as apps. The grid is the wall's own — as many
             columns as fit at 68px, so a tile here is the size and shape of the
-            tile it becomes when it is pressed.
-
-            A real surface rather than the 6% wash the other panels use, because
-            this one is the only place on the page where small text sits over
-            somebody else's wallpaper: a tile's name is 12px, and eight of them
-            over a photograph is where a page in a stranger's theme stops being
-            readable. Frosted rather than opaque, so their picture still shows
-            through the thing it is being read against. */}
-        <section className="rounded-2xl border border-border bg-card/70 px-4 py-5 backdrop-blur-md">
+            tile it becomes when it is pressed. */}
+        <section className={cn(PANEL, 'mt-4 px-4 py-5')}>
           <h3 className="px-1 pb-5 text-lg font-medium text-foreground">Apps</h3>
 
           {isLoading && (

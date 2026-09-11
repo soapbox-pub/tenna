@@ -4,16 +4,27 @@ import { nip19 } from 'nostr-tools';
 import { useMemo } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 
-import { NsiteRow } from '@/components/NsiteRow';
+import { NsiteTile } from '@/components/NsiteTile';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useAuthor } from '@/hooks/useAuthor';
 import { useAuthorNsites } from '@/hooks/useAuthorNsites';
+import { useProfileTheme } from '@/hooks/useProfileTheme';
 import { useWall } from '@/hooks/useWall';
+import { useWearTheme } from '@/hooks/useWearTheme';
 import { notificationSuccess } from '@/lib/haptics';
 import { getNsiteSubdomain } from '@/lib/nsiteSubdomain';
-import { middleEllipsis } from '@/lib/utils';
+import { cn, middleEllipsis } from '@/lib/utils';
 import { nsiteUri, parseWallUri } from '@/lib/wallUri';
+
+/**
+ * The lineup, laid out as the wall lays one out: columns that fit at 68px and
+ * share out what's left, capped so a wide screen gets more apps across rather
+ * than bigger ones. Written once for the tiles and the skeletons that stand in
+ * for them, so the page doesn't change shape when they arrive.
+ */
+const GRID =
+  'grid grid-cols-[repeat(auto-fill,minmax(4.25rem,1fr))] justify-items-center gap-x-4 gap-y-7 sm:gap-x-6 sm:gap-y-8 [&>*]:max-w-24';
 
 interface ProfilePageProps {
   /** Whose page this is. Hex, already decoded from whatever named them. */
@@ -61,6 +72,11 @@ function encodeNpub(pubkey: string): string | undefined {
  * Nothing about a person is claimed that they didn't sign. The name and the
  * pictures are their own profile, and under them is the key itself, which is
  * the only thing here that is true whatever anybody published.
+ *
+ * The page is in their colours too, where they have published a theme —
+ * Tenna spends the whole rest of its life in the logged-in user's, and this
+ * one screen is about somebody else. It is the same theme Ditto shows a
+ * visitor to their profile, read off the same event; see `useProfileTheme`.
  */
 export function ProfilePage({ pubkey }: ProfilePageProps) {
   const navigate = useNavigate();
@@ -70,6 +86,13 @@ export function ProfilePage({ pubkey }: ProfilePageProps) {
   const metadata = author.data?.metadata;
 
   const { data: sites, isLoading, error } = useAuthorNsites(pubkey);
+
+  // Their theme, for as long as this page is up. Nothing is worn until the
+  // question has been answered: `undefined` leaves the app in the user's own
+  // colours meanwhile, where a premature `null` would strip them off for the
+  // half second before the relay replies. See `useWearTheme`.
+  const theirTheme = useProfileTheme(pubkey);
+  useWearTheme(theirTheme.isFetched ? (theirTheme.data ?? null) : undefined);
 
   // Safe to hold here: `Routes` draws one route at a time, so the wall is
   // unmounted while this page is up and there is no second copy of the list
@@ -127,7 +150,10 @@ export function ProfilePage({ pubkey }: ProfilePageProps) {
         <h1 className="text-xl font-semibold">Publisher</h1>
       </header>
 
-      <div className="mx-auto max-w-2xl px-5 pb-safe-offset-16 sm:px-8">
+      {/* The gap at the top is the bar's: the header is translucent and the
+          page scrolls under it, so without it the banner starts where the
+          title ends and the two read as one block. */}
+      <div className="mx-auto max-w-2xl px-5 pb-safe-offset-16 pt-4 sm:px-8">
         {banner && (
           <img
             src={banner}
@@ -167,24 +193,31 @@ export function ProfilePage({ pubkey }: ProfilePageProps) {
             </p>
           )}
 
+          {/* `w-full` before the cap, or there isn't one: a bare `max-w-md` is
+              448px, which is wider than the phone this is being read on, and
+              a centred paragraph too wide for its column hangs off both edges
+              of the screen at once. */}
           {about && (
-            <p className="max-w-md whitespace-pre-wrap break-words text-center text-base leading-relaxed text-foreground/75">
+            <p className="w-full max-w-md whitespace-pre-wrap break-words text-center text-base leading-relaxed text-foreground/75">
               {about}
             </p>
           )}
         </div>
 
-        <section className="rounded-2xl bg-foreground/[0.06] px-3 py-4">
-          <h3 className="px-2 pb-1 text-lg font-medium text-foreground">Apps</h3>
+        {/* Their apps, laid out as apps. The grid is the wall's own — as many
+            columns as fit at 68px, so a tile here is the size and shape of the
+            tile it becomes when it is pressed. */}
+        <section className="rounded-2xl bg-foreground/[0.06] px-4 py-5">
+          <h3 className="px-1 pb-5 text-lg font-medium text-foreground">Apps</h3>
 
           {isLoading && (
             <>
               <span className="sr-only">Looking</span>
-              <div className="space-y-1" aria-hidden="true">
-                {[0, 1, 2].map((i) => (
-                  <div key={i} className="flex items-center gap-3 px-3 py-2">
-                    <Skeleton className="size-11 shrink-0 rounded-2xl bg-foreground/10" />
-                    <Skeleton className="h-4 w-40 bg-foreground/10" />
+              <div className={cn(GRID, 'pb-1')} aria-hidden="true">
+                {[0, 1, 2, 3].map((i) => (
+                  <div key={i} className="flex w-full flex-col items-center gap-2">
+                    <Skeleton className="app-squircle aspect-square w-full bg-foreground/10" />
+                    <Skeleton className="h-3 w-3/4 bg-foreground/10" />
                   </div>
                 ))}
               </div>
@@ -192,24 +225,23 @@ export function ProfilePage({ pubkey }: ProfilePageProps) {
           )}
 
           {!isLoading && error && (
-            <p role="alert" className="px-2 py-6 text-base text-destructive">
+            <p role="alert" className="px-1 pb-2 text-base text-destructive">
               Could not reach the relay. Check your connection and try again.
             </p>
           )}
 
           {!isLoading && !error && sites?.length === 0 && (
-            <p className="px-2 py-6 text-base text-foreground/55">
+            <p className="px-1 pb-2 text-base text-foreground/55">
               Nothing published under this key yet. Sites they put on Nostr will be listed here.
             </p>
           )}
 
-          {!isLoading && !error && (
-            <div className="space-y-1">
-              {sites?.map((entry) => (
-                <NsiteRow
+          {!isLoading && !error && sites && sites.length > 0 && (
+            <div className={cn(GRID, 'pb-1')}>
+              {sites.map((entry) => (
+                <NsiteTile
                   key={entry.event.id}
                   entry={entry}
-                  publisher={false}
                   added={added.has(getNsiteSubdomain(entry.event))}
                   onSelect={() => {
                     notificationSuccess();

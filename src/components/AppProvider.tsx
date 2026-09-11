@@ -1,7 +1,7 @@
-import { ReactNode, useEffect } from 'react';
+import { ReactNode, useEffect, useState } from 'react';
 import { z } from 'zod';
 import { useLocalStorage } from '@/hooks/useLocalStorage';
-import { AppContext, type AppConfig, type AppContextType, type Theme, type RelayMetadata, type BlossomServerMetadata, type ThemeMetadata } from '@/contexts/AppContext';
+import { AppContext, resolveActiveTheme, type AppConfig, type AppContextType, type Theme, type RelayMetadata, type BlossomServerMetadata, type ThemeMetadata, type ThemeOverride } from '@/contexts/AppContext';
 import {
   applyDittoTheme,
   DittoThemeSchema,
@@ -84,18 +84,24 @@ export function AppProvider(props: AppProviderProps) {
 
   const config = { ...defaultConfig, ...rawConfig };
 
+  // Somebody else's theme, while their screen is up. See `ThemeOverride`.
+  const [themeOverride, setThemeOverride] = useState<ThemeOverride>(undefined);
+
   const appContextValue: AppContextType = {
     config,
     updateConfig,
+    themeOverride,
+    setThemeOverride,
   };
 
-  // The user's own theme, where they have published one. Its colours settle
-  // the light/dark question on their own, so `config.theme` is only asked
-  // when there is no theme to ask instead.
-  const profileTheme = config.profileTheme?.theme ?? null;
+  // What the app is wearing: whoever is borrowing it, else the user's own
+  // theme where they have published one. Its colours settle the light/dark
+  // question on their own, so `config.theme` is only asked when there is no
+  // theme to ask instead.
+  const activeTheme = resolveActiveTheme(config, themeOverride);
 
-  useApplyProfileTheme(profileTheme);
-  useApplyTheme(profileTheme ? (themeIsDark(profileTheme) ? 'dark' : 'light') : config.theme);
+  useApplyProfileTheme(activeTheme);
+  useApplyTheme(activeTheme ? (themeIsDark(activeTheme) ? 'dark' : 'light') : config.theme);
 
   return (
     <AppContext.Provider value={appContextValue}>
@@ -105,7 +111,7 @@ export function AppProvider(props: AppProviderProps) {
 }
 
 /**
- * Put the document into the user's Ditto theme, or back into Tenna's own.
+ * Put the document into a Ditto theme, or back into Tenna's own.
  *
  * The colours land synchronously, before paint, because they come out of
  * local storage with the rest of the config — a cold start opens in the user's

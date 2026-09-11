@@ -1,4 +1,4 @@
-import { useAppContext } from '@/hooks/useAppContext';
+import { useActiveTheme } from '@/hooks/useActiveTheme';
 
 /**
  * The picture a theme puts behind the wall.
@@ -6,7 +6,9 @@ import { useAppContext } from '@/hooks/useAppContext';
  * A `bg` tag on kind 16767 names an image or a video and how to lay it out:
  * `cover`, which fills the screen and crops, or `tile`, which repeats it at
  * its own size. Both are drawn here rather than on the wall itself, because
- * the wall is one screen of several and a wallpaper is behind all of them.
+ * the wall is one screen of several and a wallpaper is behind all of them —
+ * including a publisher's page, which wears that publisher's theme and so
+ * their wallpaper with it. See `useActiveTheme`.
  *
  * It sits at `-z-10`, which puts it under everything in the document and over
  * the page's own background colour — so `body` still paints the theme's
@@ -19,8 +21,7 @@ import { useAppContext } from '@/hooks/useAppContext';
  * `NsiteApp` are opaque black, and a site's window is the site's own.
  */
 export function ThemeBackground() {
-  const { config } = useAppContext();
-  const media = config.profileTheme?.theme?.media;
+  const media = useActiveTheme()?.media;
 
   if (!media) return null;
 

@@ -8,7 +8,7 @@ import { LoginArea } from '@/components/auth/LoginArea';
 import { NativeAppIcon } from '@/components/NativeAppIcon';
 import { NsiteSharePicker } from '@/components/NsiteSharePicker';
 import { NsiteViewer } from '@/components/NsiteViewer';
-import { useAppContext } from '@/hooks/useAppContext';
+import { useActiveTheme } from '@/hooks/useActiveTheme';
 import { usePendingShare } from '@/hooks/useNsiteShare';
 import { useWall } from '@/hooks/useWall';
 import { useWallDrag } from '@/hooks/useWallDrag';
@@ -77,8 +77,7 @@ const Index = () => {
   // own red glow and star field stay off it. Three colours is all a theme has
   // to spend, and a decoration built out of two other hexes over the top of
   // them would be Tenna talking over it.
-  const { config } = useAppContext();
-  const themed = !!config.profileTheme?.theme;
+  const themed = !!useActiveTheme();
 
   // A site's channel is its place among the sites, counted down the wall.
   // Counted here, over the stored list, so that a site still loading holds

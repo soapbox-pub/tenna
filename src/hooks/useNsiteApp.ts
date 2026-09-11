@@ -4,6 +4,7 @@ import { useQuery } from '@tanstack/react-query';
 import { buildManifest, fetchFromBlossom, resolveServers } from '@/lib/nsiteFiles';
 import { parseShareTarget, type NsiteShareTarget } from '@/lib/nsiteShareTarget';
 import { getMimeType } from '@/lib/sandbox';
+import { parseInertHtml } from '@/lib/trustedTypes';
 
 /** How the artwork wants to sit in its tile. */
 export type IconFit = 'cover' | 'contain';
@@ -385,7 +386,7 @@ export function useNsiteApp(event: NostrEvent, options?: { enabled?: boolean }) 
 
       const servers = resolveServers(event);
       const indexBytes = await fetchFromBlossom(indexSha, servers);
-      const doc = new DOMParser().parseFromString(new TextDecoder().decode(indexBytes), 'text/html');
+      const doc = parseInertHtml(new TextDecoder().decode(indexBytes));
 
       const candidates = collectFromDocument(doc);
       const monochrome: IconCandidate[] = [];

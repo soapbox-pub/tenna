@@ -19,6 +19,7 @@
  *   - **Doesn't declare it** — the site assumes its viewport *is* the safe
  *     area. Shrink the iframe by the insets so that assumption holds.
  */
+import { parseInertHtml } from '@/lib/trustedTypes';
 
 export interface SafeAreaInsets {
   top: number;
@@ -118,7 +119,7 @@ export function readSiteChrome(html: string): {
   /** Validated `theme-color`, for the letterbox behind a non-edge-to-edge site. */
   themeColor: string | null;
 } {
-  const doc = new DOMParser().parseFromString(html, 'text/html');
+  const doc = parseInertHtml(html);
 
   const viewport = doc.querySelector('meta[name="viewport" i]')?.getAttribute('content') ?? '';
   const edgeToEdge = /viewport-fit\s*=\s*cover/i.test(viewport);
@@ -268,7 +269,7 @@ export function rewriteSafeAreaEnvInCss(css: string, insets: SafeAreaInsets): st
  *    same `env()` substitution the stylesheets do.
  */
 export function rewriteSafeAreaEnvInHtml(html: string, insets: SafeAreaInsets): string {
-  const doc = new DOMParser().parseFromString(html, 'text/html');
+  const doc = parseInertHtml(html);
 
   for (const side of SAFE_AREA_SIDES) {
     doc.documentElement.style.setProperty(`${VAR_PREFIX}${side}`, `${insets[side]}px`);

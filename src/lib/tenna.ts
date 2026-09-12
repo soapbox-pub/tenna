@@ -22,6 +22,10 @@ export const MK_FAIN_PUBKEY =
 export const CHADWICK_PUBKEY =
   '86184109eae937d8d6f980b4a0b46da4ef0d983eade403ee1b4c0b6bde238b47';
 
+/** Jared Logan (jaredlogan@happytavern.co) — publisher of Tombstone. */
+export const JARED_LOGAN_PUBKEY =
+  '291c75d937a45f66a1209f8ea6611df7448c59b3526520c66ca2cdcd37f1bfbe';
+
 /**
  * Whose nsites the "Add app" dialog offers whoever is looking — the two
  * publishers that package clients for it, and everyone whose site Tenna ships
@@ -34,6 +38,7 @@ export const NSITE_CATALOG_PUBKEYS = [
   NSITE_PACKAGERS_PUBKEY,
   MK_FAIN_PUBKEY,
   CHADWICK_PUBKEY,
+  JARED_LOGAN_PUBKEY,
 ];
 
 /** A site Tenna ships on the wall: whose it is, and its `d` tag. */
@@ -62,6 +67,7 @@ export const DEFAULT_NSITES: DefaultNsite[] = [
   { pubkey: TEAM_SOAPBOX_PUBKEY, identifier: 'yourspace' },
   { pubkey: MK_FAIN_PUBKEY, identifier: 'polaroids' },
   { pubkey: CHADWICK_PUBKEY, identifier: 'espy' },
+  { pubkey: JARED_LOGAN_PUBKEY, identifier: 'tombstone' },
 ];
 
 /** Relay where the catalog's nsite manifests live. */

@@ -46,12 +46,12 @@ interface ProfilePageProps {
 /**
  * A picture from somebody's profile, or nothing.
  *
- * `https:` only. A profile is a document a stranger wrote, its `picture` and
- * `banner` are whatever they put there, and both end up as a URL the app
- * fetches — so `javascript:` and `data:` are refused here rather than trusted
- * to be harmless in an `img`. Stricter than that isn't needed: React sets
- * these as DOM properties, so neither is ever parsed as CSS. See
- * `safeHttpsUrl` for the ones that are.
+ * `https:` only. A profile is a document a stranger wrote, its `picture` is
+ * whatever they put there, and it ends up as a URL the app fetches — so
+ * `javascript:` and `data:` are refused here rather than trusted to be
+ * harmless in an `img`. Stricter than that isn't needed: React sets it as a
+ * DOM property, so it is never parsed as CSS. See `safeHttpsUrl` for the ones
+ * that are.
  */
 function safeImage(value: string | undefined): string | undefined {
   if (!value) return undefined;
@@ -115,7 +115,6 @@ export function ProfilePage({ pubkey }: ProfilePageProps) {
   const fullNpub = useMemo(() => encodeNpub(pubkey), [pubkey]);
   const npub = fullNpub ? middleEllipsis(fullNpub, 21) : 'Unknown publisher';
   const picture = safeImage(metadata?.picture);
-  const banner = safeImage(metadata?.banner);
   const about = metadata?.about?.trim();
 
   useSeoMeta({
@@ -163,24 +162,16 @@ export function ProfilePage({ pubkey }: ProfilePageProps) {
       </header>
 
       {/* The gap at the top is the bar's: the header is translucent and the
-          page scrolls under it, so without it the banner starts where the
+          page scrolls under it, so without it the panel below starts where the
           title ends and the two read as one block. */}
       <div className="mx-auto max-w-2xl px-5 pb-safe-offset-16 pt-4 sm:px-8">
-        {banner && (
-          <img
-            src={banner}
-            alt=""
-            className="h-32 w-full rounded-2xl object-cover sm:h-44"
-          />
-        )}
-
         {/* Who they are, on a surface of its own. Everything here is text
             somebody has to read — a name, a key, a paragraph about themselves —
             and a page that wears a stranger's theme has a photograph behind it
             that nobody chose with reading in mind. Their wallpaper is still the
             page, around the panels and blurred through them; what it stops
             being is the paper. */}
-        <section className={cn(PANEL, 'mt-4 px-5 py-6')}>
+        <section className={cn(PANEL, 'px-5 py-6')}>
           <div className="flex flex-col items-center gap-4">
             {author.isPending ? (
               <Skeleton className="size-24 rounded-full bg-foreground/10" />

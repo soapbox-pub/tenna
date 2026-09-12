@@ -227,6 +227,8 @@ final class NappBunker {
         if (params == null) params = new JSONArray();
         if (requestId.isEmpty()) return;
 
+        Log.i(TAG, "A remote app asked for " + methodName);
+
         SignerTypes.Method method = SignerTypes.fromWire(methodName);
 
         // Never silence. A client waiting on an answer it will not get is a
@@ -300,13 +302,27 @@ final class NappBunker {
                     outcome.error == null ? "could not answer" : outcome.error, nip04);
                 return;
 
-            default:
-                // Nobody has decided. Put it somewhere the user can find it,
-                // and say nothing to the client until they have.
-                remember(new Pending(requestId, connection.localPubkey, clientPubkey, account,
-                    connection.displayName(), request, nip04, connection.relays));
-                NappNotifications.showSignerRequest(context, requestId,
-                    connection.displayName(), TennaSigning.describe(request));
+            default: {
+                // Nobody has decided, so this has to reach a person — and the
+                // only way it can, with the app closed and the request off a
+                // socket, is a notification.
+                Pending waiting = new Pending(requestId, connection.localPubkey, clientPubkey,
+                    account, connection.displayName(), request, nip04, connection.relays);
+
+                if (!NappNotifications.showSignerRequest(context, requestId,
+                        connection.displayName(), TennaSigning.describe(request))) {
+                    // Notifications are off, so there is no way to ask and no
+                    // point holding the request. Said out loud rather than left
+                    // to time out: a client told why can say so to whoever is
+                    // using it, where a client kept waiting can only hang.
+                    Log.i(TAG, "Could not ask about a remote request; notifications are off");
+                    reply(publisher, connection, clientPubkey, requestId, null,
+                        "cannot ask the user: notifications are turned off for Tenna", nip04);
+                    return;
+                }
+
+                remember(waiting);
+            }
         }
     }
 

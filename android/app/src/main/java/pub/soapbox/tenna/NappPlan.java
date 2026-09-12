@@ -148,12 +148,19 @@ final class NappPlan {
             JSONArray filters = bunkerFilter(connection.localPubkey);
             if (filters == null) continue;
 
-            // Kind 24133 is ephemeral, so there is no history to catch up on
-            // and a floor would only risk a relay's clock skew hiding a live
-            // request. It starts at now and stays there.
+            // No floor at all, and this is load-bearing rather than an
+            // omission. Kind 24133 is ephemeral, so there is no history to
+            // skip past — but more than that, a `since` here is measured by
+            // this phone's clock and compared against a `created_at` written
+            // by the client's. A phone a few seconds fast filters out every
+            // request made in those seconds, which is all of them, and the
+            // symptom is a connection that is plainly established and then
+            // silently answers nothing.
+            //
+            // Zero means `NappRelay.request` leaves `since` off the filter.
             AtomicLong since = sinces.get(id);
             if (since == null) {
-                since = new AtomicLong(System.currentTimeMillis() / 1000);
+                since = new AtomicLong(0);
                 sinces.put(id, since);
             }
 

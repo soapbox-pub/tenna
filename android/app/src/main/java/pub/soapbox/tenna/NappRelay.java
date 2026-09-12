@@ -271,6 +271,15 @@ final class NappRelay extends WebSocketListener {
                     sent.remove(message.optString(1, ""));
                 }
                 break;
+            case "OK":
+                // The answer to something published. Only worth a line when
+                // it is a refusal — an answer a relay would not take is a
+                // remote client left waiting, and nothing else on this path
+                // would ever say so.
+                if (!message.optBoolean(2, false)) {
+                    Log.w(TAG, url + " refused an event: " + message.optString(3, ""));
+                }
+                break;
             case "NOTICE":
                 Log.i(TAG, url + " says: " + message.optString(1, ""));
                 break;

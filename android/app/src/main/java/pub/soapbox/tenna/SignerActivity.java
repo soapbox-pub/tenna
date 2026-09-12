@@ -218,11 +218,6 @@ public class SignerActivity extends BridgeActivity {
         TennaSigning.Request request = parsed.toRequest();
         String account = TennaSigning.accountFor(this, parsed.currentUser, request);
 
-        Log.i(TAG, "Asked for " + parsed.method.wire
-            + " by " + (requesterId == null ? "a web page" : requesterId)
-            + (account == null ? ", nothing to answer with"
-                : ", answer is " + TennaSigning.decide(this, account, requesterId, request)));
-
         if (account != null) {
             TennaSigning.Outcome outcome =
                 TennaSigning.answer(this, account, requesterId, request);

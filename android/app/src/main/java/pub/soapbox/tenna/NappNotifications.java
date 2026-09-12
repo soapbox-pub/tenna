@@ -814,17 +814,21 @@ final class NappNotifications {
      * <p>It says what was asked and never what was in it. A lock screen is
      * read by whoever is holding the phone.
      */
-    static void showSignerRequest(
+    static boolean showSignerRequest(
         @NonNull Context context,
         @NonNull String requestId,
         @NonNull String appName,
         @NonNull String what
     ) {
-        if (!isEnabled(context)) return;
+        // Says so rather than failing quietly, because the caller has a client
+        // on the other end of a relay waiting for an answer. A request nobody
+        // can be shown is one that has to be refused out loud; letting it hang
+        // until it expires tells the client nothing and the user less.
+        if (!isEnabled(context)) return false;
         ensureSignerChannel(context);
 
         NotificationManager manager = context.getSystemService(NotificationManager.class);
-        if (manager == null) return;
+        if (manager == null) return false;
 
         PendingIntent open = PendingIntent.getActivity(
             context,
@@ -850,8 +854,10 @@ final class NappNotifications {
 
         try {
             manager.notify(SIGNER_TAG_PREFIX + requestId, 0, notification);
+            return true;
         } catch (SecurityException e) {
             Log.i(TAG, "Could not post a signing request");
+            return false;
         }
     }
 

@@ -210,6 +210,19 @@ export function clearNsitePermissions(
 }
 
 /**
+ * Every site this user has answered for, newest first.
+ *
+ * For the settings screen, which lists sites alongside the apps on the phone
+ * and the connections to apps elsewhere — three different things that all
+ * amount to somebody having been given the same key.
+ */
+export function listNsiteAllowances(userPubkey: string): NsiteAllowance[] {
+  return readAllowances()
+    .filter((allowance) => allowance.userPubkey === userPubkey)
+    .sort((a, b) => b.createdAt - a.createdAt);
+}
+
+/**
  * Get the full allowance record for a site, or undefined if none exists.
  */
 export function getNsiteAllowance(

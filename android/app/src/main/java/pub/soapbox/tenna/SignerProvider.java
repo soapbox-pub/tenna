@@ -107,9 +107,6 @@ public class SignerProvider extends ContentProvider {
         TennaSigning.Outcome outcome =
             TennaSigning.answer(context, account, requesterId, request);
 
-        Log.i(TAG, "Asked in the background for " + method.wire
-            + " by " + requesterId + ", answer is " + outcome.status);
-
         switch (outcome.status) {
             case RESULT:
                 SignerApps.touch(context, account, requesterId);

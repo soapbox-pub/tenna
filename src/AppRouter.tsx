@@ -4,6 +4,7 @@ import { ScrollToTop } from "./components/ScrollToTop";
 import { useNsiteLaunch } from "@/hooks/useNsiteLaunch";
 import { useSignerPrompt } from "@/hooks/useSignerPrompt";
 
+import { AuthorizedAppsPage } from "./pages/AuthorizedAppsPage";
 import Index from "./pages/Index";
 import { NIP19Page } from "./pages/NIP19Page";
 import NotFound from "./pages/NotFound";
@@ -49,6 +50,7 @@ export function AppRouter() {
             order here — but written above it anyway, since a reader ranks by
             order and React Router does not. */}
         <Route path="/settings" element={<SettingsPage />} />
+        <Route path="/settings/apps" element={<AuthorizedAppsPage />} />
         {/* NIP-19 route for npub1, note1, naddr1, nevent1, nprofile1 */}
         <Route path="/:nip19" element={<NIP19Page />} />
         {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}

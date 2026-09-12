@@ -1,6 +1,6 @@
 import { App as NativeApp } from '@capacitor/app';
 import { useSeoMeta } from '@unhead/react';
-import { ArrowLeft, LogIn, LogOut, Plus, Trash2, UserPlus, UserRound } from 'lucide-react';
+import { ArrowLeft, ChevronRight, LogIn, LogOut, Plus, Trash2, UserPlus, UserRound } from 'lucide-react';
 import { nip19 } from 'nostr-tools';
 import { useEffect, useMemo, useState, type ComponentType } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
@@ -637,6 +637,29 @@ export function SettingsPage() {
                 publishes it.
               </p>
             )}
+          </section>
+
+          {/* Above About, which is deliberately last because it is the static
+              one. This is user state, like the relay list it sits under. */}
+          <section className={GROUP}>
+            <h3 className={GROUP_TITLE}>Apps</h3>
+
+            <p className="mt-1 text-base text-foreground/55">
+              Tenna can sign for other apps on this phone, and for apps running somewhere
+              else that you connect to it.
+            </p>
+
+            <ul className="-mx-2 mt-2 divide-y divide-border">
+              <li>
+                <Link
+                  to="/settings/apps"
+                  className="flex items-center justify-between gap-3 rounded-lg px-2 py-3 outline-none transition-colors hover:bg-foreground/5 focus-visible:ring-2 focus-visible:ring-primary"
+                >
+                  <span className="text-base text-foreground/90">Authorized apps</span>
+                  <ChevronRight aria-hidden="true" className="size-5 shrink-0 text-foreground/40" />
+                </Link>
+              </li>
+            </ul>
           </section>
 
           <section className={GROUP}>

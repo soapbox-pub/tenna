@@ -123,6 +123,18 @@ honoured once the user pins the site to their home screen.
 A site written for the web is written for both. See **[NAPP.md](NAPP.md)** for
 the whole of it.
 
+## Signing for other apps
+
+Tenna holds a key, and on Android it will use that key for applications that do
+not: another app on the phone, over NIP-55, or an app running somewhere else,
+over NIP-46. Both are answered by the same code and asked about with the same
+sheet, over a transparent window so the app that asked stays on screen while
+the question is answered. An app that has been answered once can be answered
+again without anything appearing, and what has been allowed is listed — and
+taken back — under Settings → Apps.
+
+See **[SIGNER.md](SIGNER.md)** for what a client can ask and what comes back.
+
 ## Development
 
 ```bash
@@ -158,10 +170,12 @@ src/
 android/app/src/main/java/pub/soapbox/tenna/
                        # Nsite* — serving sites, windows, shares, shortcuts
                        # Napp*  — the relay pool, the foreground service, the shade
+                       # Signer*, Bunker*, Tenna* — the key, and signing for others
 ```
 
 `AGENTS.md` documents the conventions this codebase is written to; `NAPP.md` is
-the reference for nsite authors.
+the reference for nsite authors, and `SIGNER.md` for anyone whose app wants
+Tenna to sign for it.
 
 ### CI and releases
 

@@ -6,7 +6,11 @@ import { useToast } from '@/hooks/useToast';
 import { renderAppBadgePng } from '@/lib/appBadgeBitmap';
 import { renderAppIconPng } from '@/lib/appIconBitmap';
 import { NsiteShortcuts, supportsNsiteWindows } from '@/lib/nsiteShortcutsPlugin';
+import { shareCategories } from '@/lib/nsiteShareTarget';
 import { getNsiteSubdomain } from '@/lib/nsiteSubdomain';
+
+/** Sites whose artwork has already been redrawn, this process. */
+const redrawn = new Set<string>();
 
 interface UseNsiteWindowResult {
   /** Whether this platform can give the site a window at all. */
@@ -23,12 +27,20 @@ interface UseNsiteWindowResult {
  * Tenna's over it — which is what a site opened from the home screen has
  * always got, and there was never a good reason for the two to differ.
  *
- * The manifest, the tile and the site's monochrome mark all go with it. The
- * window may be started cold, from nothing but its intent, so what it needs to
- * serve the site has to be on disk before it opens; the tile is redrawn here
- * for the same reason it is for the launcher, so that the recents card is the
- * site rather than Tenna again, and the mark for the same reason again, so
- * that its notifications are its own.
+ * The manifest goes with it, because the window may be started cold from
+ * nothing but its intent and that is what it serves the site from. It is also
+ * all that has to be there before the window can open, which is the whole of
+ * what this waits on.
+ *
+ * The tile and the site's monochrome mark follow afterwards — see
+ * {@link redrawArtwork}. They used to go first, and drawing them means
+ * fetching artwork the wall had no reason to fetch, so a site being opened for
+ * the first time this process paid a Blossom round trip before anything
+ * happened on screen. On a fast connection that is a hundred milliseconds and
+ * invisible; on a bad one it is seconds of a tap that appears to have missed.
+ * Nothing about the window needs them to have arrived: the record's artwork is
+ * only read when the recents card is drawn and when a notification is posted,
+ * and whatever was stored last time stands until these land.
  */
 export function useNsiteWindow(
   event: NostrEvent,
@@ -38,25 +50,19 @@ export function useNsiteWindow(
   const { toast } = useToast();
 
   const open = useCallback((channel?: number) => {
+    const siteId = getNsiteSubdomain(event);
+
     void (async () => {
       try {
-        const [icon, badge] = await Promise.all([
-          renderAppIconPng(name, app),
-          renderAppBadgePng(app),
-        ]);
         await NsiteShortcuts.open({
-          siteId: getNsiteSubdomain(event),
+          siteId,
           label: name,
           event: JSON.stringify(event),
-          icon: icon ?? undefined,
-          // The wall is also the only place a site's monochrome mark is read,
-          // and a notification can arrive for this site with nothing of the
-          // wall's in memory — so it is written down while it is known.
-          badge: badge ?? undefined,
           channel,
           // The wall is the only place a site's manifest is read, so it is the
           // only place its share_target can be kept current. A window opened
           // from here refreshes what a pinned shortcut will offer next time.
+          // Unlike the artwork it costs nothing to carry: it is already here.
           shareTarget: app?.shareTarget ? JSON.stringify(app.shareTarget) : undefined,
         });
       } catch (err) {
@@ -65,9 +71,65 @@ export function useNsiteWindow(
           description: err instanceof Error ? err.message : String(err),
           variant: 'destructive',
         });
+        return;
       }
+
+      void redrawArtwork(siteId, name, app, channel);
     })();
   }, [event, name, app, toast]);
 
   return { available: supportsNsiteWindows(), open };
+}
+
+/**
+ * Bring the site's stored artwork up to date, once the window is already up.
+ *
+ * Both drawings cost a Blossom fetch of artwork nothing else asked for — the
+ * launcher wants a different icon from the one on the tile, and the monochrome
+ * mark is never shown on the wall at all — so neither is waited on before the
+ * window opens. Nor is either urgent: what they are for is the recents card and
+ * the status bar, and the record already holds whatever was drawn last time.
+ *
+ * Once per site per process. The renders themselves are memoised, so a second
+ * tap would cost only the bridge call and a bitmap decode, but saying the same
+ * thing twice is still not worth saying.
+ *
+ * Quiet about failing, and deliberately: this is the artwork, and a site that
+ * opened is a site that opened. A failure is put back so the next tap tries
+ * again.
+ */
+async function redrawArtwork(
+  siteId: string,
+  name: string,
+  app: NsiteApp | undefined,
+  channel?: number,
+): Promise<void> {
+  if (redrawn.has(siteId)) return;
+  redrawn.add(siteId);
+
+  try {
+    const [icon, badge] = await Promise.all([
+      renderAppIconPng(name, app),
+      renderAppBadgePng(app),
+    ]);
+    if (!icon) return;
+
+    await NsiteShortcuts.refreshIcon({
+      siteId,
+      icon,
+      // A notification can arrive for this site with nothing of the wall's in
+      // memory, long after the manifest this was picked out of was read, and
+      // nowhere else writes one down.
+      badge: badge ?? undefined,
+      // Carried because updating a shortcut replaces it wholesale: a site in
+      // the share sheet would otherwise quietly drop out of it, or fall to the
+      // bottom of the ranking and be the next one evicted. The channel is the
+      // site's place on the wall, which is what that ranking is. See
+      // `useNsitePin`.
+      shareCategories: app?.shareTarget ? shareCategories(app.shareTarget) : undefined,
+      rank: channel && channel > 0 ? channel - 1 : 0,
+    });
+  } catch {
+    redrawn.delete(siteId);
+  }
 }

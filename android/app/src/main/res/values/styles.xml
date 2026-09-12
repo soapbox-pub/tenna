@@ -32,6 +32,28 @@
     </style>
 
     <!--
+        The sheet another application's signing request appears in. See
+        SignerActivity.
+
+        Every part of this is about the window drawing nothing, so that the app
+        that asked stays visible underneath it — which is the point of asking
+        there rather than on a screen of Tenna's own. windowIsFloating stays
+        false because the sheet is full-width and sits on the bottom edge, and
+        backgroundDimEnabled stays off because the sheet draws its own scrim:
+        that way the dim fades in with it, as it does everywhere else in the
+        app, instead of appearing a frame early with the window.
+    -->
+    <style name="AppTheme.Signer" parent="Theme.AppCompat.DayNight.NoActionBar">
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:windowContentOverlay">@null</item>
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:windowIsFloating">false</item>
+        <item name="android:backgroundDimEnabled">false</item>
+        <item name="android:windowAnimationStyle">@null</item>
+    </style>
+
+    <!--
         A dialog a site opened with `alert`, `confirm` or `prompt`. See
         NsiteChromeClient.
 

@@ -1,6 +1,18 @@
+import { App } from '@capacitor/app';
+import { Capacitor } from '@capacitor/core';
 import type { NostrEvent, NostrSigner } from '@nostrify/types';
 import { getEventHash, verifyEvent } from 'nostr-tools/pure';
 import { NostrSignerPlugin } from 'capacitor-plugin-nostr-signer';
+
+/** This app's own package name, asked once. */
+let own: Promise<string | null> | undefined;
+
+function ownPackageName(): Promise<string | null> {
+  own ??= App.getInfo()
+    .then((info) => info.id)
+    .catch(() => null);
+  return own;
+}
 
 /**
  * NIP-55: a signer that lives in another app on the device.
@@ -37,10 +49,20 @@ export class AndroidNativeSigner implements NostrSigner {
     };
   }
 
-  /** The signer apps installed on this device. Throws if the platform has none. */
+  /**
+   * The signer apps installed on this device. Throws if the platform has none.
+   *
+   * Tenna itself is struck off the list. It answers the `nostrsigner:` intent
+   * now — that is the whole of the NIP-55 side of it — so the device query
+   * that finds signer apps finds this one too, and would offer signing in to
+   * Tenna through Tenna as a way of signing in to Tenna. The account it would
+   * reach is the one already here, by a longer road and with a sheet in the
+   * middle of it.
+   */
   static async getSignerApps() {
     const { apps } = await NostrSignerPlugin.getInstalledSignerApps();
-    return apps;
+    const own = Capacitor.isNativePlatform() ? await ownPackageName() : null;
+    return own ? apps.filter((app) => app.packageName !== own) : apps;
   }
 
   /**

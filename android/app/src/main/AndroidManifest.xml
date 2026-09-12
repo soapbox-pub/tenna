@@ -113,6 +113,40 @@
         </activity>
 
         <!--
+            Where another application asks Tenna to sign something. See
+            SignerActivity.
+
+            singleTop, which NIP-55 asks for by name, and deliberately not
+            singleTask: this activity runs inside the calling app's own task.
+            That is what lets a result reach a client that used
+            startActivityForResult — an activity launched into a task of its
+            own cannot return one — and it is what puts the sheet over the app
+            that asked rather than over a window of Tenna's. A client sending
+            several requests with FLAG_ACTIVITY_SINGLE_TOP gets them delivered
+            to onNewIntent and answered one after another.
+
+            The scheme filter is browsable because a web page reaches a signer
+            by navigating to one, which is the whole of NIP-55's web transport.
+        -->
+        <activity
+            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode|navigation|density"
+            android:name=".SignerActivity"
+            android:label="@string/app_name"
+            android:theme="@style/AppTheme.Signer"
+            android:launchMode="singleTop"
+            android:excludeFromRecents="true"
+            android:exported="true">
+
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="nostrsigner" />
+            </intent-filter>
+
+        </activity>
+
+        <!--
             Keeps relays open for every nsite that subscribed to something,
             and hands what arrives to the site's service worker. See
             NappPushService. A special-use type because nothing narrower
@@ -145,6 +179,27 @@
         <receiver
             android:name=".NappNotificationReceiver"
             android:exported="false" />
+
+        <!--
+            The background half of NIP-55: a request from an app that has
+            already been granted what it is asking for, answered without
+            anything appearing on screen. See SignerProvider.
+
+            One class serving several authorities, because the method being
+            called is the authority — that is how the NIP addresses it, and the
+            clients are already written that way.
+
+            Exported with no android:permission, which is deliberate. There is
+            no platform permission that means "may ask about a key", and one
+            invented here would be one every client had to declare. What guards
+            it is that the caller is named by the binder and answered only for
+            what that name has been granted.
+        -->
+        <provider
+            android:name=".SignerProvider"
+            android:authorities="${applicationId}.GET_PUBLIC_KEY;${applicationId}.SIGN_EVENT;${applicationId}.NIP04_ENCRYPT;${applicationId}.NIP04_DECRYPT;${applicationId}.NIP44_ENCRYPT;${applicationId}.NIP44_DECRYPT;${applicationId}.DECRYPT_ZAP_EVENT"
+            android:enabled="true"
+            android:exported="true" />
 
         <provider
             android:name="androidx.core.content.FileProvider"

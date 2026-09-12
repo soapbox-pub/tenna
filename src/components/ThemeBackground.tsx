@@ -1,4 +1,5 @@
 import { useActiveTheme } from '@/hooks/useActiveTheme';
+import { isSignerSheet } from '@/hooks/useSignerPrompt';
 
 /**
  * The picture a theme puts behind the wall.
@@ -22,6 +23,12 @@ import { useActiveTheme } from '@/hooks/useActiveTheme';
  */
 export function ThemeBackground() {
   const media = useActiveTheme()?.media;
+
+  // Not behind the signing sheet. That window is transparent so the app that
+  // asked stays visible under it, and a wallpaper stretched across it is
+  // exactly the thing that would hide the caller — which is the one thing on
+  // screen the user is being asked to judge.
+  if (isSignerSheet()) return null;
 
   if (!media) return null;
 

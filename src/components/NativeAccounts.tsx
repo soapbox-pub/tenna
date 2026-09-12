@@ -1,4 +1,5 @@
-import { useEffect } from 'react';
+import { useNostrLogin } from '@nostrify/react/login';
+import { useEffect, useMemo } from 'react';
 
 import { useLoggedInAccounts } from '@/hooks/useLoggedInAccounts';
 import { supportsNativeSigner, TennaSigner } from '@/lib/tennaSignerPlugin';
@@ -22,25 +23,34 @@ import { supportsNativeSigner, TennaSigner } from '@/lib/tennaSignerPlugin';
  *
  * Kept apart from {@link NativeKeys} deliberately. That component's sweep can
  * destroy an account if it acts on a list it should not trust, so it reads the
- * logins and nothing else. This one wants names and faces, which means relay
- * queries and a cache — worth having for the notification that says who a
- * remote app is asking to sign as, and not worth putting anywhere near the
- * sweep.
+ * logins and nothing else. This one also wants names, which means a relay
+ * query and a cache, and that is not something to put anywhere near the sweep.
  */
 export function NativeAccounts() {
-  const { authors, currentUser } = useLoggedInAccounts();
+  const { logins } = useNostrLogin();
+  const { authors } = useLoggedInAccounts();
 
-  // `authors` is in login order, so the active account is already first — but
-  // it is also the list that arrives empty on the first render and fills in
-  // once the profiles resolve, and `currentUser` is the one that is right
-  // immediately. Depending on both means the mirror is correct from the first
-  // pass and gets names on the second.
-  const serialized = JSON.stringify(
-    authors.map(({ pubkey, metadata }) => ({
-      pubkey,
-      name: metadata.name ?? metadata.display_name ?? '',
-      picture: metadata.picture ?? '',
-    })),
+  // The logins are the list, and the profiles are decoration on it.
+  //
+  // Not the other way round, which is the mistake worth naming: `authors`
+  // comes out of a query and is empty until it resolves, so building the
+  // mirror from it writes "nobody is signed in" on the first render of every
+  // launch — and leaves it that way for good on a device that cannot reach a
+  // relay. An application asking to sign would be told there was no account
+  // here, which is a lie the user has no way to see.
+  const serialized = useMemo(
+    () =>
+      JSON.stringify(
+        logins.map((login) => {
+          const author = authors.find((candidate) => candidate.pubkey === login.pubkey);
+          return {
+            pubkey: login.pubkey,
+            name: author?.metadata.name ?? author?.metadata.display_name ?? '',
+            picture: author?.metadata.picture ?? '',
+          };
+        }),
+      ),
+    [logins, authors],
   );
 
   useEffect(() => {
@@ -63,7 +73,7 @@ export function NativeAccounts() {
     return () => {
       cancelled = true;
     };
-  }, [serialized, currentUser?.pubkey]);
+  }, [serialized]);
 
   return null;
 }

@@ -191,6 +191,20 @@ export function getNsiteName(event: NostrEvent): string | null {
   return event.tags.find(([n]) => n === 'd')?.[1] || null;
 }
 
+/**
+ * What to call a site from its address alone. A named site is addressed by
+ * its `d` tag, which is the name its manifest falls back to anyway; a root
+ * site or a snapshot is addressed by a key, so the start of it is all there is.
+ *
+ * The last resort, for a site whose manifest hasn't arrived and which has
+ * never been drawn before — a tile on a cold wall, a row in the search bar.
+ */
+export function nameFromSubdomain(subdomain: string): string {
+  const pointer = parseNsiteSubdomain(subdomain);
+  if (pointer?.kind === NSITE_NAMED_KIND && pointer.identifier) return pointer.identifier;
+  return `${subdomain.slice(0, 9)}…`;
+}
+
 /** An addressable/replaceable pointer to the site a snapshot was taken from. */
 export interface NsiteParentAddr {
   kind: number;

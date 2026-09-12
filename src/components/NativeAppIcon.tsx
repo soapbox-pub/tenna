@@ -1,5 +1,4 @@
 import { Info, Trash2 } from 'lucide-react';
-import { useCallback } from 'react';
 
 import { TileArtwork, TileButton, TileImage, TileMenuAnchor, TileStatic } from '@/components/Tile';
 import { MENU, MENU_ITEM, MENU_ITEM_DESTRUCTIVE } from '@/components/tile-variants';
@@ -8,9 +7,7 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
 } from '@/components/ui/dropdown-menu';
-import { useNativeAppIcon } from '@/hooks/useNativeApps';
-import { useToast } from '@/hooks/useToast';
-import { notificationError } from '@/lib/haptics';
+import { useLaunchNativeApp, useNativeAppIcon } from '@/hooks/useNativeApps';
 import { NativeApps, type NativeApp } from '@/lib/nativeAppsPlugin';
 
 interface NativeAppIconProps {
@@ -85,33 +82,10 @@ export function NativeAppIcon({
   menuOpen,
   onMenuOpenChange,
 }: NativeAppIconProps) {
-  const { toast } = useToast();
   // `isLoading` rather than `isPending`: a query that is disabled because this
   // platform has no such apps is pending forever, and static forever with it.
   const { data: icon, isLoading } = useNativeAppIcon(app);
-
-  const handleSelect = useCallback(() => {
-    void NativeApps.launch(app)
-      .then(({ launched }) => {
-        if (launched) return;
-        // Uninstalled since it was added. The tile stays, because the wall is
-        // the user's list and nothing takes a thing off it but them; this
-        // says so and points at the way off.
-        notificationError();
-        toast({
-          title: `${app.label} isn't installed anymore`,
-          description: 'Hold its tile to remove it from Tenna.',
-          variant: 'destructive',
-        });
-      })
-      .catch(() => {
-        notificationError();
-        toast({
-          title: `Could not open ${app.label}`,
-          variant: 'destructive',
-        });
-      });
-  }, [app, toast]);
+  const launch = useLaunchNativeApp();
 
   // An adaptive icon is a square with no shape cut out of it yet, so it takes
   // the same squircle an nsite's artwork does and the wall comes out of one
@@ -123,7 +97,7 @@ export function NativeAppIcon({
     <>
       <TileButton
         name={app.label}
-        onSelect={handleSelect}
+        onSelect={() => launch(app)}
         onContextMenu={(clicked) => {
           clicked.preventDefault();
           onMenuOpenChange(true);

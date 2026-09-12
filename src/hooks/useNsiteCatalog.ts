@@ -36,11 +36,17 @@ import { NSITE_CATALOG_PUBKEYS, NSITE_RELAY } from '@/lib/tenna';
  * someone puts it there. Sorted by name, because that is the only order a
  * person scanning a list for one app can follow, and it is the order the
  * search box narrows.
+ *
+ * `enabled` is for the callers that may never need it. The "Add app" dialog
+ * only exists once it is open, so it asks by existing; the wall's search bar
+ * is on screen from the first frame and would otherwise spend the two slowest
+ * round trips in the app on every cold start, whether or not anybody searched.
  */
-export function useNsiteCatalog() {
+export function useNsiteCatalog(options?: { enabled?: boolean }) {
+  const enabled = options?.enabled ?? true;
   const { nostr } = useNostr();
   const { user } = useCurrentUser();
-  const { data: follows, isLoading: followsLoading } = useFollows();
+  const { data: follows, isLoading: followsLoading } = useFollows({ enabled });
 
   const authors = useMemo(
     () => [...new Set([...NSITE_CATALOG_PUBKEYS, ...(user ? [user.pubkey] : []), ...(follows ?? [])])],
@@ -54,7 +60,7 @@ export function useNsiteCatalog() {
   // of it was the same last time. Both halves come off disk at once: the
   // manifests, and every profile that might name one of them.
   useCacheFirstSeedMany<NsiteCatalogEntry[]>({
-    queryKey: authors.length > 0 ? queryKey : undefined,
+    queryKey: enabled && authors.length > 0 ? queryKey : undefined,
     filters: [
       { kinds: [NSITE_ROOT_KIND, NSITE_NAMED_KIND], authors, limit: 500 },
       { kinds: [0], authors },
@@ -71,7 +77,7 @@ export function useNsiteCatalog() {
     // Waits for the follow list rather than running twice: a catalog that
     // arrives short and then reshuffles under the finger is worse than one
     // that arrives a moment later whole.
-    enabled: !followsLoading,
+    enabled: enabled && !followsLoading,
     queryKey,
     queryFn: async (c): Promise<NsiteCatalogEntry[]> => {
       const signal = AbortSignal.any([c.signal, AbortSignal.timeout(8000)]);

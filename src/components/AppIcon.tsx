@@ -22,9 +22,9 @@ import { useNsiteWindow } from '@/hooks/useNsiteWindow';
 import {
   getNsiteName,
   getNsiteSubdomain,
-  NSITE_NAMED_KIND,
-  parseNsiteSubdomain,
+  nameFromSubdomain,
 } from '@/lib/nsiteSubdomain';
+import { recordLaunch, siteKey } from '@/lib/recents';
 import { readTileSnapshot, writeTileSnapshot } from '@/lib/tileSnapshot';
 
 interface AppIconProps {
@@ -47,17 +47,6 @@ interface AppIconProps {
 }
 
 /**
- * What to call a site from its address alone. A named site is addressed by
- * its `d` tag, which is the name its manifest falls back to anyway; a root
- * site or a snapshot is addressed by a key, so the start of it is all there is.
- */
-function nameFromAddress(siteId: string): string {
-  const pointer = parseNsiteSubdomain(siteId);
-  if (pointer?.kind === NSITE_NAMED_KIND && pointer.identifier) return pointer.identifier;
-  return `${siteId.slice(0, 9)}…`;
-}
-
-/**
  * A site whose manifest hasn't arrived.
  *
  * Still a tile, in its place, because the user put it there. It is drawn as
@@ -72,7 +61,7 @@ export function AppIconPending({
   onMenuOpenChange,
 }: { siteId: string } & Pick<AppIconProps, 'onRemove' | 'menuOpen' | 'onMenuOpenChange'>) {
   const [snapshot] = useState(() => readTileSnapshot(siteId));
-  const name = snapshot?.name ?? nameFromAddress(siteId);
+  const name = snapshot?.name ?? nameFromSubdomain(siteId);
 
   return (
     <>
@@ -207,10 +196,15 @@ export function AppIcon({
   // Where a site can have a window of its own, it gets one — pressing the tile
   // launches the site rather than tuning it in over the wall. Everywhere else
   // the wall is the only screen there is, so the viewer opens on top of it.
+  //
+  // Written down either way. What is being recorded is that the person opened
+  // this site, which is the same fact whichever screen it opened on, and the
+  // search bar ranks by it. See `lib/recents`.
   const launch = useCallback(() => {
+    recordLaunch(siteKey(siteId));
     if (ownWindow.available) ownWindow.open(channel);
     else onSelect();
-  }, [ownWindow, channel, onSelect]);
+  }, [ownWindow, channel, onSelect, siteId]);
 
   // Every tile has a menu, because every app has an info panel — a site the
   // user can neither pin nor take off the wall has still been granted things,

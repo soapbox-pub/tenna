@@ -8,6 +8,7 @@ import { LoginArea } from '@/components/auth/LoginArea';
 import { NativeAppIcon } from '@/components/NativeAppIcon';
 import { NsiteSharePicker } from '@/components/NsiteSharePicker';
 import { NsiteViewer } from '@/components/NsiteViewer';
+import { WallSearch } from '@/components/WallSearch';
 import { useActiveTheme } from '@/hooks/useActiveTheme';
 import { usePendingShare } from '@/hooks/useNsiteShare';
 import { useWall } from '@/hooks/useWall';
@@ -49,7 +50,7 @@ const Index = () => {
   // The site tuned in over the wall, where a site can't be given a window of
   // its own. On Android pressing a tile launches one instead and nothing here
   // ever fills — see `useNsiteWindow`.
-  const [active, setActive] = useState<{ event: NostrEvent; channel: number } | null>(null);
+  const [active, setActive] = useState<{ event: NostrEvent; channel?: number } | null>(null);
   const [adding, setAdding] = useState(false);
 
   // Which tile is showing its menu. One at a time, and held here rather than
@@ -115,12 +116,23 @@ const Index = () => {
       */}
       <div className="relative mx-auto max-w-2xl px-5 pb-safe-offset-20 pt-safe-offset-4 sm:px-8 sm:pt-safe-offset-8">
         {/*
-          The one thing on the wall that isn't an app. Signing in belongs to
-          Tenna rather than to any site on it: the identity the browser holds
-          is the one every site it opens ends up asking to sign with, so the
-          way in sits above the lineup instead of somewhere inside it.
+          The two things on the wall that aren't apps, in the order a browser
+          puts them: the way to whatever you were after, and whoever you are
+          while you are there.
+
+          Signing in belongs to Tenna rather than to any site on it — the
+          identity the browser holds is the one every site it opens ends up
+          asking to sign with — so the way in sits above the lineup instead of
+          somewhere inside it. The box beside it is the other thing a browser
+          keeps at the top, and it reaches past the lineup rather than into it.
         */}
-        <header className="mb-7 flex items-center justify-end sm:mb-10">
+        <header className="relative mb-7 flex items-center gap-3 sm:mb-10">
+          <WallSearch
+            uris={wall.uris}
+            events={wall.events}
+            onTuneIn={(event, channel) => setActive({ event, channel })}
+            className="min-w-0 flex-1"
+          />
           <LoginArea />
         </header>
 

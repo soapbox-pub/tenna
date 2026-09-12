@@ -38,24 +38,29 @@ function followsFrom(event: NostrEvent): string[] {
   return [...follows];
 }
 
-export function useFollows() {
+export function useFollows(options?: { enabled?: boolean }) {
   const { nostr } = useNostr();
   const { user } = useCurrentUser();
   const pubkey = user?.pubkey;
+
+  // Nobody logged in is nothing to ask, and so is a caller that hasn't been
+  // looked at yet — see `useNsiteCatalog`, which is the only thing that wants
+  // this and does not always want it.
+  const enabled = (options?.enabled ?? true) && Boolean(pubkey);
 
   // The catalog waits on this list before it will ask for anything, so a cold
   // start spends a relay round trip here before it can spend another one
   // there. Last launch's contact list is a good enough answer to get moving
   // on, and the query below corrects it.
   useCacheFirstSeedMany<string[]>({
-    queryKey: pubkey ? ['follows', pubkey] : undefined,
+    queryKey: enabled && pubkey ? ['follows', pubkey] : undefined,
     filters: [{ kinds: [3], authors: pubkey ? [pubkey] : [], limit: 1 }],
     toData: ([event]) => followsFrom(event),
   });
 
   return useQuery({
     queryKey: ['follows', pubkey ?? ''],
-    enabled: Boolean(pubkey),
+    enabled,
     queryFn: async (c): Promise<string[]> => {
       const signal = AbortSignal.any([c.signal, AbortSignal.timeout(5000)]);
       const [event] = await nostr.query([{ kinds: [3], authors: [pubkey!], limit: 1 }], { signal });

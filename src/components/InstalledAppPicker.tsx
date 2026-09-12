@@ -1,72 +1,16 @@
-import { Check, Loader2, Search } from 'lucide-react';
+import { Loader2, Search } from 'lucide-react';
 import { useMemo, useState } from 'react';
 
+import { NativeAppRow } from '@/components/NativeAppRow';
 import { Input } from '@/components/ui/input';
-import { useNativeAppIcon, useInstalledApps } from '@/hooks/useNativeApps';
-import { useSeen } from '@/hooks/useSeen';
-import { getTileGradient, getTileInitial } from '@/lib/iconTile';
+import { useInstalledApps } from '@/hooks/useNativeApps';
 import { notificationSuccess } from '@/lib/haptics';
-import type { NativeApp } from '@/lib/nativeAppsPlugin';
 import { nativeAppUri, parseWallUri } from '@/lib/wallUri';
-import { cn } from '@/lib/utils';
 
 interface InstalledAppPickerProps {
   /** Everything on the wall, of which the apps are shown as already there. */
   addedUris: string[];
   onAdd: (uri: string) => void;
-}
-
-/** One app in the list: its icon, its name, and whether it is already up. */
-function InstalledAppRow({
-  app,
-  added,
-  onSelect,
-}: {
-  app: NativeApp;
-  added: boolean;
-  onSelect: () => void;
-}) {
-  const [ref, seen] = useSeen<HTMLButtonElement>();
-  const { data: icon } = useNativeAppIcon(seen ? app : undefined);
-
-  return (
-    <button
-      ref={ref}
-      type="button"
-      onClick={onSelect}
-      disabled={added}
-      className={cn(
-        'flex w-full items-center gap-3 rounded-2xl px-3 py-2 text-left transition-colors',
-        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
-        added ? 'cursor-default opacity-50' : 'hover:bg-foreground/10 active:bg-foreground/15',
-      )}
-    >
-      {/* The tile this row would put on the wall, at the size of a row: an
-          adaptive icon cut to Tenna's squircle, a legacy one left in the
-          outline it came with. See `NativeAppIcon`. */}
-      {icon?.adaptive ? (
-        <img
-          src={icon.url}
-          alt=""
-          decoding="async"
-          className="app-squircle size-11 shrink-0 object-cover"
-        />
-      ) : icon ? (
-        <img src={icon.url} alt="" decoding="async" className="size-11 shrink-0 object-contain" />
-      ) : (
-        <span
-          className="app-squircle flex size-11 shrink-0 items-center justify-center text-lg font-semibold text-white/95"
-          style={{ background: getTileGradient(app.label) }}
-        >
-          {getTileInitial(app.label)}
-        </span>
-      )}
-
-      <span className="min-w-0 flex-1 truncate text-base text-foreground/95">{app.label}</span>
-
-      {added && <Check aria-hidden="true" className="size-5 shrink-0 text-foreground/50" />}
-    </button>
-  );
 }
 
 /**
@@ -144,7 +88,7 @@ export function InstalledAppPicker({ addedUris, onAdd }: InstalledAppPickerProps
 
         <div className="space-y-1">
           {results.map((app) => (
-            <InstalledAppRow
+            <NativeAppRow
               key={app.id}
               app={app}
               added={added.has(app.id)}

@@ -19,6 +19,66 @@ interface UseNsiteWindowResult {
   open: (channel?: number) => void;
 }
 
+interface UseNsiteOpenerResult {
+  /** Whether this platform can give a site a window at all. */
+  available: boolean;
+  /** Open a site's window, or bring the one it has forward. */
+  open: (event: NostrEvent, name: string, app?: NsiteApp, channel?: number) => void;
+}
+
+/**
+ * Open a window for whichever site is named at the time.
+ *
+ * The same thing {@link useNsiteWindow} does, asked the other way round. A
+ * tile is one site and knows which before it is drawn; a search result is
+ * whichever row the finger lands on, out of a list that isn't fetched yet when
+ * the hooks run. So the site is an argument here rather than a parameter of
+ * the hook.
+ *
+ * What a caller in that position hasn't got is the site's {@link NsiteApp} —
+ * the document is fetched per row and may not have arrived — and nothing
+ * needs it to open: it carries the share target and the artwork, and both are
+ * things the record already holds from the last time the site was drawn.
+ */
+export function useNsiteOpener(): UseNsiteOpenerResult {
+  const { toast } = useToast();
+
+  const open = useCallback(
+    (event: NostrEvent, name: string, app?: NsiteApp, channel?: number) => {
+      const siteId = getNsiteSubdomain(event);
+
+      void (async () => {
+        try {
+          await NsiteShortcuts.open({
+            siteId,
+            label: name,
+            event: JSON.stringify(event),
+            channel,
+            // The wall is the only place a site's manifest is read, so it is
+            // the only place its share_target can be kept current. A window
+            // opened from here refreshes what a pinned shortcut will offer
+            // next time. Unlike the artwork it costs nothing to carry: it is
+            // already here.
+            shareTarget: app?.shareTarget ? JSON.stringify(app.shareTarget) : undefined,
+          });
+        } catch (err) {
+          toast({
+            title: 'Could not open the site',
+            description: err instanceof Error ? err.message : String(err),
+            variant: 'destructive',
+          });
+          return;
+        }
+
+        void redrawArtwork(siteId, name, app, channel);
+      })();
+    },
+    [toast],
+  );
+
+  return { available: supportsNsiteWindows(), open };
+}
+
 /**
  * Open an nsite in a window of its own.
  *
@@ -47,38 +107,15 @@ export function useNsiteWindow(
   name: string,
   app: NsiteApp | undefined,
 ): UseNsiteWindowResult {
-  const { toast } = useToast();
+  const { available, open } = useNsiteOpener();
 
-  const open = useCallback((channel?: number) => {
-    const siteId = getNsiteSubdomain(event);
-
-    void (async () => {
-      try {
-        await NsiteShortcuts.open({
-          siteId,
-          label: name,
-          event: JSON.stringify(event),
-          channel,
-          // The wall is the only place a site's manifest is read, so it is the
-          // only place its share_target can be kept current. A window opened
-          // from here refreshes what a pinned shortcut will offer next time.
-          // Unlike the artwork it costs nothing to carry: it is already here.
-          shareTarget: app?.shareTarget ? JSON.stringify(app.shareTarget) : undefined,
-        });
-      } catch (err) {
-        toast({
-          title: 'Could not open the site',
-          description: err instanceof Error ? err.message : String(err),
-          variant: 'destructive',
-        });
-        return;
-      }
-
-      void redrawArtwork(siteId, name, app, channel);
-    })();
-  }, [event, name, app, toast]);
-
-  return { available: supportsNsiteWindows(), open };
+  return {
+    available,
+    open: useCallback(
+      (channel?: number) => open(event, name, app, channel),
+      [open, event, name, app],
+    ),
+  };
 }
 
 /**
@@ -104,6 +141,14 @@ async function redrawArtwork(
   app: NsiteApp | undefined,
   channel?: number,
 ): Promise<void> {
+  // Nothing fetched is nothing to redraw. A site opened before its document
+  // arrived — from the search bar, which doesn't wait for one, or from a tile
+  // pressed the moment it appeared — would otherwise have its stored artwork
+  // replaced by the lettered tile `renderAppIconPng` falls back to, which is
+  // the picture for a site that *has* no artwork rather than for one whose
+  // artwork nobody has read yet. What was stored last time stands instead.
+  if (!app) return;
+
   if (redrawn.has(siteId)) return;
   redrawn.add(siteId);
 

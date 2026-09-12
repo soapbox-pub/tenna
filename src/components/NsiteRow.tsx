@@ -24,11 +24,14 @@ function tidyName(value: string | undefined): string | null {
 export function NsiteRow({
   entry,
   added,
+  highlighted = false,
   onSelect,
   publisher: showPublisher = true,
 }: {
   entry: NsiteCatalogEntry;
   added: boolean;
+  /** Whether the keyboard is on this row. See `WallSearch`. */
+  highlighted?: boolean;
   onSelect: () => void;
   /**
    * Whether to name whose site it is. False on a page that is already about
@@ -69,6 +72,7 @@ export function NsiteRow({
         'flex w-full items-center gap-3 rounded-2xl px-3 py-2 text-left transition-colors',
         'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
         added ? 'cursor-default opacity-50' : 'hover:bg-foreground/10 active:bg-foreground/15',
+        highlighted && !added && 'bg-foreground/10',
       )}
     >
       {/* The site's tile, at the size of a row — the same squircle, the same

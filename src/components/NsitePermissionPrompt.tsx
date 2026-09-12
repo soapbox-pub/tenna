@@ -1,7 +1,7 @@
 import { App } from '@capacitor/app';
 import type { PluginListenerHandle } from '@capacitor/core';
 import { useCallback, useEffect, useState } from 'react';
-import { Bell, Camera, Check, KeyRound, Lock, Mic, Pen, TriangleAlert, X } from 'lucide-react';
+import { Bell, Camera, Check, KeyRound, Lock, Mic, Pen, X } from 'lucide-react';
 
 import { TileArtwork } from '@/components/Tile';
 import { Button } from '@/components/ui/button';
@@ -16,7 +16,7 @@ import {
   DrawerTitle,
 } from '@/components/ui/drawer';
 import { Label } from '@/components/ui/label';
-import { getKindLabel, getSensitiveKindReason } from '@/lib/kindLabels';
+import { getKindLabel } from '@/lib/kindLabels';
 import type { NsiteIdentity } from '@/hooks/useNsiteIdentity';
 import type { NsitePromptState, NsitePromptDecision } from '@/hooks/useNsiteSignerRpc';
 
@@ -184,14 +184,6 @@ export function NsitePermissionPrompt({
       )
     : [];
 
-  // Some kinds are not a post. Signing one rewrites who the user is, what they
-  // can prove, or what they still have — so the reason is spelled out, and the
-  // decision cannot be made once and reused. See `SENSITIVE_KINDS`.
-  const sensitive =
-    prompt.type === 'signEvent' && prompt.kind !== null
-      ? getSensitiveKindReason(prompt.kind)
-      : null;
-
   return (
     <Drawer
       open
@@ -238,19 +230,6 @@ export function NsitePermissionPrompt({
               <p className="mt-0.5 text-xs text-muted-foreground">{description}</p>
             </div>
           </div>
-
-          {/* What this kind costs, when it costs more than a post. Above the
-              content, because it is the thing to read before the thing the
-              site wrote to be read. */}
-          {sensitive && (
-            <div className="flex items-start gap-3 rounded-lg border border-amber-500/40 bg-amber-500/10 p-3">
-              <TriangleAlert
-                className="mt-0.5 size-5 shrink-0 text-amber-500"
-                aria-hidden="true"
-              />
-              <p className="min-w-0 text-xs leading-relaxed">{sensitive}</p>
-            </div>
-          )}
 
           {/* Event content preview (signEvent only) */}
           {prompt.type === 'signEvent' && eventContent && (
@@ -309,30 +288,24 @@ export function NsitePermissionPrompt({
         </div>
 
         <DrawerFooter className="gap-3 pb-safe-offset-4">
-          {/* A remembered decision is a question answered once for every time
-              it is asked again. That is a fair trade where the worst it buys
-              is more of the same, and not where the event rewrites who the
-              user is — so for those the offer is withdrawn rather than merely
-              discouraged, and the site asks each time. */}
-          {sensitive ? (
-            <p className="text-xs text-muted-foreground">
-              This one is asked every time.
-            </p>
-          ) : (
-            <div className="flex items-center gap-2">
-              <Checkbox
-                id="nsite-remember"
-                checked={remember}
-                onCheckedChange={(checked) => setRemember(checked === true)}
-              />
-              <Label
-                htmlFor="nsite-remember"
-                className="cursor-pointer select-none text-xs text-muted-foreground"
-              >
-                Remember for this site
-              </Label>
-            </div>
-          )}
+          {/* A remembered decision is offered for anything that gets this far.
+              What the sheet shows — the kind, the content, the tags — is what
+              a person needs to decide; deciding once is then theirs to choose,
+              for any kind, and a prompt the app refuses to stop showing is a
+              prompt people learn to dismiss. */}
+          <div className="flex items-center gap-2">
+            <Checkbox
+              id="nsite-remember"
+              checked={remember}
+              onCheckedChange={(checked) => setRemember(checked === true)}
+            />
+            <Label
+              htmlFor="nsite-remember"
+              className="cursor-pointer select-none text-xs text-muted-foreground"
+            >
+              Remember for this site
+            </Label>
+          </div>
 
           <div className="flex gap-2">
             <Button

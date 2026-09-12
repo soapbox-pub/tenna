@@ -11,7 +11,6 @@
 import { useCallback, useRef, useState } from 'react';
 
 import { useCurrentUser } from '@/hooks/useCurrentUser';
-import { getSensitiveKindReason } from '@/lib/kindLabels';
 import { NappPush, supportsNappPush } from '@/lib/nappPushPlugin';
 import { normalizeNappSubscriptions } from '@/lib/nappSubscriptions';
 import {
@@ -28,6 +27,9 @@ import {
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
+
+/** NIP-42 client authentication. Signed on request, without asking. */
+const NIP42_AUTH = 22242;
 
 /** Describes a pending permission prompt waiting for the user's decision. */
 export interface NsitePromptState {
@@ -146,13 +148,7 @@ export function useNsiteSignerRpc({
       // No stored decision — ask the user.
       const decision = await showPrompt(promptState);
 
-      // Some kinds are never remembered, however the prompt was answered.
-      // The sheet withholds the checkbox for these, but that is a fact about
-      // the view; this is the line that decides what gets written, so this is
-      // where it has to hold. See `SENSITIVE_KINDS`.
-      const rememberable = kind === null || getSensitiveKindReason(kind) === null;
-
-      if (decision.remember && rememberable) {
+      if (decision.remember) {
         setNsitePermission(siteId, user.pubkey, siteName, type, kind, decision.allowed);
       }
 
@@ -233,11 +229,23 @@ export function useNsiteSignerRpc({
 
           const kind = event.kind as number;
 
-          await checkPermission('signEvent', kind, {
-            type: 'signEvent',
-            kind,
-            event,
-          });
+          // Relay auth is not asked about. A kind 22242 is ephemeral, carries
+          // no content, and says one thing to one relay: that whoever holds
+          // this key is on the other end of this connection, right now. It
+          // buys the site nothing it could not already have — it is reading
+          // that relay as the user either way — and it is what a site has to
+          // sign to be shown the user's own protected events at all. Tenna
+          // signs these unprompted for its own relays (see `NostrProvider`),
+          // and there is no reason to hold a site to a stricter rule than the
+          // app applies to itself. A prompt here is a question with one sane
+          // answer, asked mid-connection, which teaches people to say yes.
+          if (kind !== NIP42_AUTH) {
+            await checkPermission('signEvent', kind, {
+              type: 'signEvent',
+              kind,
+              event,
+            });
+          }
 
           // Build the event template the signer expects.
           const template = {

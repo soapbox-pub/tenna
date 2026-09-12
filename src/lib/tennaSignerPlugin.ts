@@ -42,6 +42,20 @@ export interface TennaSignerPlugin {
   retainKeys(options: { pubkeys: string[] }): Promise<{ forgotten: number }>;
 
   /**
+   * Tell the app process who is signed in.
+   *
+   * `accounts` is JSON text of `{ pubkey, name, picture }[]`, in order, the
+   * active account first. It replaces whatever was there — this is a mirror of
+   * the login list for the paths that run with no WebView, and the web layer
+   * is the only thing that knows the whole answer.
+   *
+   * Being in this list is not the same as being signable. It says who is
+   * logged in, including people whose key lives in an extension or another
+   * app; `listKeys` is what says which of them can actually be answered for.
+   */
+  setAccounts(options: { accounts: string }): Promise<void>;
+
+  /**
    * Sign an event template as `pubkey`.
    *
    * `event` is JSON text of `{ kind, content, tags, created_at }`. Any `id`,

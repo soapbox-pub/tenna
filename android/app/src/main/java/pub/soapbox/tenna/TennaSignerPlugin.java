@@ -119,6 +119,25 @@ public class TennaSignerPlugin extends Plugin {
         call.resolve(result);
     }
 
+    /**
+     * Say who is signed in, so that code with no WebView in it can know.
+     *
+     * <p>Wholesale: the argument is the whole list and it replaces the whole
+     * list. See {@link TennaAccounts} for why there is a copy of this down
+     * here at all, and why it is only ever a copy.
+     */
+    @PluginMethod
+    public void setAccounts(PluginCall call) {
+        String accounts = call.getString("accounts");
+        if (accounts == null) {
+            call.reject("accounts is required");
+            return;
+        }
+
+        TennaAccounts.replace(getContext(), accounts);
+        call.resolve();
+    }
+
     /** Keep these and forget the rest — see {@link TennaKeys#retain}. */
     @PluginMethod
     public void retainKeys(PluginCall call) {

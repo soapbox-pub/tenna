@@ -6,6 +6,7 @@ import { createHead, UnheadProvider } from '@unhead/react/client';
 import { InferSeoMetaPlugin } from 'unhead/plugins';
 import { Suspense } from 'react';
 import NostrProvider from '@/components/NostrProvider';
+import { NativeAccounts } from '@/components/NativeAccounts';
 import { NativeKeys } from '@/components/NativeKeys';
 import { NostrSync } from '@/components/NostrSync';
 import { Toaster } from "@/components/ui/toaster";
@@ -100,6 +101,12 @@ export function App() {
                 back off the device. See `NativeKeys`.
               */}
               <NativeKeys />
+              {/*
+                And who is signed in is written down beside the keys, because
+                the three ways another application can reach Tenna all run
+                with no WebView to ask. See `NativeAccounts`.
+              */}
+              <NativeAccounts />
               <TooltipProvider>
                 <Toaster />
                 <Suspense>

@@ -179,7 +179,12 @@ jobs:
           set -eu
           cd android
           chmod +x gradlew
-          ./gradlew assembleRelease --no-daemon
+          # Two ABIs, not four. This is a universal APK — everyone downloads
+          # every copy of libsecp256k1-jni.so in it, and the x86 pair is
+          # emulators and a handful of Chromebooks, at ~2.8 MB of an 8 MB
+          # download. Debug builds pass nothing here and keep all four so an
+          # emulator can still run one.
+          ./gradlew assembleRelease --no-daemon -PapkAbis=armeabi-v7a,arm64-v8a
 
       - name: Collect and name the artifact
         id: artifacts

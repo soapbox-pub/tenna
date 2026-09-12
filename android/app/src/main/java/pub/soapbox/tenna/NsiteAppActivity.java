@@ -161,6 +161,10 @@ public class NsiteAppActivity extends BridgeActivity {
         registerPlugin(NsiteWebViewPlugin.class);
         registerPlugin(NsiteShortcutsPlugin.class);
         registerPlugin(NappPushPlugin.class);
+        // Here as much as on the wall: this window is where a site does its
+        // asking, and a `signEvent` that arrived to find no signer would be
+        // the one thing a site's own window could not do.
+        registerPlugin(TennaSignerPlugin.class);
         super.onCreate(savedInstanceState);
 
         silenceTransitions();

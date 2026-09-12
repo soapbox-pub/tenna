@@ -31,9 +31,12 @@ import okhttp3.WebSocketListener;
  * each new socket with {@code since} raised to wherever the subscription had
  * got to, so a dropped connection costs at most a repeat of the last event.
  *
- * NIP-42 is not spoken here. The service holds no keys, so an {@code AUTH}
- * challenge is noted and left unanswered; a relay that then withholds events
- * withholds them.
+ * NIP-42 is not spoken here. Nothing on this path signs — the key
+ * {@link TennaKeys} holds is reachable from this process but is only ever
+ * asked for by the plugin, on behalf of somebody the user is looking at — so
+ * an {@code AUTH} challenge is noted and left unanswered, and a relay that
+ * then withholds events withholds them. Answering one would mean a background
+ * service signing as the user with nothing on screen to have asked.
  */
 final class NappRelay extends WebSocketListener {
 

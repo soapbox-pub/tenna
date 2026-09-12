@@ -14,10 +14,13 @@ interface AndroidSignerOptionsProps {
 /**
  * The NIP-55 signer apps installed on this device, offered as ways in.
  *
- * This is the best login Tenna can offer on Android: the key stays in the
- * other app, and every site Tenna opens signs through it rather than through
- * a key sitting in this process. Which is why it goes above the nsec field
- * rather than under a menu.
+ * This is still the best login Tenna can offer on Android, which is why it
+ * goes above the nsec field rather than under a menu. A key given to Tenna
+ * now stays out of the browser too — sealed under the KeyStore and signed
+ * with in the app process, see `nativeKeySigner.ts` — but out of Tenna
+ * altogether is further out than that, and a signer app asks the user each
+ * time. Tenna being compromised is then a thing the user is shown rather than
+ * a thing that signs for them.
  *
  * Renders nothing at all off Android, or when the device has no signer
  * installed, so it is safe to mount unconditionally.

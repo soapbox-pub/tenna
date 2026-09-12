@@ -14,6 +14,7 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(NsiteWebViewPlugin.class);
         registerPlugin(NsiteShortcutsPlugin.class);
         registerPlugin(NappPushPlugin.class);
+        registerPlugin(TennaSignerPlugin.class);
         // Only here. The wall is the one screen that puts an app on itself or
         // launches one, and it never runs in a site's window.
         registerPlugin(NativeAppsPlugin.class);

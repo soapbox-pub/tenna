@@ -61,6 +61,24 @@ Permissions are remembered per (user, site), and per event kind for signing, so
 allowing a site to publish a note is not allowing it to publish anything else.
 They are reviewed and revoked from the shield menu over the site.
 
+On **Android** the key is not in the browser either. It is sealed under the
+Android KeyStore, unsealed only in the app process, and signed with there:
+every `signEvent`, `nip04.*` and `nip44.*` is a call across the bridge that
+returns the answer and never the key. Chromium runs its renderers in a process
+of their own under a different UID, and the renderer is the one parsing bytes
+from whatever site the user opened — so a key on this side of the bridge is not
+in that process's address space. What a renderer compromise gets instead is the
+ability to ask, as the user, for as long as it is resident. That is a signing
+oracle and it is bad; it is not the account being taken, which is what an nsec
+in web storage would have been, and which has no undo. The curve arithmetic is
+libsecp256k1's, through the same bindings Amber and Amethyst use.
+
+There is no way to read a key back out. Tenna shows a new key once, at signup,
+for the user to write down, and never again — an export method would be a
+method the compromised renderer could call. A key that was logged in under an
+older version is moved across on sight, and a key whose account is signed out
+of is deleted from the device.
+
 ## The face it wears
 
 Tenna has colours of its own — a dark red screen, a yellow sun — and gives them

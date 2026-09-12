@@ -6,6 +6,7 @@ import { createHead, UnheadProvider } from '@unhead/react/client';
 import { InferSeoMetaPlugin } from 'unhead/plugins';
 import { Suspense } from 'react';
 import NostrProvider from '@/components/NostrProvider';
+import { NativeKeys } from '@/components/NativeKeys';
 import { NostrSync } from '@/components/NostrSync';
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -72,6 +73,11 @@ export function App() {
             localStorage on the web, where there is nowhere better to put it,
             and migrates a key it finds there on the first native read.
 
+            On Android there is no key here to store: an `x-native-key` login
+            is a pubkey, and the key itself is in the app process. This still
+            matters for the rest of it — the login list is who the user is,
+            and a bunker login's client key is a real secret.
+
             That read is a trip to the keychain, so it is asynchronous, and
             the provider shows the fallback until it lands. The fallback is
             the same empty dark screen `AppRouter` paints while it works out
@@ -86,6 +92,14 @@ export function App() {
           >
             <NostrProvider>
               <NostrSync />
+              {/*
+                And on Android the key does not stay here either: it is handed
+                to the app process, sealed under the KeyStore, and signed with
+                over the bridge. A login that predates that is moved across on
+                sight, and a key whose account has been signed out of is taken
+                back off the device. See `NativeKeys`.
+              */}
+              <NativeKeys />
               <TooltipProvider>
                 <Toaster />
                 <Suspense>

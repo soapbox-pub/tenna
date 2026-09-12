@@ -9,6 +9,7 @@ import {
 import { useAppContext } from '@/hooks/useAppContext';
 import { AndroidNativeSigner } from '@/lib/androidNativeSigner';
 import { APP_RELAYS } from '@/lib/appRelays';
+import { importNativeKey } from '@/lib/nativeKeySigner';
 
 // NOTE: This file should not be edited except for adding new login methods.
 
@@ -35,6 +36,16 @@ export function useLoginActions() {
     nsec(nsec: string): void {
       const login = NLogin.fromNsec(nsec);
       addAndActivate(login);
+    },
+    // Login with a secret key kept in the app process, not in this one.
+    //
+    // The nsec goes across the bridge to be sealed under the Android Keystore
+    // and is not stored here at all — the login holds a pubkey and nothing
+    // else. Only available where `supportsNativeSigner()` says so; callers
+    // fall back to `nsec` where it doesn't. See `nativeKeySigner.ts`.
+    async nativeKey(nsec: string): Promise<void> {
+      const pubkey = await importNativeKey(nsec);
+      addAndActivate(new NLogin('x-native-key', pubkey, {}));
     },
     // Login with a NIP-46 "bunker://" URI
     async bunker(uri: string): Promise<void> {

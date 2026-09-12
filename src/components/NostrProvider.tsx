@@ -9,6 +9,7 @@ import { NostrStorageContext } from '@/contexts/NostrStorageContext';
 import { useAppContext } from '@/hooks/useAppContext';
 import { AndroidNativeSigner } from '@/lib/androidNativeSigner';
 import { CachingPool } from '@/lib/CachingPool';
+import { NativeKeySigner } from '@/lib/nativeKeySigner';
 
 /**
  * IndexedDB database holding every event worth keeping between launches.
@@ -139,6 +140,11 @@ const NostrProvider: React.FC<NostrProviderProps> = (props) => {
           const { packageName } = currentLogin.data as { packageName: string };
           return new AndroidNativeSigner(packageName, currentLogin.pubkey);
         }
+        case 'x-native-key':
+          // Unlike NIP-55, an unprompted AUTH costs nothing here: the pubkey
+          // is on the login and signing is a bridge call, so the challenge is
+          // answered without anything coming to the front.
+          return new NativeKeySigner(currentLogin.pubkey);
         case 'extension':
           return NUser.fromExtensionLogin(currentLogin).signer;
         default:

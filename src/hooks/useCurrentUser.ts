@@ -3,6 +3,7 @@ import { useNostr } from '@nostrify/react';
 import { useCallback, useMemo } from 'react';
 
 import { AndroidNativeSigner } from '@/lib/androidNativeSigner';
+import { NativeKeySigner } from '@/lib/nativeKeySigner';
 
 import { useAuthor } from './useAuthor.ts';
 
@@ -26,6 +27,8 @@ export function useCurrentUser() {
           new AndroidNativeSigner(packageName, login.pubkey),
         );
       }
+      case 'x-native-key': // A key in the app process, signed for over the bridge
+        return new NUser(login.type, login.pubkey, new NativeKeySigner(login.pubkey));
       // Other login types can be defined here
       default:
         throw new Error(`Unsupported login type: ${login.type}`);

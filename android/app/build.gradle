@@ -21,6 +21,19 @@ android {
         versionCode 1
         versionName "1.0"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+        // -PapkAbis=armeabi-v7a,arm64-v8a trims the packaged ABIs, and the
+        // release workflow passes exactly that. libsecp256k1-jni.so is ~2.5 MB
+        // per ABI and this is a universal APK, so without it every download
+        // carries four copies of it — including the x86 pair, which is
+        // emulators and a handful of Chromebooks. Debug builds pass nothing and
+        // get all four, so an emulator can still run one.
+        def apkAbis = project.findProperty("apkAbis")
+        if (apkAbis) {
+            ndk {
+                abiFilters.clear()
+                abiFilters.addAll(apkAbis.toString().split(",").collect { it.trim() }.findAll { it })
+            }
+        }
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
              // Default: https://android.googlesource.com/platform/frameworks/base/+/282e181b58cf72b6ca770dc7ca5f91f135444502/tools/aapt/AaptAssets.cpp#61
@@ -71,8 +84,24 @@ dependencies {
     implementation "androidx.webkit:webkit:$androidxWebkitVersion"
     // NappPushService: the WebSocket client that keeps relays open.
     implementation "com.squareup.okhttp3:okhttp:$okhttpVersion"
+    // NostrCrypto: ACINQ's JNI bindings over libsecp256k1, the audited C
+    // library Bitcoin Core uses — and Amber and Amethyst, through these same
+    // bindings. BIP-340 Schnorr signing and the ECDH both encryption NIPs
+    // start from. The curve arithmetic under a user's key is not something to
+    // write, and this is what everyone else's signer is standing on.
+    //
+    // The -android artifact carries the .so per ABI; the -jvm one carries a
+    // host-loadable native so NostrCryptoTest can exercise the real thing in a
+    // plain JVM unit test rather than only on a device.
+    implementation "fr.acinq.secp256k1:secp256k1-kmp-jni-android:$secp256k1Version"
+    testImplementation "fr.acinq.secp256k1:secp256k1-kmp-jni-jvm:$secp256k1Version"
     implementation project(':capacitor-android')
     testImplementation "junit:junit:$junitVersion"
+    // A real org.json for the JVM. Android bundles one, but the stub the unit
+    // test classpath gets throws "not mocked" from every method — and an event
+    // is a JSONObject all the way down, so NostrCryptoTest could not run a
+    // single line of the thing it exists to pin.
+    testImplementation "org.json:json:$jsonVersion"
     androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"
     androidTestImplementation "androidx.test.espresso:espresso-core:$androidxEspressoCoreVersion"
     implementation project(':capacitor-cordova-android-plugins')

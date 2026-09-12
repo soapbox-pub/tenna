@@ -31,6 +31,8 @@ import { useNostrPublish } from '@/hooks/useNostrPublish';
 import { useUploadFile } from '@/hooks/useUploadFile';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { generateSecretKey, getPublicKey, nip19 } from 'nostr-tools';
+import { generateNativeKey } from '@/lib/nativeKeySigner';
+import { supportsNativeSigner } from '@/lib/tennaSignerPlugin';
 import { AndroidSignerOptions } from './AndroidSignerOptions';
 
 interface AuthDialogProps {
@@ -240,22 +242,53 @@ const AuthDialog: React.FC<AuthDialogProps> = ({ isOpen, onClose }) => {
     }
   };
 
+  /**
+   * Sign in with a secret key, keeping it out of this process where the
+   * device will hold it instead.
+   *
+   * The fallback is not a lesser login, it is the login this app has always
+   * had: the key in web storage, signed with here. It is what the web build
+   * does, and what an Android build whose APK has no native library for this
+   * device's ABI does.
+   */
+  const signInWithKey = async (value: string) => {
+    if (await supportsNativeSigner()) {
+      await login.nativeKey(value);
+      return;
+    }
+    login.nsec(value);
+  };
+
   // Signup: generate a key with a brief spinner for feedback.
+  //
+  // Where the device can hold the key, it makes it: the key exists in the app
+  // process first and only ever visits this one so that the next screen can
+  // show it to the user, which is the whole reason it comes back at all.
   const generateKey = () => {
     setIsGenerating(true);
-    setTimeout(() => {
-      const sk = generateSecretKey();
-      setNsec(nip19.nsecEncode(sk));
-      setStep('secure');
-      setIsGenerating(false);
+    setTimeout(async () => {
+      try {
+        const native = await supportsNativeSigner();
+        setNsec(native
+          ? (await generateNativeKey()).nsec
+          : nip19.nsecEncode(generateSecretKey()));
+        setStep('secure');
+      } catch {
+        // The native store refused. A key in this process is worse but it is
+        // an account, which is what the user pressed the button for.
+        setNsec(nip19.nsecEncode(generateSecretKey()));
+        setStep('secure');
+      } finally {
+        setIsGenerating(false);
+      }
     }, 750);
   };
 
-  // Signup: download the nsec to a file and move on to the profile step.
-  const downloadAndProceed = () => {
+  // Signup: download the nsec to a text file and move on to the profile step.
+  const downloadAndProceed = async () => {
     try {
       downloadNsecFile(nsec);
-      login.nsec(nsec);
+      await signInWithKey(nsec);
       setStep('profile');
     } catch {
       toast({
@@ -294,10 +327,11 @@ const AuthDialog: React.FC<AuthDialogProps> = ({ isOpen, onClose }) => {
 
     setIsLoggingIn(true);
     setLoginError('');
-    // Timeout gives the UI a chance to repaint before the synchronous login.
-    setTimeout(() => {
+    // Timeout gives the UI a chance to repaint before the login itself, which
+    // is a trip to the KeyStore at most and synchronous at least.
+    setTimeout(async () => {
       try {
-        login.nsec(value);
+        await signInWithKey(value);
         onClose();
       } catch {
         setLoginError("Couldn't log in with this key.");

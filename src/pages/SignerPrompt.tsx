@@ -120,8 +120,12 @@ export function SignerPrompt({
         event={parseEvent(request.event)}
       />
 
+      {/* Between the scrolling detail and the buttons, and never part of
+          either. `shrink-0` because the region above it is what gives when the
+          sheet runs out of room, and a line that says which identity is about
+          to be used is not a line to let a long tag list push off screen. */}
       {request.accountName && (
-        <p className="px-4 pb-1 text-xs text-muted-foreground">
+        <p className="shrink-0 border-t px-4 pb-1 pt-2 text-xs text-muted-foreground">
           Signing as <span className="text-foreground">{request.accountName}</span>
         </p>
       )}

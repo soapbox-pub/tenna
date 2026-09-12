@@ -23,6 +23,9 @@ import androidx.webkit.WebViewFeature;
 
 import com.getcapacitor.BridgeActivity;
 
+import org.json.JSONArray;
+import org.json.JSONObject;
+
 import java.io.ByteArrayOutputStream;
 import java.io.FileOutputStream;
 import java.util.ArrayDeque;
@@ -89,6 +92,9 @@ public class SignerActivity extends BridgeActivity {
     }
 
     private final Deque<Pending> queue = new ArrayDeque<>();
+
+    /** Every answer given in this window, for a client that batched — see {@link #batched}. */
+    private final JSONArray answered = new JSONArray();
 
     /** Whether everything was answered before anything had to be drawn. */
     private boolean silent;
@@ -161,6 +167,11 @@ public class SignerActivity extends BridgeActivity {
 
         TennaSigning.Request request = parsed.toRequest();
         String account = TennaSigning.accountFor(this, parsed.currentUser, request);
+
+        Log.i(TAG, "Asked for " + parsed.method.wire
+            + " by " + (requesterId == null ? "a web page" : requesterId)
+            + (account == null ? ", nothing to answer with"
+                : ", answer is " + TennaSigning.decide(this, account, requesterId, request)));
 
         if (account != null) {
             TennaSigning.Outcome outcome =
@@ -321,7 +332,35 @@ public class SignerActivity extends BridgeActivity {
             }
         }
 
+        // Anything else waiting that the answer just settled.
+        //
+        // A client that sent four requests at once had all four judged as they
+        // arrived, when none of them had an answer on record. Saying "remember"
+        // to the first one decides the rest, and asking again about a question
+        // the user has this second answered is the sort of thing that teaches
+        // people to press Allow without reading.
+        drain();
+
         if (queue.isEmpty()) finish();
+    }
+
+    /** Answer everything at the front of the queue that no longer needs asking. */
+    private void drain() {
+        Pending next = queue.peekFirst();
+        while (next != null && next.accountPubkey != null) {
+            TennaSigning.Outcome outcome = TennaSigning.answer(
+                this, next.accountPubkey, next.requesterId, next.parsed.toRequest());
+
+            if (outcome.status == TennaSigning.Outcome.Status.NEEDS_APPROVAL) break;
+
+            queue.pollFirst();
+            if (outcome.isResult()) {
+                deliver(next.parsed, outcome, next.requesterId, next.accountPubkey);
+            } else {
+                refuse(next.parsed);
+            }
+            next = queue.peekFirst();
+        }
     }
 
     /** Hand a result back the way the caller can receive one. */
@@ -336,8 +375,8 @@ public class SignerActivity extends BridgeActivity {
         }
 
         String value = outcome.value == null ? "" : outcome.value;
-        setResult(Activity.RESULT_OK,
-            SignerRequests.success(parsed, value, outcome.eventJson, getPackageName()));
+        Intent result = SignerRequests.success(parsed, value, outcome.eventJson, getPackageName());
+        setResult(Activity.RESULT_OK, batched(result, parsed, value, false));
 
         // A web page cannot read an activity result, so it gets sent back to
         // itself with the answer on the end of the URL it named.
@@ -352,7 +391,45 @@ public class SignerActivity extends BridgeActivity {
     }
 
     private void refuse(@NonNull SignerRequests.Parsed parsed) {
-        setResult(Activity.RESULT_OK, SignerRequests.rejection(parsed));
+        setResult(Activity.RESULT_OK, batched(SignerRequests.rejection(parsed), parsed, null, true));
+    }
+
+    /**
+     * Everything answered in this window, for a client that sent several.
+     *
+     * <p>An activity can hand back exactly one result, and NIP-55 lets a client
+     * put several requests into one window — so a batch is answered with a
+     * {@code results} array alongside the extras for the last one. Clients that
+     * send one request at a time never look at it and are unaffected; clients
+     * that batch would otherwise get one answer out of four and wait forever
+     * for the rest.
+     */
+    @NonNull
+    private Intent batched(
+        @NonNull Intent result,
+        @NonNull SignerRequests.Parsed parsed,
+        @Nullable String value,
+        boolean rejected
+    ) {
+        try {
+            JSONObject entry = new JSONObject();
+            entry.put("id", parsed.id);
+            entry.put("package", getPackageName());
+            if (rejected) {
+                entry.put("rejected", true);
+            } else {
+                entry.put("result", value);
+                entry.put("signature", value);
+            }
+            answered.put(entry);
+        } catch (org.json.JSONException e) {
+            // The individual extras are still on the intent; only a batching
+            // client loses anything, and only this one entry of it.
+            Log.i(TAG, "Could not record an answer for a batch");
+        }
+
+        if (answered.length() > 1) result.putExtra("results", answered.toString());
+        return result;
     }
 
     /**

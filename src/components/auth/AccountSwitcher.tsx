@@ -1,4 +1,4 @@
-import { ChevronDown, LogOut, UserIcon, UserPlus } from 'lucide-react';
+import { ChevronDown, LogOut, Settings, UserIcon, UserPlus } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { nip19 } from 'nostr-tools';
 import {
@@ -106,6 +106,15 @@ export function AccountSwitcher({ onAddAccountClick }: AccountSwitcherProps) {
           );
         })}
         <DropdownMenuSeparator />
+        {/* Above the two account verbs, because it is about Tenna rather than
+            about who is signed into it — and because the relay list behind it
+            is the one thing here somebody might come looking for. */}
+        <DropdownMenuItem asChild className='flex items-center gap-2 cursor-pointer p-2 rounded-md'>
+          <Link to='/settings'>
+            <Settings className='w-4 h-4' />
+            <span>Settings</span>
+          </Link>
+        </DropdownMenuItem>
         <DropdownMenuItem
           onClick={onAddAccountClick}
           className='flex items-center gap-2 cursor-pointer p-2 rounded-md'

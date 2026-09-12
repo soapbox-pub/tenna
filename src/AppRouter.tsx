@@ -7,6 +7,7 @@ import Index from "./pages/Index";
 import { NIP19Page } from "./pages/NIP19Page";
 import NotFound from "./pages/NotFound";
 import { NsiteApp } from "./pages/NsiteApp";
+import { SettingsPage } from "./pages/SettingsPage";
 
 export function AppRouter() {
   const { pending, launch } = useNsiteLaunch();
@@ -28,6 +29,10 @@ export function AppRouter() {
       <ScrollToTop />
       <Routes>
         <Route path="/" element={<Index />} />
+        {/* Static, so it outranks the identifier route below whatever the
+            order here — but written above it anyway, since a reader ranks by
+            order and React Router does not. */}
+        <Route path="/settings" element={<SettingsPage />} />
         {/* NIP-19 route for npub1, note1, naddr1, nevent1, nprofile1 */}
         <Route path="/:nip19" element={<NIP19Page />} />
         {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}

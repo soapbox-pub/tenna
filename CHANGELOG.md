@@ -1,5 +1,44 @@
 # Changelog
 
+## [0.4.0] - 2026-09-12
+
+A search box now sits above the wall: type a few letters and Tenna answers with
+the apps and sites you already have, the ones published by the people you
+follow, and whatever is at an address you paste — what you opened lately first.
+There is also a settings screen, behind the account menu, where the list of
+places Tenna looks for sites can finally be seen and added to. On Android, a key
+can no longer be lost to a phone that was only momentarily busy.
+
+### Added
+
+- A search box above the wall. It answers with the apps and sites on your wall,
+  the rest of the phone's apps, and the sites published by the people you
+  follow, with whatever you opened lately at the top. Paste an address and it
+  finds the site there. Pressing a row opens the app rather than adding it — the
+  plus is still how something moves onto the wall for good — and a site opened
+  this way is remembered, so the second time it is at the top of the list before
+  the letter finishes.
+- A settings screen, reached from the account menu. It shows who is signed in,
+  their key under the name they chose, and the ways to their profile, to another
+  account, and out. Under that is the list of places Tenna looks for sites:
+  press one to turn reading or writing off, or take it off the list, and press
+  the plus to add one. Signed in, every change is published for you; signed out,
+  it stays on the device. At the bottom, the version, the license, and the way
+  to the source.
+
+### Fixed
+
+- On Android, a key is no longer taken off the device because the phone could
+  not open it this time. A phone that is busy, or still waking up, answers the
+  same way as one that has genuinely lost the key, and Tenna was taking it at
+  its word — on a device with no way to export a key, that meant an account gone
+  for good, with nobody having pressed anything.
+- A site taken off the wall and put back on can reach you again without
+  restarting the app. It had been left without the part of it that runs while it
+  is closed, so nothing it sent arrived.
+- A site pinned to the home screen keeps the icon it had. Opening it before
+  Tenna had read the site would put a plain lettered tile there instead.
+
 ## [0.3.0] - 2026-09-11
 
 On Android your key is now sealed by the phone itself and never sits in the

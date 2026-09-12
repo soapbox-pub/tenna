@@ -1047,16 +1047,17 @@ public class NsiteWebViewPlugin extends Plugin {
      * {@code file:} and {@code content:} name the device's own storage, which
      * is not the site's to point a viewer at. The rest never reach a URL
      * handler anyway, and are refused here so that stays true.
+     *
+     * <p>{@code nostrsigner:} is deliberately not on this list. A signer app
+     * attributes the request to the package that sent it, which here is Tenna
+     * rather than the site — a real wart, and the reason it was once refused.
+     * It is still a link a user pressed, to an app they installed, which
+     * answers to them and asks them; refusing it breaks every site that signs
+     * the way the rest of the ecosystem does, to spare the user a prompt
+     * naming the wrong app. The gesture check below is what keeps it a link.
      */
     private static final Set<String> UNHANDLED_SCHEMES = new HashSet<>(Arrays.asList(
-        "intent", "android-app", "file", "content", "javascript", "data", "about",
-        // A signer app attributes a `nostrsigner:` request to the package that
-        // sent it, which here is Tenna — so a site could put an event in front
-        // of a signer the user has told to approve Tenna without asking. The
-        // answer never comes back, so there is nothing to gain but the prompt
-        // itself, and a prompt that misnames who is asking is the thing worth
-        // refusing.
-        "nostrsigner"
+        "intent", "android-app", "file", "content", "javascript", "data", "about"
     ));
 
     /**

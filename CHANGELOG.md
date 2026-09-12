@@ -1,5 +1,62 @@
 # Changelog
 
+## [0.3.0] - 2026-09-11
+
+On Android your key is now sealed by the phone itself and never sits in the
+browser again: it is unlocked only inside the app, and every signature is made
+there. A key you were already logged in with moves across on its own. Every
+site also gets a store of its own, so one site can no longer read another's
+cookies, and taking a site off the wall deletes what it kept. Tapping a site
+opens it straight away.
+
+### Added
+
+- On Android, a key you give Tenna is sealed by the phone and is never held in
+  the browser again. It is unlocked only inside the app, and every signature —
+  yours and the ones sites ask for — is made there. A key you were already
+  logged in with is moved across on sight, and signing out deletes it from the
+  device. There is no way to read it back out afterwards, so the words shown at
+  signup are the one chance to write them down.
+
+### Changed
+
+- Every site has a store of its own. Its cookies, storage and cache are its own
+  and no other site's, and taking a site off the wall now deletes them. One
+  consequence of the move: a site looks freshly installed the first time you
+  open it, because what it saved under the store sites used to share is not
+  carried across. That store also let any site read a cookie every other site
+  would then send, which it can no longer do.
+- The sheet asking to sign lists the event's tags, a row each, so the stranger
+  being named or the thing about to be overwritten is readable without opening
+  the raw text.
+- A site reading a relay that asks who it is signs for it without a prompt. The
+  signature buys the site nothing it could not already do as you, and a
+  question with one answer is how people learn to press Allow without reading.
+- The Android app's data is kept out of the phone's cloud backup. The login
+  would restore as ciphertext nobody can open, but beside it sit the sites you
+  have opened and what each one is allowed to do with your keys, and neither
+  belongs in a backup because a default said so.
+- The Android app is built for arm processors — phones and tablets. Emulators
+  and the handful of x86 Chromebooks are no longer covered.
+- A publisher's page no longer has a banner across the top.
+
+### Fixed
+
+- Tapping a site the app has not opened yet puts its window up straight away.
+  It had been waiting first on artwork nothing else had asked for, which on a
+  slow connection read as a missed tap.
+- A site's files are checked against the address they were asked for before
+  they are used, so a file store a publisher names cannot hand back something
+  else.
+- A site can no longer post a notification in another site's name, or take
+  another site's notifications down.
+- A site whose address holds characters an address should not hold no longer
+  loads somebody else's page inside its own window.
+- A page can no longer start a download with nobody touching the screen, and
+  only ordinary web links are handed on to the phone.
+- Tenna refuses to load inside another page's frame, where an "Allow" could be
+  laid under whatever you meant to press.
+
 ## [0.2.1] - 2026-09-10
 
 A publisher's page now wears that publisher's own colours and lays their sites

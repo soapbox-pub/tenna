@@ -60,7 +60,15 @@ final class NsiteProfiles {
     /** What marks a profile as a site's, and not the default one. */
     private static final String PREFIX = "site-";
 
-    /** Profiles whose service worker client has been set, this process. */
+    /**
+     * Profiles whose service worker client has been set, this process.
+     *
+     * Emptied of a profile when the profile is deleted, because deleting one
+     * takes its client with it: a name left in here after that is a site whose
+     * next profile would be made without a client and whose worker would then
+     * be unreachable — no script to install from, and no notifications — until
+     * the app was restarted. See {@link #serve}.
+     */
     private static final Set<String> served = new HashSet<>();
 
     private NsiteProfiles() {}
@@ -120,6 +128,11 @@ final class NsiteProfiles {
         new android.os.Handler(android.os.Looper.getMainLooper()).post(() -> {
             try {
                 ProfileStore.getInstance().deleteProfile(name);
+                // The client went with it. A site can be forgotten and opened
+                // again inside one run of the app — taken off the wall and put
+                // back — and the profile it gets then is a new one needing a
+                // client of its own.
+                served.remove(name);
             } catch (RuntimeException e) {
                 Log.i(TAG, "The store for " + siteId + " is still in use; sweeping it later");
             }
@@ -151,6 +164,11 @@ final class NsiteProfiles {
                 if (live.contains(name.substring(PREFIX.length()))) continue;
 
                 store.deleteProfile(name);
+                // Nothing is in `served` yet at the moment this normally runs
+                // — no WebView has been made — but the set is not allowed to
+                // name a profile that no longer exists, whenever it is that a
+                // profile stops existing.
+                served.remove(name);
                 Log.i(TAG, "Swept the store of a site nothing is left of");
             }
         } catch (RuntimeException e) {

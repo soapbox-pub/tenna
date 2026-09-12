@@ -139,12 +139,21 @@ final class TennaKeys {
         String hex = open(sealed);
         byte[] sk = hex != null ? NostrCipher.hexToBytes(hex) : null;
         if (sk == null || sk.length != 32) {
-            // The blob is there and won't open: a Keystore key lost to a
-            // factory reset of the secure hardware, or a corrupted entry.
-            // Either way this account cannot sign again, and leaving the entry
-            // would make every later call retry the same failure.
-            Log.w(TAG, "Dropping a sealed key that will not open");
-            prefs(context).edit().remove(pubkey).apply();
+            // The blob is there and won't open. It is kept anyway.
+            //
+            // Some reasons it won't are permanent — a Keystore key lost to a
+            // reset of the secure hardware, a corrupted entry — and for those
+            // the entry is worthless and retrying it costs a failed decrypt
+            // per call. But others are not: the Keystore is a service that can
+            // be unavailable for a moment, particularly early in a boot, and
+            // nothing here can tell the two apart from the outside.
+            //
+            // A key deleted here cannot be got back. There is no export, so
+            // this blob is the only copy of that account on the device, and
+            // trading it against a cheap retry is not a trade worth making.
+            // The one thing that removes a key is the account being signed
+            // out of; see `retain`.
+            Log.w(TAG, "A sealed key will not open; keeping it and answering with nothing");
             return null;
         }
 

@@ -145,6 +145,36 @@ final class TennaSigning {
         }
     }
 
+    /**
+     * One line saying what was asked, for a notification.
+     *
+     * <p>Deliberately thin. A notification about a signing request is seen on
+     * a lock screen by whoever is holding the phone, so it says the shape of
+     * the request and never its contents — the event body is for the sheet,
+     * which at least required getting that far.
+     */
+    @NonNull
+    static String describe(@NonNull Request request) {
+        switch (request.method) {
+            case SIGN_EVENT: {
+                Integer kind = request.eventKind();
+                return kind == null ? "wants to sign an event" : "wants to sign a kind " + kind + " event";
+            }
+            case GET_PUBLIC_KEY:
+                return "wants to know who you are";
+            case NIP04_ENCRYPT:
+            case NIP44_ENCRYPT:
+                return "wants to encrypt a message";
+            case NIP04_DECRYPT:
+            case NIP44_DECRYPT:
+                return "wants to decrypt a message";
+            case DECRYPT_ZAP_EVENT:
+                return "wants to read a private zap";
+            default:
+                return "wants to use your key";
+        }
+    }
+
     // ── Choosing the account ─────────────────────────────────────────────────
 
     /**

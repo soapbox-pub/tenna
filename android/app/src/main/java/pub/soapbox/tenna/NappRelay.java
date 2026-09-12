@@ -9,6 +9,7 @@ import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
@@ -31,12 +32,19 @@ import okhttp3.WebSocketListener;
  * each new socket with {@code since} raised to wherever the subscription had
  * got to, so a dropped connection costs at most a repeat of the last event.
  *
- * NIP-42 is not spoken here. Nothing on this path signs — the key
+ * NIP-42 is answered only as a connection, never as the user. The key
  * {@link TennaKeys} holds is reachable from this process but is only ever
- * asked for by the plugin, on behalf of somebody the user is looking at — so
- * an {@code AUTH} challenge is noted and left unanswered, and a relay that
- * then withholds events withholds them. Answering one would mean a background
- * service signing as the user with nothing on screen to have asked.
+ * asked for on behalf of somebody who is looking at a screen, and a background
+ * service signing as the user with nothing on screen to have asked is the
+ * thing that must not happen.
+ *
+ * A connection's own key is a different matter. It was minted for one remote
+ * client, it signs nothing but that conversation, and authenticating with it
+ * says no more than "this socket belongs to the connection it says it does" —
+ * which is what the relay is asking. Several NIP-46 relays require it before
+ * they will carry an ephemeral event at all, so a socket that has a connection
+ * on it answers with that connection's key, and a socket that has only sites
+ * on it still says nothing.
  */
 final class NappRelay extends WebSocketListener {
 
@@ -55,6 +63,16 @@ final class NappRelay extends WebSocketListener {
     interface Listener {
         /** An EVENT under one of our REQs. Called on an OkHttp thread. */
         void onEvent(@NonNull String relayUrl, @NonNull NappPlan.Subscription subscription, @NonNull JSONObject event);
+
+        /**
+         * A signed kind 22242 for this challenge, or null to leave it alone.
+         *
+         * Given the connections whose REQs this socket is carrying, so that
+         * the answer is signed by one of them and never by the user.
+         */
+        @Nullable
+        String onAuthChallenge(@NonNull String relayUrl, @NonNull String challenge,
+                               @NonNull List<NappPlan.Subscription> carrying);
     }
 
     private static final long MIN_BACKOFF_MS = 1_000;
@@ -257,13 +275,59 @@ final class NappRelay extends WebSocketListener {
                 Log.i(TAG, url + " says: " + message.optString(1, ""));
                 break;
             case "AUTH":
-                if (!authNoted) {
-                    authNoted = true;
-                    Log.i(TAG, url + " wants NIP-42 auth, which the push service cannot give");
-                }
+                authenticate(message.optString(1, ""));
                 break;
             default:
                 break;
+        }
+    }
+
+    /**
+     * Answer a relay's challenge, if anything on this socket may.
+     *
+     * <p>Only ever with a connection's key. A socket carrying nothing but
+     * sites has nothing to answer with and says so once, in the log.
+     */
+    private void authenticate(@NonNull String challenge) {
+        if (challenge.isEmpty()) return;
+
+        List<NappPlan.Subscription> carrying;
+        WebSocket current;
+        synchronized (this) {
+            current = socket;
+            carrying = new ArrayList<>(desired.values());
+        }
+        if (current == null) return;
+
+        String event = listener.onAuthChallenge(url, challenge, carrying);
+        if (event == null) {
+            if (!authNoted) {
+                authNoted = true;
+                Log.i(TAG, url + " wants NIP-42 auth and nothing here may answer as the user");
+            }
+            return;
+        }
+
+        try {
+            current.send("[\"AUTH\"," + event + "]");
+        } catch (RuntimeException e) {
+            Log.i(TAG, "Could not answer " + url + "'s challenge");
+        }
+    }
+
+    /**
+     * Publish an event, if this relay is up.
+     *
+     * @return false when there is no open socket, so the caller can try
+     *         another relay rather than assume it was sent.
+     */
+    synchronized boolean publish(@NonNull String eventJson) {
+        WebSocket current = socket;
+        if (current == null || !open) return false;
+        try {
+            return current.send("[\"EVENT\"," + eventJson + "]");
+        } catch (RuntimeException e) {
+            return false;
         }
     }
 

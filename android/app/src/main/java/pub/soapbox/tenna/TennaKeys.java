@@ -230,8 +230,16 @@ final class TennaKeys {
         return gen.generateKey();
     }
 
-    /** Encrypt for SharedPreferences; null on failure. */
-    private static String seal(String plaintext) {
+    /**
+     * Encrypt for SharedPreferences; null on failure.
+     *
+     * <p>Package-private rather than private because {@link BunkerConnections}
+     * holds secrets of the same order — a key that signs as the user, for one
+     * remote connection — and there is no reason for a second Keystore alias
+     * doing the identical job. It is deliberately not a general-purpose
+     * facility: the only things sealed with it are keys.
+     */
+    static String seal(String plaintext) {
         try {
             Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
             cipher.init(Cipher.ENCRYPT_MODE, sealKey());
@@ -247,7 +255,7 @@ final class TennaKeys {
     }
 
     /** Decrypt a sealed blob; null on any failure. */
-    private static String open(String sealed) {
+    static String open(String sealed) {
         try {
             byte[] data = Base64.decode(sealed, Base64.NO_WRAP);
             if (data.length < 13) return null;

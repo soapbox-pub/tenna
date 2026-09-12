@@ -18,6 +18,9 @@ public class MainActivity extends BridgeActivity {
         // Only here. The wall is the one screen that puts an app on itself or
         // launches one, and it never runs in a site's window.
         registerPlugin(NativeAppsPlugin.class);
+        // Likewise: who has been given a key is a settings screen, and
+        // settings are only reachable from Tenna's own window.
+        registerPlugin(SignerAppsPlugin.class);
         super.onCreate(savedInstanceState);
 
         // The push service is sticky, but an update or a force-stop takes it

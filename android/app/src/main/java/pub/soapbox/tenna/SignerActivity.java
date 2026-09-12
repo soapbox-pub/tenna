@@ -62,18 +62,32 @@ public class SignerActivity extends BridgeActivity {
 
     private static final String TAG = "SignerActivity";
 
-    /** A request the user has not answered yet. */
+    /**
+     * A request the user has not answered yet.
+     *
+     * <p>Either an intent from an app on the phone, in which case {@link
+     * #parsed} is set and the answer goes back as an activity result, or a
+     * request that came off a relay, in which case {@link #bunker} is set and
+     * the answer goes back to the push service to be published. The sheet in
+     * between does not know the difference and does not need to: it is the
+     * same question about the same key.
+     */
     static final class Pending {
-        @NonNull final SignerRequests.Parsed parsed;
+        @Nullable final SignerRequests.Parsed parsed;
+        @Nullable final NappBunker.Pending bunker;
+        /** The client's own id for this, echoed back with the answer. */
+        @NonNull final String id;
+        @NonNull final TennaSigning.Request request;
         /** The account that would answer, or null if this device has no key. */
         @Nullable final String accountPubkey;
-        /** The calling package, or null for a web page with nothing behind it. */
+        /** The calling package or client pubkey; null for a web page. */
         @Nullable final String requesterId;
         @NonNull final String appName;
         @NonNull final String appKind;
         /** The caller's launcher icon as a data URI, or null. */
         @Nullable final String icon;
 
+        /** From an intent. */
         Pending(
             @NonNull SignerRequests.Parsed parsed,
             @Nullable String accountPubkey,
@@ -83,11 +97,30 @@ public class SignerActivity extends BridgeActivity {
             @Nullable String icon
         ) {
             this.parsed = parsed;
+            this.bunker = null;
+            this.id = parsed.id;
+            this.request = parsed.toRequest();
             this.accountPubkey = accountPubkey;
             this.requesterId = requesterId;
             this.appName = appName;
             this.appKind = appKind;
             this.icon = icon;
+        }
+
+        /** From a relay. */
+        Pending(@NonNull NappBunker.Pending bunker) {
+            this.parsed = null;
+            this.bunker = bunker;
+            this.id = bunker.requestId;
+            this.request = bunker.request;
+            this.accountPubkey = bunker.accountPubkey;
+            this.requesterId = bunker.clientPubkey;
+            this.appName = bunker.appName;
+            this.appKind = SignerApps.KIND_BUNKER;
+            // A remote client's icon is a URL it gave us, and fetching one on
+            // the strength of a signing request would tell whoever hosts it
+            // when the user is being asked to sign. Its initial will do.
+            this.icon = null;
         }
     }
 
@@ -148,6 +181,23 @@ public class SignerActivity extends BridgeActivity {
      * @return true when nothing is left to put in front of the user.
      */
     private boolean settle(@NonNull Intent intent, boolean additional) {
+        // A notification about a remote request, rather than an app on the
+        // phone asking directly. Nothing here is decided again — it was judged
+        // when it arrived, and only got this far because nobody had.
+        String bunkerId = bunkerRequestId(intent);
+        if (bunkerId != null) {
+            NappBunker.Pending waiting = NappBunker.take(bunkerId);
+            if (waiting == null) {
+                // Answered elsewhere, or old enough that the client has given
+                // up. Either way there is nothing to ask about.
+                Log.i(TAG, "A remote request is no longer waiting for an answer");
+                return !additional;
+            }
+            NappNotifications.cancelSignerRequest(this, bunkerId);
+            queue.addLast(new Pending(waiting));
+            return false;
+        }
+
         SignerRequests.Parsed parsed = SignerRequests.parse(intent);
         if (parsed == null) {
             // Not a request this signer understands. A client waiting on a
@@ -305,25 +355,34 @@ public class SignerActivity extends BridgeActivity {
      */
     void resolve(@NonNull String id, boolean allowed, boolean remember) {
         Pending pending = queue.peekFirst();
-        if (pending == null || !pending.parsed.id.equals(id)) return;
+        if (pending == null || !pending.id.equals(id)) return;
         queue.pollFirst();
 
+        // A request that came off a relay is answered by the service, which
+        // owns the socket it has to go out on. Everything about the decision —
+        // the grant, the signing — happens there too, so that the answer and
+        // the publish are one step and neither can happen without the other.
+        if (pending.bunker != null) {
+            NappPushService.resolveBunker(this, pending.bunker, allowed, remember);
+            if (queue.isEmpty()) finish();
+            return;
+        }
+
         String account = pending.accountPubkey;
-        String permission = pending.parsed.method.permission;
+        String permission = pending.request.method.permission;
 
         if (account != null && remember && permission != null
                 && pending.requesterId != null && !pending.requesterId.isEmpty()) {
             SignerApps.grant(
                 this, account, pending.requesterId, pending.appKind, pending.appName,
-                permission, pending.parsed.toRequest().eventKind(), allowed
+                permission, pending.request.eventKind(), allowed
             );
         }
 
         if (!allowed || account == null) {
             refuse(pending.parsed);
         } else {
-            TennaSigning.Outcome outcome =
-                TennaSigning.run(this, account, pending.parsed.toRequest());
+            TennaSigning.Outcome outcome = TennaSigning.run(this, account, pending.request);
             if (outcome.isResult()) {
                 deliver(pending.parsed, outcome, pending.requesterId, account);
             } else {
@@ -347,9 +406,9 @@ public class SignerActivity extends BridgeActivity {
     /** Answer everything at the front of the queue that no longer needs asking. */
     private void drain() {
         Pending next = queue.peekFirst();
-        while (next != null && next.accountPubkey != null) {
+        while (next != null && next.accountPubkey != null && next.parsed != null) {
             TennaSigning.Outcome outcome = TennaSigning.answer(
-                this, next.accountPubkey, next.requesterId, next.parsed.toRequest());
+                this, next.accountPubkey, next.requesterId, next.request);
 
             if (outcome.status == TennaSigning.Outcome.Status.NEEDS_APPROVAL) break;
 
@@ -444,7 +503,14 @@ public class SignerActivity extends BridgeActivity {
     public void finish() {
         Pending pending = queue.peekFirst();
         while (pending != null) {
-            refuse(pending.parsed);
+            if (pending.parsed != null) {
+                refuse(pending.parsed);
+            } else if (pending.bunker != null) {
+                // A remote client is holding the request open, so a dismissal
+                // has to be said out loud rather than left to time out. Never
+                // remembered — see the note above.
+                NappPushService.resolveBunker(this, pending.bunker, false, false);
+            }
             queue.pollFirst();
             pending = queue.peekFirst();
         }
@@ -509,5 +575,39 @@ public class SignerActivity extends BridgeActivity {
 
     private static boolean fromHistory(@NonNull Intent intent) {
         return (intent.getFlags() & Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY) != 0;
+    }
+
+    // ── Requests that came off a relay ───────────────────────────────────────
+
+    /** The scheme a notification about a remote request opens this with. */
+    private static final String BUNKER_SCHEME = "tenna-signer";
+
+    /**
+     * An intent that opens the sheet for a request raised off a relay.
+     *
+     * <p>A NIP-46 request has no activity behind it, so a notification is the
+     * only thing that can carry it to the user, and a notification needs a
+     * task of its own.
+     *
+     * <p>The id is in the URI rather than an extra so that two notifications
+     * make two distinct {@code PendingIntent}s — extras alone do not tell them
+     * apart, and the second would silently replace the first.
+     */
+    @NonNull
+    static Intent bunkerIntent(@NonNull android.content.Context context, @NonNull String requestId) {
+        return new Intent(context, SignerActivity.class)
+            .setAction(Intent.ACTION_VIEW)
+            .setData(Uri.fromParts(BUNKER_SCHEME, requestId, null))
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+    }
+
+    /** The request id a notification named, or null if this is not one. */
+    @Nullable
+    private static String bunkerRequestId(@NonNull Intent intent) {
+        Uri data = intent.getData();
+        if (data == null || !BUNKER_SCHEME.equals(data.getScheme())) return null;
+
+        String id = data.getSchemeSpecificPart();
+        return id == null || id.isEmpty() ? null : id;
     }
 }

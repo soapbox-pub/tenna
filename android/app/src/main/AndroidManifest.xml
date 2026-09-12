@@ -34,6 +34,23 @@
             </intent-filter>
 
             <!--
+                A link from an app somewhere else asking to be connected to
+                this signer. It lands on the wall, which sends it to the
+                settings screen that lists connections — and stops there.
+
+                Nothing is accepted by arriving. Any web page can navigate to
+                a nostrconnect: link, and accepting one is a standing
+                permission to sign as the user, so the screen asks. See
+                DeepLinkHandler.
+            -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="nostrconnect" />
+            </intent-filter>
+
+            <!--
                 What a pinned nsite may be offered from the share sheet. See
                 @xml/shortcuts, whose <share-target> entries send the share on
                 to NsiteShareActivity.

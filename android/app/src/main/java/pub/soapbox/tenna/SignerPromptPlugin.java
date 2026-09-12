@@ -89,19 +89,18 @@ public class SignerPromptPlugin extends Plugin {
         @NonNull SignerActivity activity,
         @NonNull SignerActivity.Pending pending
     ) {
-        SignerRequests.Parsed parsed = pending.parsed;
-        TennaSigning.Request request = parsed.toRequest();
+        TennaSigning.Request request = pending.request;
 
         JSObject json = new JSObject();
-        json.put("id", parsed.id);
-        json.put("method", parsed.method.wire);
-        json.put("permission", parsed.method.permission);
+        json.put("id", pending.id);
+        json.put("method", request.method.wire);
+        json.put("permission", request.method.permission);
         json.put("appName", pending.appName);
         json.put("appKind", pending.appKind);
         json.put("requesterId", pending.requesterId);
         json.put("icon", pending.icon);
         json.put("account", pending.accountPubkey);
-        json.put("peer", parsed.peer);
+        json.put("peer", request.peer);
 
         Integer kind = request.eventKind();
         if (kind != null) json.put("kind", (int) kind);
@@ -109,8 +108,8 @@ public class SignerPromptPlugin extends Plugin {
         // The event as text, exactly as it arrived. The sheet parses it
         // itself; nothing on the way through gets to reshape what the user is
         // being shown.
-        if (parsed.method == SignerTypes.Method.SIGN_EVENT) {
-            json.put("event", parsed.payload);
+        if (request.method == SignerTypes.Method.SIGN_EVENT) {
+            json.put("event", request.payload);
         }
 
         // Whether "remember this" is worth offering. It is not for a caller
@@ -118,7 +117,7 @@ public class SignerPromptPlugin extends Plugin {
         // a grant given to one would answer for the next.
         json.put("canRemember",
             pending.requesterId != null && !pending.requesterId.isEmpty()
-                && parsed.method.permission != null);
+                && request.method.permission != null);
 
         json.put("signedIn", pending.accountPubkey != null);
         if (pending.accountPubkey != null) {

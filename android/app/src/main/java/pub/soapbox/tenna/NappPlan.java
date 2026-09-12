@@ -1,6 +1,7 @@
 package pub.soapbox.tenna;
 
 import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -15,13 +16,19 @@ import java.util.Set;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * Every site's subscriptions, regrouped by the relay that has to carry them.
+ * Every subscription this device is holding open, regrouped by relay.
  *
- * The merge is deliberately plain. Each site subscription becomes one REQ on
- * each of its relays, and a relay named by several sites gets one socket
- * carrying all of their REQs. Relays match events against filters far better
- * than a phone would, and a REQ per subscription means an event arrives
- * already labelled with the site and the subscription it was for.
+ * The merge is deliberately plain. Each subscription becomes one REQ on each
+ * of its relays, and a relay named by several of them gets one socket carrying
+ * all the REQs. Relays match events against filters far better than a phone
+ * would, and a REQ per subscription means an event arrives already labelled
+ * with what it was for.
+ *
+ * Two kinds ride the same sockets. A site's subscription is whatever that site
+ * asked to be notified about; a connection's is the one filter a remote signer
+ * needs — kind 24133 addressed to the connection's own key. They are kept
+ * apart by {@link Subscription#bunkerPubkey} and nothing else, because from
+ * the socket's point of view there is no difference between them.
  */
 final class NappPlan {
 
@@ -29,9 +36,18 @@ final class NappPlan {
     static final class Subscription {
         /** The REQ id; unique across sites, stable across rebuilds. */
         @NonNull final String id;
+        /** The site this is for, or empty when it is a connection's. */
         @NonNull final String siteId;
         /** Position in the site's own list, reported back to its worker. */
         final int index;
+        /**
+         * The connection this is for, or null when it is a site's.
+         *
+         * Also the key the answer will be signed with, and the {@code p} tag
+         * the client is addressing — so it is the whole of what the service
+         * needs to route an arriving request.
+         */
+        @Nullable final String bunkerPubkey;
         @NonNull final JSONArray filters;
         /**
          * The floor for {@code since} on every filter, raised as events
@@ -40,21 +56,33 @@ final class NappPlan {
          */
         @NonNull final AtomicLong since;
 
-        Subscription(@NonNull String id, @NonNull String siteId, int index, @NonNull JSONArray filters, @NonNull AtomicLong since) {
+        Subscription(@NonNull String id, @NonNull String siteId, int index,
+                     @Nullable String bunkerPubkey, @NonNull JSONArray filters,
+                     @NonNull AtomicLong since) {
             this.id = id;
             this.siteId = siteId;
             this.index = index;
+            this.bunkerPubkey = bunkerPubkey;
             this.filters = filters;
             this.since = since;
+        }
+
+        /** Whether this carries requests for a remote signer rather than a site. */
+        boolean isBunker() {
+            return bunkerPubkey != null;
         }
     }
 
     @NonNull final Map<String, List<Subscription>> byRelay;
     @NonNull final Set<String> siteIds;
+    /** How many connections are being listened for, for the service's notification. */
+    final int connectionCount;
 
-    private NappPlan(@NonNull Map<String, List<Subscription>> byRelay, @NonNull Set<String> siteIds) {
+    private NappPlan(@NonNull Map<String, List<Subscription>> byRelay,
+                     @NonNull Set<String> siteIds, int connectionCount) {
         this.byRelay = byRelay;
         this.siteIds = siteIds;
+        this.connectionCount = connectionCount;
     }
 
     /**
@@ -66,7 +94,9 @@ final class NappPlan {
      * event noted for it on disk.
      */
     @NonNull
-    static NappPlan build(@NonNull List<NappSubscriptions.Record> records, @NonNull Map<String, AtomicLong> sinces) {
+    static NappPlan build(@NonNull List<NappSubscriptions.Record> records,
+                          @NonNull List<BunkerConnections.Connection> connections,
+                          @NonNull Map<String, AtomicLong> sinces) {
         Map<String, List<Subscription>> byRelay = new HashMap<>();
         Set<String> siteIds = new HashSet<>();
         Set<String> live = new HashSet<>();
@@ -93,7 +123,7 @@ final class NappPlan {
                     since.accumulateAndGet(floor, Math::max);
                 }
 
-                Subscription planned = new Subscription(id, record.siteId, i, filters, since);
+                Subscription planned = new Subscription(id, record.siteId, i, null, filters, since);
                 siteIds.add(record.siteId);
 
                 for (int r = 0; r < relays.length(); r++) {
@@ -109,10 +139,54 @@ final class NappPlan {
             }
         }
 
+        for (BunkerConnections.Connection connection : connections) {
+            if (connection.relays.isEmpty()) continue;
+
+            String id = "bunker:" + connection.localPubkey.substring(0, 12);
+            live.add(id);
+
+            JSONArray filters = bunkerFilter(connection.localPubkey);
+            if (filters == null) continue;
+
+            // Kind 24133 is ephemeral, so there is no history to catch up on
+            // and a floor would only risk a relay's clock skew hiding a live
+            // request. It starts at now and stays there.
+            AtomicLong since = sinces.get(id);
+            if (since == null) {
+                since = new AtomicLong(System.currentTimeMillis() / 1000);
+                sinces.put(id, since);
+            }
+
+            Subscription planned = new Subscription(id, "", -1, connection.localPubkey, filters, since);
+
+            for (String url : connection.relays) {
+                List<Subscription> list = byRelay.get(url);
+                if (list == null) {
+                    list = new ArrayList<>();
+                    byRelay.put(url, list);
+                }
+                list.add(planned);
+            }
+        }
+
         // Floors for subscriptions that no longer exist would only grow the
         // map forever.
         sinces.keySet().retainAll(live);
 
-        return new NappPlan(Collections.unmodifiableMap(byRelay), Collections.unmodifiableSet(siteIds));
+        return new NappPlan(Collections.unmodifiableMap(byRelay),
+            Collections.unmodifiableSet(siteIds), connections.size());
+    }
+
+    /** The one filter a remote signer needs: requests addressed to this connection. */
+    @Nullable
+    private static JSONArray bunkerFilter(@NonNull String localPubkey) {
+        try {
+            JSONObject filter = new JSONObject();
+            filter.put("kinds", new JSONArray().put(NappBunker.KIND));
+            filter.put("#p", new JSONArray().put(localPubkey));
+            return new JSONArray().put(filter);
+        } catch (org.json.JSONException e) {
+            return null;
+        }
     }
 }

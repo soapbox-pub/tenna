@@ -47,6 +47,25 @@ final class NappRelayPool {
         }
     }
 
+    /**
+     * Send an event to every one of these relays that is currently up.
+     *
+     * <p>All of them rather than the first that works. A remote client listens
+     * on the relays it named and there is no telling which of them it is
+     * actually reading; kind 24133 is ephemeral, so an answer that went to the
+     * wrong one of three is an answer that no longer exists anywhere.
+     *
+     * @return how many sockets took it.
+     */
+    synchronized int publish(@NonNull String eventJson, @NonNull List<String> urls) {
+        int sent = 0;
+        for (String url : urls) {
+            NappRelay relay = relays.get(url);
+            if (relay != null && relay.publish(eventJson)) sent++;
+        }
+        return sent;
+    }
+
     synchronized void reconnectAll() {
         for (NappRelay relay : relays.values()) relay.reconnectNow();
     }

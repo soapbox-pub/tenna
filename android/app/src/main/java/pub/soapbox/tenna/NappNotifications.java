@@ -79,6 +79,18 @@ final class NappNotifications {
     static final int SERVICE_NOTIFICATION_ID = 1;
 
     /**
+     * A remote app waiting on an answer about the user's key.
+     *
+     * Its own channel, and a loud one, because it is the one thing here the
+     * user has to act on for anything to happen: a client on the other end of
+     * a relay is holding a request open, and a notification nobody notices is
+     * a request that times out. Everything else this class posts is a site
+     * saying something.
+     */
+    private static final String SIGNER_CHANNEL = "napp.signer";
+    private static final String SIGNER_TAG_PREFIX = "signer/";
+
+    /**
      * The group a site's channels live in, one group per site.
      *
      * Sites once shared a single "Sites" group with one channel each. Both the
@@ -756,12 +768,10 @@ final class NappNotifications {
     }
 
     /** The standing notification the push service runs under. */
-    static Notification serviceNotification(@NonNull Context context, int siteCount) {
+    static Notification serviceNotification(@NonNull Context context, int siteCount, int connectionCount) {
         ensureServiceChannel(context);
 
-        String text = siteCount == 1
-            ? "Listening for notifications from 1 site"
-            : "Listening for notifications from " + siteCount + " sites";
+        String text = describeListening(siteCount, connectionCount);
 
         return new NotificationCompat.Builder(context, SERVICE_CHANNEL)
             .setSmallIcon(R.drawable.ic_stat_napp)
@@ -773,6 +783,82 @@ final class NappNotifications {
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
             .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
             .build();
+    }
+
+    /**
+     * What the standing notification says it is doing.
+     *
+     * <p>Both halves, because they are two different things to be told about
+     * a notification that cannot be dismissed: one is sites the user
+     * installed, the other is apps that can sign as them. Naming only the
+     * first while the second is also running would be the more alarming of
+     * the two going unmentioned.
+     */
+    @NonNull
+    private static String describeListening(int siteCount, int connectionCount) {
+        String sites = siteCount == 1 ? "1 site" : siteCount + " sites";
+        String connections = connectionCount == 1 ? "1 app" : connectionCount + " apps";
+
+        if (connectionCount == 0) return "Listening for notifications from " + sites;
+        if (siteCount == 0) return "Signing for " + connections + " you connected";
+        return "Listening for " + sites + " and signing for " + connections;
+    }
+
+    /**
+     * A remote app is asking to use the key, and nobody has said yes or no.
+     *
+     * <p>There is no window to put this in — the request arrived on a relay
+     * socket held by a service, with the app closed — so a notification is the
+     * only way it reaches anybody. Tapping it opens the sheet.
+     *
+     * <p>It says what was asked and never what was in it. A lock screen is
+     * read by whoever is holding the phone.
+     */
+    static void showSignerRequest(
+        @NonNull Context context,
+        @NonNull String requestId,
+        @NonNull String appName,
+        @NonNull String what
+    ) {
+        if (!isEnabled(context)) return;
+        ensureSignerChannel(context);
+
+        NotificationManager manager = context.getSystemService(NotificationManager.class);
+        if (manager == null) return;
+
+        PendingIntent open = PendingIntent.getActivity(
+            context,
+            requestId.hashCode(),
+            SignerActivity.bunkerIntent(context, requestId),
+            PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE
+        );
+
+        Notification notification = new NotificationCompat.Builder(context, SIGNER_CHANNEL)
+            .setSmallIcon(R.drawable.ic_stat_napp)
+            .setContentTitle(appName)
+            .setContentText(appName + " " + what)
+            .setStyle(new NotificationCompat.BigTextStyle().bigText(appName + " " + what))
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setCategory(NotificationCompat.CATEGORY_MESSAGE)
+            .setContentIntent(open)
+            .setAutoCancel(true)
+            // A request that has expired is a request nobody can answer, and
+            // the notification for it should go with it rather than open a
+            // sheet with nothing in it.
+            .setTimeoutAfter(5 * 60_000)
+            .build();
+
+        try {
+            manager.notify(SIGNER_TAG_PREFIX + requestId, 0, notification);
+        } catch (SecurityException e) {
+            Log.i(TAG, "Could not post a signing request");
+        }
+    }
+
+    /** Take down the notification for a request that has been answered. */
+    static void cancelSignerRequest(@NonNull Context context, @NonNull String requestId) {
+        NotificationManager manager = context.getSystemService(NotificationManager.class);
+        if (manager != null) manager.cancel(SIGNER_TAG_PREFIX + requestId, 0);
     }
 
     // -----------------------------------------------------------------------
@@ -839,6 +925,20 @@ final class NappNotifications {
         );
         channel.setDescription("Shown while Tenna is connected to relays for site notifications");
         channel.setShowBadge(false);
+        manager.createNotificationChannel(channel);
+    }
+
+    private static void ensureSignerChannel(Context context) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return;
+        NotificationManager manager = context.getSystemService(NotificationManager.class);
+        if (manager == null) return;
+
+        NotificationChannel channel = new NotificationChannel(
+            SIGNER_CHANNEL,
+            "Signing requests",
+            NotificationManager.IMPORTANCE_HIGH
+        );
+        channel.setDescription("An app you connected is asking to sign or decrypt something");
         manager.createNotificationChannel(channel);
     }
 

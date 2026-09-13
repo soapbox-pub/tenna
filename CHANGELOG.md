@@ -1,5 +1,54 @@
 # Changelog
 
+## [0.5.0] - 2026-09-13
+
+Tenna can sign for other apps now. An app on this phone — or one running
+somewhere else, connected by a link you paste — asks, and you answer on a
+screen that shows the post it would make, under your own name and face.
+Settings has a new Authorized apps screen: everything that has been given your
+key, one switch per thing it may do, and one way to take it all back. An
+account whose key lives in another signer app can sign for sites again.
+
+### Added
+
+- Other apps on this phone can ask Tenna to sign, encrypt, and decrypt for the
+  account you are signed in as. Tenna now appears wherever an app asks you to
+  choose which app holds your key, and every request comes up as a screen with
+  the asking app's icon and name at the top, and the name it was installed
+  under beneath — the one thing about an app that nobody can pick for
+  themselves.
+- Remember an answer. Tick the box on a request and the same app asking the
+  same thing again is answered without anything appearing on screen. Backing
+  out of a request is always a no, and never a remembered one.
+- Apps that are not on this phone can be connected too. Paste the link an app
+  gives you, or make one for it to accept, from the new Authorized apps screen.
+  Tenna keeps listening for them while it is closed and raises a notification
+  when one wants something you have not already allowed.
+- An Authorized apps screen, under Settings. Everything that has been given
+  your key — sites you opened in Tenna, apps on the phone, apps somewhere else
+  — in one list, each with its own icon, when it last asked, and one switch per
+  thing it may do. Turning one off means being asked again; there is also one
+  way to take everything back at once.
+- Tombstone, by Jared Logan, on a fresh wall, and everything else he publishes
+  is offered in Add app.
+
+### Changed
+
+- A request to sign is shown as the post it would make, rather than as the
+  fields the post is made of. A note appears as a note, a profile as a profile,
+  a reaction beside the note it reacts to, a follow list as faces and a count,
+  and an encrypted message as one Tenna cannot read either. Your own name and
+  face sit above it, where they will be once it is signed. The whole thing as
+  it was sent is still one tap away.
+
+### Fixed
+
+- An account whose key is kept in another signer app can sign for sites again.
+  Tenna would refuse anything it did not hold the key for itself, so signing in
+  to a site with such an account did not work — the one thing a separate signer
+  is for. It asks that app instead of answering on its behalf, and checks that
+  what comes back is a signature for the account and the event you were shown.
+
 ## [0.4.0] - 2026-09-12
 
 A search box now sits above the wall: type a few letters and Tenna answers with

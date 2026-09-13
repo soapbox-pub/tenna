@@ -3,6 +3,7 @@ import type { PluginListenerHandle } from '@capacitor/core';
 import { Check, X } from 'lucide-react';
 import { type ElementType, type ReactNode, useCallback, useEffect, useState } from 'react';
 
+import { EmbeddedEvent, UnreadableEvent } from '@/components/EmbeddedEvent';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
@@ -13,18 +14,13 @@ import {
   DrawerTitle,
 } from '@/components/ui/drawer';
 import { Label } from '@/components/ui/label';
+import { formatEventJson, parseDraftEvent } from '@/lib/draftEvent';
 import {
   permissionDescription,
   permissionIcon,
   permissionTitle,
   type PermissionKind,
 } from '@/lib/permissionLabels';
-
-/** Truncate a string to a maximum character length. */
-function truncate(str: string, max: number): string {
-  if (str.length <= max) return str;
-  return str.slice(0, max) + '\u2026';
-}
 
 // ---------------------------------------------------------------------------
 // What is being asked
@@ -35,32 +31,30 @@ function truncate(str: string, max: number): string {
  *
  * Shared by every sheet because the answer depends on what is in the event and
  * not at all on who sent it. Scrolls on its own, so the buttons never move.
+ *
+ * A request to sign is shown as the post it would make: see `EmbeddedEvent`.
+ * What was there before was the event's fields laid out as fields — a Content
+ * box, a Tags table — which is a description of the data structure rather than
+ * of what signing it would do, and which asked the reader to do the rendering
+ * a client would have done for them. Everything else asks about an operation
+ * rather than a document, and for those the summary row is the whole question.
  */
 export function PermissionDetails({
   type,
   kind,
   event,
+  pubkey,
 }: {
   type: PermissionKind;
   kind: number | null;
-  event?: Record<string, unknown> | null;
+  event?: Record<string, unknown> | string | null;
+  /** Whose key would sign it, for a draft that doesn't name one. */
+  pubkey?: string;
 }) {
   const [showDetails, setShowDetails] = useState(false);
 
-  const eventContent = event?.content as string | undefined;
-  const eventJson = event ? JSON.stringify(event, null, 2) : null;
-
-  // The tags, which are where a signing request keeps the things a reader
-  // would actually want to know — who is addressed, what is referenced, what
-  // is being replaced — and which used to be visible only by opening the raw
-  // JSON. Content is the part an app writes for a person; tags are the part it
-  // writes for a protocol, and it is the protocol doing the surprising things.
-  const eventTags = Array.isArray(event?.tags)
-    ? (event.tags as unknown[]).filter(
-        (tag): tag is string[] =>
-          Array.isArray(tag) && tag.every((part) => typeof part === 'string'),
-      )
-    : [];
+  const draft = parseDraftEvent(event);
+  const eventJson = formatEventJson(event);
 
   return (
     <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-4 pb-2">
@@ -72,38 +66,14 @@ export function PermissionDetails({
         </div>
       </div>
 
-      {type === 'signEvent' && eventContent && (
-        <div className="rounded-lg border bg-muted/30 p-3">
-          <p className="mb-1 text-xs text-muted-foreground">Content</p>
-          <p className="whitespace-pre-wrap break-words text-sm">{truncate(eventContent, 280)}</p>
-        </div>
-      )}
-
-      {/* The tags, plainly. One row each, name apart from value, so that a `p`
-          naming a stranger or an `e` naming somebody else's note is readable
-          without opening the JSON. */}
-      {eventTags.length > 0 && (
-        <div className="rounded-lg border bg-muted/30 p-3">
-          <p className="mb-1.5 text-xs text-muted-foreground">Tags</p>
-          <ul className="space-y-1">
-            {eventTags.slice(0, 12).map(([name, ...values], i) => (
-              <li key={i} className="flex gap-2 text-xs">
-                <span className="shrink-0 font-mono font-medium text-muted-foreground">
-                  {truncate(name, 16)}
-                </span>
-                <span className="min-w-0 break-all font-mono">
-                  {truncate(values.join(' '), 120)}
-                </span>
-              </li>
-            ))}
-          </ul>
-          {eventTags.length > 12 && (
-            <p className="mt-1.5 text-xs text-muted-foreground">
-              and {eventTags.length - 12} more
-            </p>
-          )}
-        </div>
-      )}
+      {type === 'signEvent' &&
+        (draft ? (
+          <EmbeddedEvent event={draft} pubkey={pubkey} />
+        ) : (
+          // Asked to sign, with nothing readable to sign. Whatever arrived is
+          // still shown below as JSON, if there is any of it.
+          <UnreadableEvent kind={kind} />
+        ))}
 
       {eventJson && (
         <Collapsible open={showDetails} onOpenChange={setShowDetails}>

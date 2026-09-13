@@ -2,6 +2,7 @@ import { useState } from 'react';
 
 import { PermissionDetails, PermissionSheet } from '@/components/PermissionSheet';
 import { TileArtwork } from '@/components/Tile';
+import { useCurrentUser } from '@/hooks/useCurrentUser';
 import type { NsiteIdentity } from '@/hooks/useNsiteIdentity';
 import type { NsitePromptDecision, NsitePromptState } from '@/hooks/useNsiteSignerRpc';
 
@@ -29,6 +30,7 @@ export function NsitePermissionPrompt({
   onResolve,
 }: NsitePermissionPromptProps) {
   const [remember, setRemember] = useState(false);
+  const { user } = useCurrentUser();
 
   return (
     <PermissionSheet
@@ -57,7 +59,15 @@ export function NsitePermissionPrompt({
       // Never a remembered one; see the note on `PermissionSheet`.
       onDismiss={() => onResolve({ allowed: false, remember: false })}
     >
-      <PermissionDetails type={prompt.type} kind={prompt.kind} event={prompt.event} />
+      {/* A site sends a template with no `pubkey` in it — it is asking Tenna
+          for the one field it cannot fill in — so whose post this would be has
+          to come from here. */}
+      <PermissionDetails
+        type={prompt.type}
+        kind={prompt.kind}
+        event={prompt.event}
+        pubkey={user?.pubkey}
+      />
     </PermissionSheet>
   );
 }

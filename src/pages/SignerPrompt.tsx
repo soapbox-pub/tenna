@@ -2,24 +2,9 @@ import { useState } from 'react';
 
 import { AppMark } from '@/components/AppMark';
 import { PermissionDetails, PermissionSheet } from '@/components/PermissionSheet';
+import { parseDraftEvent } from '@/lib/draftEvent';
 import type { PermissionKind } from '@/lib/permissionLabels';
 import type { SignerRequest } from '@/lib/signerPromptPlugin';
-
-/** The event being signed, if one is and it can be read. */
-function parseEvent(json: string | undefined): Record<string, unknown> | null {
-  if (!json) return null;
-  try {
-    const parsed: unknown = JSON.parse(json);
-    return typeof parsed === 'object' && parsed !== null
-      ? (parsed as Record<string, unknown>)
-      : null;
-  } catch {
-    // An event that cannot be read is one the sheet describes by its kind
-    // alone — which it does not have either, so the request is as opaque to
-    // the user as it is to us, and that is worth showing rather than hiding.
-    return null;
-  }
-}
 
 /**
  * The sheet another application's request appears in.
@@ -100,6 +85,11 @@ export function SignerPrompt({
 
   const type = (request.permission ?? 'signEvent') as PermissionKind;
 
+  // Whether the card below will draw the author itself. Read here as well as
+  // there because the answer decides what goes *outside* the scrolling region;
+  // an event too broken to draw leaves nothing saying whose key this is.
+  const embedded = type === 'signEvent' && parseDraftEvent(request.event) !== null;
+
   return (
     <PermissionSheet
       artwork={artwork}
@@ -125,14 +115,23 @@ export function SignerPrompt({
       <PermissionDetails
         type={type}
         kind={request.kind ?? null}
-        event={parseEvent(request.event)}
+        // The text exactly as it arrived. Reading it is the sheet's job, and
+        // one thing reading it means one answer to what is in it.
+        event={request.event}
+        pubkey={request.account ?? undefined}
       />
 
-      {/* Between the scrolling detail and the buttons, and never part of
-          either. `shrink-0` because the region above it is what gives when the
-          sheet runs out of room, and a line that says which identity is about
-          to be used is not a line to let a long tag list push off screen. */}
-      {request.accountName && (
+      {/* Which identity is about to be used, between the scrolling detail and
+          the buttons and never part of either. `shrink-0` because the region
+          above is what gives when the sheet runs out of room, and this is not
+          a line to let a long post push off screen.
+          
+          Not shown for a signing request: the card above it draws the event
+          under the signer's own face and name, which is both the same fact and
+          a better place for it — it is where a person reads who posted
+          something everywhere else they read posts. Saying it twice would make
+          the smaller, redundant copy look like the real answer. */}
+      {request.accountName && !embedded && (
         <p className="shrink-0 border-t px-4 pb-1 pt-2 text-xs text-muted-foreground">
           Signing as <span className="text-foreground">{request.accountName}</span>
         </p>

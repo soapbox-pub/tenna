@@ -24,6 +24,14 @@ import java.util.Map;
  * the budget is shared among all of them, and it is the one an attacker
  * reaches without having to install anything.
  *
+ * <p><b>Counted only where a question would be asked.</b> A request the user
+ * has already answered is not a question, however often it arrives, and an app
+ * holding a grant can exercise it through the content resolver as fast as it
+ * likes anyway — so refusing those buys nothing and costs an app doing a
+ * legitimate burst of work its own permission. The budget is spent in {@link
+ * SignerActivity}, at the point where something is about to go on screen, and
+ * nowhere else.
+ *
  * <p>The counter lives in memory and dies with the process, which is the right
  * lifetime — a user who force-stops the app has cleared the problem, and this
  * is not a security boundary that has to survive anything.

@@ -27,15 +27,15 @@ import java.io.FileOutputStream;
 import java.util.ArrayDeque;
 import java.util.Collections;
 import java.util.Deque;
+import java.util.HashMap;
+import java.util.Map;
 
 /**
- * The drawer another application's request appears in.
+ * The screen another application's request appears on.
  *
- * A translucent window that draws nothing of its own, so what is behind it —
- * the app that asked — stays on screen underneath. That is the whole point of
- * the shape: a question about signing as somebody is a question you answer by
- * looking at what is asking, and an opaque screen that replaces the caller
- * takes that away.
+ * <p>It was meant to be a sheet over a window drawing nothing of its own, so
+ * that the app which asked stayed visible underneath — see {@link
+ * #seeThrough}, which explains why it is not.
  *
  * <p><b>A remembered answer costs no WebView.</b> {@link #settle} runs before
  * anything is loaded, and if the user has already decided this, it sets the
@@ -45,14 +45,14 @@ import java.util.Deque;
  * Getting this the other way round is what makes background signing feel like
  * a signer app flashing on screen for every request.
  *
- * <p>{@code singleTop}, and deliberately not {@code singleTask}: this activity
- * runs inside the calling app's own task, which is what lets
- * {@code setResult} reach a client that used {@code startActivityForResult} at
- * all, and what makes the sheet appear over the caller rather than over a task
- * of its own. NIP-55 asks for {@code singleTop} by name, so that a client
- * sending several requests with {@code FLAG_ACTIVITY_SINGLE_TOP} gets them
- * delivered to {@link #onNewIntent} and answered one after another without the
- * window closing in between.
+ * <p><b>Standard launch mode, and deliberately not {@code singleTask}:</b>
+ * this activity runs inside the calling app's own task, which is what lets
+ * {@code setResult} reach a client that used {@code startActivityForResult}
+ * at all. It is not {@code singleTop} either — see the manifest — because an
+ * activity hands back exactly one result, so an instance that collects a
+ * second request has a caller it can never answer. A client that sets
+ * {@code FLAG_ACTIVITY_SINGLE_TOP} still gets that behaviour, and {@link
+ * #record} explains which of the answers the one result carries.
  */
 public class SignerActivity extends BridgeActivity {
 
@@ -127,8 +127,29 @@ public class SignerActivity extends BridgeActivity {
 
     private final Deque<Pending> queue = new ArrayDeque<>();
 
-    /** Every answer given in this window, for a client that batched — see {@link #batched}. */
+    /** Every answer given in this window, for a client that batched — see {@link #record}. */
     private final JSONArray answered = new JSONArray();
+
+    /**
+     * The one result this window hands back, once there is one.
+     *
+     * <p>An activity returns exactly one, and it belongs to the request that
+     * opened the window. See {@link #record}.
+     */
+    @Nullable private Intent callersAnswer;
+
+    /** Whether that has been decided — including by a failure, which has none. */
+    private boolean callerSettled;
+
+    /**
+     * What the user has already said in this window, by the bytes of the
+     * question.
+     *
+     * <p>Scoped to the window on purpose: it is not a remembered grant, which
+     * is a deliberate act with a checkbox on it, but an answer to <em>this</em>
+     * question, seconds old, still on the screen it was given on.
+     */
+    private final Map<String, Boolean> decidedHere = new HashMap<>();
 
     /**
      * Requests already allowed, waiting on another signer app to do the work.
@@ -248,19 +269,11 @@ public class SignerActivity extends BridgeActivity {
         if (parsed == null) {
             // Not a request this signer understands. A client waiting on a
             // result gets one rather than a window that closed for no reason.
-            setResult(Activity.RESULT_CANCELED);
+            cancelCaller();
             return !additional;
         }
 
         String requesterId = getCallingPackage();
-
-        if (!additional && !SignerRateLimiter.allow(requesterId, bucket(parsed))) {
-            Log.i(TAG, "Refused a request that came too fast");
-            Toast.makeText(this, "Too many signing requests", Toast.LENGTH_SHORT).show();
-            setResult(Activity.RESULT_CANCELED);
-            return !additional;
-        }
-
         TennaSigning.Request request = parsed.toRequest();
         String account = TennaSigning.accountFor(this, parsed.currentUser, request);
 
@@ -281,7 +294,7 @@ public class SignerActivity extends BridgeActivity {
             }
             if (outcome.status == TennaSigning.Outcome.Status.ERROR) {
                 Log.i(TAG, "Could not answer a request: " + outcome.error);
-                setResult(Activity.RESULT_CANCELED);
+                cancelCaller();
                 return !additional;
             }
             if (outcome.status == TennaSigning.Outcome.Status.NEEDS_ACTIVITY) {
@@ -302,7 +315,23 @@ public class SignerActivity extends BridgeActivity {
                 + TennaKeys.pubkeys(this).size() + " with a key on this device");
         }
 
-        // Either nobody decided, or there is no key here and the sheet is
+        // Only now, with a person about to be asked.
+        //
+        // The limit is on questions, not on work. A request the user has
+        // already answered costs them nothing however often it arrives — and
+        // an app that has been granted something can do it through the content
+        // resolver as fast as it likes anyway, so refusing it here buys no
+        // safety and breaks an app doing a legitimate burst of work. What is
+        // worth stopping is an app that can put an unbounded queue of
+        // questions in front of somebody, which is this.
+        if (!additional && !SignerRateLimiter.allow(requesterId, bucket(parsed))) {
+            Log.i(TAG, "Refused a request that came too fast");
+            Toast.makeText(this, "Too many signing requests", Toast.LENGTH_SHORT).show();
+            cancelCaller();
+            return !additional;
+        }
+
+        // Either nobody decided, or there is no key here and the screen is
         // going to have to say so.
         queue.addLast(describe(parsed, account, requesterId));
         return false;
@@ -410,6 +439,12 @@ public class SignerActivity extends BridgeActivity {
             );
         }
 
+        // Written down before anything is done about it, and whatever road
+        // the doing takes. An answer the user has given is given, and the
+        // queue behind this one is entitled to it even when this one has to
+        // go off to another signer before it can be honoured.
+        decidedHere.put(fingerprint(pending), allowed);
+
         TennaSigning.Outcome outcome;
         if (!allowed) {
             outcome = TennaSigning.Outcome.rejected();
@@ -425,30 +460,59 @@ public class SignerActivity extends BridgeActivity {
         // through the sheet rather than being answered where it arrived.
         if (outcome.status == TennaSigning.Outcome.Status.NEEDS_ACTIVITY) {
             forwards.addLast(pending);
-            pumpForwards();
-            return;
+        } else {
+            answer(pending, outcome);
         }
-
-        answer(pending, outcome);
 
         // Anything else waiting that the answer just settled.
         //
         // A client that sent four requests at once had all four judged as they
         // arrived, when none of them had an answer on record. Saying "remember"
-        // to the first one decides the rest, and asking again about a question
-        // the user has this second answered is the sort of thing that teaches
-        // people to press Allow without reading.
+        // to the first one decides the rest — and so does saying anything at
+        // all to a question the rest are a copy of. Asking again about
+        // something the user answered a second ago is the sort of thing that
+        // teaches people to press Allow without reading.
         drain();
 
         pumpForwards();
+    }
+
+    /**
+     * What identifies one question, for telling two of them apart.
+     *
+     * <p>Everything the user was shown and nothing else: who is asking, what
+     * they want done, and the exact bytes it would be done to.
+     */
+    @NonNull
+    private static String fingerprint(@NonNull Pending pending) {
+        TennaSigning.Request request = pending.request;
+        return (pending.requesterId == null ? "" : pending.requesterId)
+            + "\u0000" + request.method.wire
+            + "\u0000" + (request.peer == null ? "" : request.peer)
+            + "\u0000" + request.payload;
     }
 
     /** Answer everything at the front of the queue that no longer needs asking. */
     private void drain() {
         Pending next = queue.peekFirst();
         while (next != null && next.accountPubkey != null && next.parsed != null) {
-            TennaSigning.Outcome outcome = TennaSigning.answer(
-                this, next.accountPubkey, next.requesterId, next.request, false);
+            // The same question twice, in one window, seconds apart. Clients
+            // do send a request twice — a retry, or a second call for the same
+            // work — and asking a person the identical question again teaches
+            // them that answering is a formality. It is not a remembered
+            // grant: it dies with this window, and it only ever matches bytes
+            // the user has actually read.
+            Boolean said = decidedHere.get(fingerprint(next));
+
+            TennaSigning.Outcome outcome;
+            if (said == null) {
+                outcome = TennaSigning.answer(
+                    this, next.accountPubkey, next.requesterId, next.request, false);
+            } else if (said) {
+                outcome = TennaSigning.run(this, next.accountPubkey, next.request, false);
+            } else {
+                outcome = TennaSigning.Outcome.rejected();
+            }
 
             if (outcome.status == TennaSigning.Outcome.Status.NEEDS_APPROVAL) break;
 
@@ -589,7 +653,7 @@ public class SignerActivity extends BridgeActivity {
                 refuse(pending.parsed);
             } else {
                 Log.i(TAG, "Could not answer a request: " + outcome.error);
-                setResult(Activity.RESULT_CANCELED);
+                cancelCaller();
             }
         }
     }
@@ -606,8 +670,8 @@ public class SignerActivity extends BridgeActivity {
         }
 
         String value = outcome.value == null ? "" : outcome.value;
-        Intent result = SignerRequests.success(parsed, value, outcome.eventJson, getPackageName());
-        setResult(Activity.RESULT_OK, batched(result, parsed, value, false));
+        record(SignerRequests.success(parsed, value, outcome.eventJson, getPackageName()),
+            parsed, value, false);
 
         // A web page cannot read an activity result, so it gets sent back to
         // itself with the answer on the end of the URL it named.
@@ -622,21 +686,28 @@ public class SignerActivity extends BridgeActivity {
     }
 
     private void refuse(@NonNull SignerRequests.Parsed parsed) {
-        setResult(Activity.RESULT_OK, batched(SignerRequests.rejection(parsed), parsed, null, true));
+        record(SignerRequests.rejection(parsed), parsed, null, true);
     }
 
     /**
-     * Everything answered in this window, for a client that sent several.
+     * Write one answer down, and hand the window's result back.
      *
-     * <p>An activity can hand back exactly one result, and NIP-55 lets a client
-     * put several requests into one window — so a batch is answered with a
-     * {@code results} array alongside the extras for the last one. Clients that
-     * send one request at a time never look at it and are unaffected; clients
-     * that batch would otherwise get one answer out of four and wait forever
-     * for the rest.
+     * <p>An activity returns exactly one result, and NIP-55 lets a client put
+     * several requests into one window. So everything answered here goes into
+     * a {@code results} array, which a client that batches knows to read.
+     *
+     * <p><b>The extras themselves answer the first request, not the last.</b>
+     * That is the one the result can actually reach: the later intents were
+     * redelivered to an instance that was already running, and Android
+     * cancels the result of a redelivered start the moment it arrives — their
+     * callers have already been told, and there is nothing this window can
+     * send them. Answering the first request in the extras and everything
+     * else in {@code results} is the only arrangement where the client that
+     * is still listening hears the answer to the question it asked. Putting
+     * the last one there instead is how a note got signed twice and published
+     * with the wrong signature of the two.
      */
-    @NonNull
-    private Intent batched(
+    private void record(
         @NonNull Intent result,
         @NonNull SignerRequests.Parsed parsed,
         @Nullable String value,
@@ -659,8 +730,26 @@ public class SignerActivity extends BridgeActivity {
             Log.i(TAG, "Could not record an answer for a batch");
         }
 
-        if (answered.length() > 1) result.putExtra("results", answered.toString());
-        return result;
+        if (!callerSettled) {
+            callersAnswer = result;
+            callerSettled = true;
+        }
+        if (callersAnswer == null) return;
+
+        if (answered.length() > 1) callersAnswer.putExtra("results", answered.toString());
+        setResult(Activity.RESULT_OK, callersAnswer);
+    }
+
+    /**
+     * Tell whoever opened this window that there is no answer.
+     *
+     * <p>Only the first time. A later failure in a batch must not take away an
+     * answer already given to the request the result belongs to.
+     */
+    private void cancelCaller() {
+        if (callerSettled) return;
+        callerSettled = true;
+        setResult(Activity.RESULT_CANCELED);
     }
 
     /**
@@ -779,13 +868,22 @@ public class SignerActivity extends BridgeActivity {
      * <p>The id is in the URI rather than an extra so that two notifications
      * make two distinct {@code PendingIntent}s — extras alone do not tell them
      * apart, and the second would silently replace the first.
+     *
+     * <p>{@code SINGLE_TOP} because a second tap while the first is still
+     * being answered should join the queue rather than throw it away. Nothing
+     * is waiting on a result here — the answer goes back over a relay — so
+     * one window can hold as many of these as arrive. Stated on the intent
+     * because the activity itself is not {@code singleTop}; see the manifest
+     * for the app that taught us why.
      */
     @NonNull
     static Intent bunkerIntent(@NonNull android.content.Context context, @NonNull String requestId) {
         return new Intent(context, SignerActivity.class)
             .setAction(Intent.ACTION_VIEW)
             .setData(Uri.fromParts(BUNKER_SCHEME, requestId, null))
-            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK
+                | Intent.FLAG_ACTIVITY_CLEAR_TOP
+                | Intent.FLAG_ACTIVITY_SINGLE_TOP);
     }
 
     /** The request id a notification named, or null if this is not one. */

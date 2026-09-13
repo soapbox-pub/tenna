@@ -99,11 +99,13 @@ public class SignerProvider extends ContentProvider {
             return null;
         }
 
-        if (!SignerRateLimiter.allow(requesterId, method.wire)) {
-            Log.i(TAG, "Refused a background request that came too fast");
-            return null;
-        }
-
+        // Deliberately not rate limited. Everything answered here was answered
+        // by the user already, and a decision does not wear out with use: an
+        // app doing a burst of legitimate work — a screenful of messages to
+        // decrypt, say — would find its own grant refused, fall back to the
+        // intent, and put a queue of questions in front of somebody who had
+        // said yes to all of them once. The limit belongs where the questions
+        // are, which is {@link SignerActivity}.
         TennaSigning.Outcome outcome =
             TennaSigning.answer(context, account, requesterId, request, true);
 

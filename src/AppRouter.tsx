@@ -1,7 +1,9 @@
 import { BrowserRouter, Route, Routes } from "react-router-dom";
 import { DeepLinkHandler } from "./components/DeepLinkHandler";
+import { Onboarding } from "./components/Onboarding";
 import { ScrollToTop } from "./components/ScrollToTop";
 import { useNsiteLaunch } from "@/hooks/useNsiteLaunch";
+import { useOnboarding } from "@/hooks/useOnboarding";
 import { isSignerSheet, useSignerPrompt } from "@/hooks/useSignerPrompt";
 
 import { AuthorizedAppsPage } from "./pages/AuthorizedAppsPage";
@@ -15,6 +17,7 @@ import { SignerPrompt } from "./pages/SignerPrompt";
 export function AppRouter() {
   const { pending, launch } = useNsiteLaunch();
   const signer = useSignerPrompt();
+  const onboarding = useOnboarding();
 
   // Another application asking to sign something isn't a route either, and for
   // a stronger reason than a site: that window is not the app. Its whole life
@@ -48,10 +51,19 @@ export function AppRouter() {
   if (pending) return <div className="min-h-screen bg-background" />;
   if (launch) return <NsiteApp launch={launch} />;
 
+  // Everything above this point is a launch that is not the app: a question
+  // from another application, a sheet on its way out, a site opened from its
+  // own shortcut. None of them is a first run of Tenna and none of them may be
+  // interrupted by one, which is why the introduction is asked about last.
+  //
+  // Inside the router rather than in front of it, because the dialog it opens
+  // for a user who already has a key is the app's own login dialog, and that
+  // is a component of the app rather than of the gate.
   return (
     <BrowserRouter>
       <DeepLinkHandler />
       <ScrollToTop />
+      {onboarding.show && <Onboarding onDone={onboarding.dismiss} />}
       <Routes>
         <Route path="/" element={<Index />} />
         {/* Static, so it outranks the identifier route below whatever the

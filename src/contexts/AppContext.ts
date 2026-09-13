@@ -77,6 +77,15 @@ export interface AppConfig {
   useAppBlossomServers: boolean;
   /** The logged-in user's Ditto theme, or null when Tenna wears its own. */
   profileTheme: ThemeMetadata | null;
+  /**
+   * Whether the introduction has been through once on this device.
+   *
+   * Set by finishing it and equally by skipping it: what it records is that
+   * the user has been shown, not that they agreed. It stays false for somebody
+   * who signs in without ever seeing it, which costs nothing — the gate asks
+   * about the login first, and a signed-in user is never held up by this.
+   */
+  onboarded: boolean;
 }
 
 export interface AppContextType {

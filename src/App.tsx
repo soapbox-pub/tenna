@@ -52,6 +52,8 @@ const defaultConfig: AppConfig = {
     updatedAt: 0,
   },
   useAppBlossomServers: true,
+  // Nobody has been introduced to anything yet. See `Onboarding`.
+  onboarded: false,
 };
 
 export function App() {

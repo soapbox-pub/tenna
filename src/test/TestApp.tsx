@@ -34,6 +34,10 @@ export function TestApp({ children }: TestAppProps) {
     },
     useAppBlossomServers: true,
     profileTheme: null,
+    // True, so a component under test is never rendered behind the
+    // introduction. What the introduction itself does is its own test's
+    // business. See `Onboarding`.
+    onboarded: true,
   };
 
   return (

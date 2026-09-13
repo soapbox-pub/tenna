@@ -30,17 +30,25 @@ import {
 import { useNostrPublish } from '@/hooks/useNostrPublish';
 import { useUploadFile } from '@/hooks/useUploadFile';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
-import { generateSecretKey, getPublicKey, nip19 } from 'nostr-tools';
-import { generateNativeKey } from '@/lib/nativeKeySigner';
-import { supportsNativeSigner } from '@/lib/tennaSignerPlugin';
+import { useSignup } from '@/hooks/useSignup';
+import { getPublicKey, nip19 } from 'nostr-tools';
 import { AndroidSignerOptions } from './AndroidSignerOptions';
+
+export type AuthStep = 'welcome' | 'generate' | 'secure' | 'profile' | 'login';
 
 interface AuthDialogProps {
   isOpen: boolean;
   onClose: () => void;
+  /**
+   * Which screen the dialog opens on, and returns to when it is closed.
+   *
+   * Defaults to the welcome screen. The introduction opens it at `'login'`,
+   * having already asked the question that screen exists to ask.
+   */
+  initialStep?: AuthStep;
 }
 
-type Step = 'welcome' | 'generate' | 'secure' | 'profile' | 'login';
+type Step = AuthStep;
 
 const validateNsec = (nsec: string) => /^nsec1[a-zA-Z0-9]{58}$/.test(nsec);
 const validateBunkerUri = (uri: string) => uri.startsWith('bunker://');
@@ -82,8 +90,8 @@ function downloadNsecFile(nsec: string) {
   document.body.removeChild(a);
 }
 
-const AuthDialog: React.FC<AuthDialogProps> = ({ isOpen, onClose }) => {
-  const [step, setStep] = useState<Step>('welcome');
+const AuthDialog: React.FC<AuthDialogProps> = ({ isOpen, onClose, initialStep = 'welcome' }) => {
+  const [step, setStep] = useState<Step>(initialStep);
 
   // Signup state
   const [nsec, setNsec] = useState('');
@@ -109,6 +117,7 @@ const AuthDialog: React.FC<AuthDialogProps> = ({ isOpen, onClose }) => {
   const [hasOpenedSigner, setHasOpenedSigner] = useState(false);
 
   const login = useLoginActions();
+  const { generateKey: makeKey, signInWithKey } = useSignup();
   // Stable refs so the nostrconnect listening effect below doesn't restart on
   // every parent render. Parents typically pass inline arrow functions for
   // onClose, and useLoginActions returns a fresh object each render — without
@@ -138,7 +147,7 @@ const AuthDialog: React.FC<AuthDialogProps> = ({ isOpen, onClose }) => {
   useEffect(() => {
     if (!isOpen) {
       /* eslint-disable react-hooks/set-state-in-effect */
-      setStep('welcome');
+      setStep(initialStep);
       setNsec('');
       setLoginInput('');
       setShowKey(false);
@@ -155,7 +164,7 @@ const AuthDialog: React.FC<AuthDialogProps> = ({ isOpen, onClose }) => {
       abortControllerRef.current?.abort();
       abortControllerRef.current = null;
     }
-  }, [isOpen]);
+  }, [isOpen, initialStep]);
 
   // Generate a nostrconnect session and return its URI. The listening effect
   // (keyed on the params) handles the handshake once params are set.
@@ -242,41 +251,14 @@ const AuthDialog: React.FC<AuthDialogProps> = ({ isOpen, onClose }) => {
     }
   };
 
-  /**
-   * Sign in with a secret key, keeping it out of this process where the
-   * device will hold it instead.
-   *
-   * The fallback is not a lesser login, it is the login this app has always
-   * had: the key in web storage, signed with here. It is what the web build
-   * does, and what an Android build whose APK has no native library for this
-   * device's ABI does.
-   */
-  const signInWithKey = async (value: string) => {
-    if (await supportsNativeSigner()) {
-      await login.nativeKey(value);
-      return;
-    }
-    login.nsec(value);
-  };
-
-  // Signup: generate a key with a brief spinner for feedback.
-  //
-  // Where the device can hold the key, it makes it: the key exists in the app
-  // process first and only ever visits this one so that the next screen can
-  // show it to the user, which is the whole reason it comes back at all.
+  // Signup: generate a key with a brief spinner for feedback. The timeout is
+  // cosmetic and belongs to this screen; `useSignup` does the actual work, and
+  // does it the same way for the introduction — see `Onboarding`.
   const generateKey = () => {
     setIsGenerating(true);
     setTimeout(async () => {
       try {
-        const native = await supportsNativeSigner();
-        setNsec(native
-          ? (await generateNativeKey()).nsec
-          : nip19.nsecEncode(generateSecretKey()));
-        setStep('secure');
-      } catch {
-        // The native store refused. A key in this process is worse but it is
-        // an account, which is what the user pressed the button for.
-        setNsec(nip19.nsecEncode(generateSecretKey()));
+        setNsec(await makeKey());
         setStep('secure');
       } finally {
         setIsGenerating(false);

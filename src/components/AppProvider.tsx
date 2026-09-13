@@ -55,6 +55,7 @@ const AppConfigSchema = z.object({
   blossomServerMetadata: BlossomServerMetadataSchema,
   useAppBlossomServers: z.boolean(),
   profileTheme: ThemeMetadataSchema.nullable(),
+  onboarded: z.boolean(),
 }) satisfies z.ZodType<AppConfig>;
 
 export function AppProvider(props: AppProviderProps) {

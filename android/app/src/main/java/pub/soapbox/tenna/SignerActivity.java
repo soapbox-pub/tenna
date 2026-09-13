@@ -704,6 +704,15 @@ public class SignerActivity extends BridgeActivity {
      * background from the manifest has to be put back afterwards. The dim
      * behind the sheet is drawn by the sheet itself rather than by the window,
      * which is what gives it the same fade as everywhere else in the app.
+     *
+     * <p><b>It does not make the app that asked visible underneath.</b> The
+     * window is translucent as far as the framework is concerned — it does not
+     * occlude its parent — and the document, the WebView and every view
+     * between them have been checked to be transparent, and the screen above
+     * the sheet is still a flat grey. Whatever paints it is below all of that.
+     * So the sheet fills the window instead of rising partway up it, and the
+     * emptiness this was meant to show something through is never on screen.
+     * See {@code PermissionSheet}.
      */
     private void seeThrough() {
         getWindow().setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));

@@ -21,6 +21,7 @@ import {
   permissionTitle,
   type PermissionKind,
 } from '@/lib/permissionLabels';
+import { cn } from '@/lib/utils';
 
 /** Truncate a string to a maximum character length. */
 function truncate(str: string, max: number): string {
@@ -158,6 +159,21 @@ interface PermissionSheetProps {
    * written twice.
    */
   soleAction?: { label: string; onPress: () => void };
+  /**
+   * Fill the window rather than rising partway up it.
+   *
+   * A sheet leaves a gap above itself, and where the thing that asked is
+   * behind that gap — a site in Tenna's own frame, dimmed but still there —
+   * the gap is the whole point. Where it is not, the gap is a hole onto
+   * nothing, and a question hanging over a void reads as something having
+   * gone wrong rather than as the app underneath being interrupted.
+   *
+   * That is the case for another application's request, whose window cannot
+   * be seen through however transparent everything in it is made — see
+   * {@code SignerActivity.seeThrough}. So it fills the screen and looks like
+   * a screen.
+   */
+  fill?: boolean;
   /** Backing out: dragged down, escaped, or the Android back gesture. */
   onDismiss: () => void;
 }
@@ -166,11 +182,15 @@ interface PermissionSheetProps {
  * The sheet a request for permission comes up in.
  *
  * A bottom sheet rather than a dialog in the middle, because of where the
- * question comes from. Whatever asked is still there behind it — a site in an
- * iframe, an app in its own task under a transparent window — and a sheet
- * rising from the bottom edge over the thing that asked reads as that thing
- * being interrupted, where a floating card reads as Tenna having replaced it.
- * It is the same shape Android's own signer prompts use, for the same reason.
+ * question comes from. Something was being used and has been interrupted by a
+ * question about it, and a sheet rising from the bottom edge reads as exactly
+ * that, where a floating card reads as Tenna having replaced whatever was
+ * there. It is the same shape Android's own permission prompts use, for the
+ * same reason.
+ *
+ * Where the thing that asked is genuinely behind the sheet — a site in Tenna's
+ * own frame — the gap above it is left open and the site shows through,
+ * dimmed. Where it cannot be, the sheet fills the window instead: see `fill`.
  *
  * It is also the shape that puts the two buttons under the thumb. The decision
  * is at the bottom of a sheet that starts at the bottom; nothing about it
@@ -191,6 +211,7 @@ export function PermissionSheet({
   onAllow,
   onDeny,
   soleAction,
+  fill = false,
   onDismiss,
 }: PermissionSheetProps) {
   const dismiss = useCallback(() => onDismiss(), [onDismiss]);
@@ -224,8 +245,21 @@ export function PermissionSheet({
       {/* Tall enough to be a sheet rather than a toast even when the question
           is one line. The cap comes from the drawer's own styles, and the gap
           it leaves at the top is the point: what shows through it is whatever
-          asked, still there, waiting on an answer. */}
-      <DrawerContent className="mx-auto min-h-[55svh] w-full max-w-lg">
+          asked, still there, waiting on an answer.
+
+          Unless there is nothing to show through it, in which case the sheet
+          is the window — the drawer's own height, margin, corners and top
+          edge all go, and the top padding keeps the handle out from under the
+          status bar. Still a drawer: it is dragged down to dismiss, and that
+          still reads as putting something back rather than as cancelling. */}
+      <DrawerContent
+        className={cn(
+          'mx-auto w-full max-w-lg',
+          fill
+            ? 'h-full pt-safe data-[vaul-drawer-direction=bottom]:mt-0 data-[vaul-drawer-direction=bottom]:max-h-none data-[vaul-drawer-direction=bottom]:rounded-none data-[vaul-drawer-direction=bottom]:border-t-0'
+            : 'min-h-[55svh]',
+        )}
+      >
         <DrawerHeader className="flex flex-row items-center gap-3 pt-2">
           <span aria-hidden="true" className="relative block size-10 shrink-0">
             {artwork}

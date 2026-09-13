@@ -24,10 +24,9 @@ import { isSignerSheet } from '@/hooks/useSignerPrompt';
 export function ThemeBackground() {
   const media = useActiveTheme()?.media;
 
-  // Not behind the signing sheet. That window is transparent so the app that
-  // asked stays visible under it, and a wallpaper stretched across it is
-  // exactly the thing that would hide the caller — which is the one thing on
-  // screen the user is being asked to judge.
+  // Not behind the signing sheet. That window is one question asked on behalf
+  // of another application, and a wallpaper across it would be Tenna dressing
+  // a screen that is not its own.
   if (isSignerSheet()) return null;
 
   if (!media) return null;

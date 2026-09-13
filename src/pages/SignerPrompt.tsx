@@ -24,10 +24,16 @@ function parseEvent(json: string | undefined): Record<string, unknown> | null {
 /**
  * The sheet another application's request appears in.
  *
- * This whole window is transparent — see `SignerActivity` — so what is behind
- * the sheet is the app that asked, still on screen, which is the thing a
- * person needs in order to answer. Nothing else of Tenna is drawn here: no
- * wall, no router, no wallpaper.
+ * It fills the window, and that is a concession: the window was meant to be
+ * transparent, so that the app that asked stayed on screen behind the sheet
+ * and the user could see what they were answering for. Everything in this
+ * window is transparent and the framework agrees the window does not occlude
+ * what is under it, and the screen above the sheet is a flat grey anyway —
+ * see `SignerActivity.seeThrough`. A sheet floating over that reads as a
+ * mistake, so it takes the whole screen instead.
+ *
+ * Nothing else of Tenna is drawn here: no wall, no router, no wallpaper. This
+ * window's whole life is one question.
  *
  * The asker is drawn with the same tile the wall uses for a site. An app's
  * launcher icon goes in the squircle full-bleed, the way Android draws it
@@ -75,6 +81,7 @@ export function SignerPrompt({
         name={request.appName}
         subtitle={subtitle}
         soleAction={{ label: 'Close', onPress: () => onResolve(false, false) }}
+        fill
         onDismiss={() => onResolve(false, false)}
       >
         <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-2">
@@ -111,6 +118,7 @@ export function SignerPrompt({
       }
       onAllow={() => onResolve(true, remember)}
       onDeny={() => onResolve(false, remember)}
+      fill
       onDismiss={() => onResolve(false, false)}
     >
       <PermissionDetails

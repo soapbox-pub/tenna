@@ -223,14 +223,16 @@
   /*
    * The window another application's signing request comes up in.
    *
-   * It is transparent, so that the app that asked stays on screen behind the
-   * sheet — which is the thing a person needs in order to answer a question
-   * about signing as themselves. Nothing in the document may paint over that,
-   * and the body's own background is the first thing that would.
+   * Nothing in this document is Tenna's own screen: the sheet is the whole of
+   * it, and the body painting a background behind the sheet would be the app
+   * drawing a page nobody opened. So it paints none, and the window shows
+   * whatever is under it — which turns out to be a flat grey rather than the
+   * app that asked, and is why the sheet fills the screen. See
+   * `SignerActivity.seeThrough`.
    *
    * The class is put on <html> by `SignerActivity`, through a script that runs
-   * before any of the app's own — so there is no frame in which the page is
-   * opaque and the caller has disappeared. See `isSignerSheet`.
+   * before any of the app's own, so there is no frame in which Tenna's own
+   * background is on screen. See `isSignerSheet`.
    */
   html.signer-sheet,
   html.signer-sheet body {

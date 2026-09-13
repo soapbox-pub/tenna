@@ -2,7 +2,7 @@ import { BrowserRouter, Route, Routes } from "react-router-dom";
 import { DeepLinkHandler } from "./components/DeepLinkHandler";
 import { ScrollToTop } from "./components/ScrollToTop";
 import { useNsiteLaunch } from "@/hooks/useNsiteLaunch";
-import { useSignerPrompt } from "@/hooks/useSignerPrompt";
+import { isSignerSheet, useSignerPrompt } from "@/hooks/useSignerPrompt";
 
 import { AuthorizedAppsPage } from "./pages/AuthorizedAppsPage";
 import Index from "./pages/Index";
@@ -17,9 +17,9 @@ export function AppRouter() {
   const signer = useSignerPrompt();
 
   // Another application asking to sign something isn't a route either, and for
-  // a stronger reason than a site: this window is transparent and the app that
-  // asked is still on screen behind it. Anything drawn here that is not the
-  // sheet covers the thing the user needs to see to answer.
+  // a stronger reason than a site: that window is not the app. Its whole life
+  // is one question, put by whatever opened it, and it closes when the
+  // question is answered.
   //
   // Asked first because it is the cheaper question — the plugin behind it only
   // exists in the window that has a request in it, so everywhere else it
@@ -28,6 +28,14 @@ export function AppRouter() {
   if (signer.request) {
     return <SignerPrompt request={signer.request} onResolve={signer.resolve} />;
   }
+
+  // Answered, and the window is on its way out — or it is holding another
+  // request that has not arrived from the app process yet. Either way there is
+  // nothing here to fall back to, and falling back to the router put a page
+  // nobody asked for on screen behind a sheet on its way down: the sheet is
+  // dragged, the request clears, and for a few frames the whole app renders
+  // whatever `/` in that window resolves to.
+  if (isSignerSheet()) return null;
 
   // A site opened from its own home screen shortcut isn't a route and never
   // was — Tenna has no URL for an nsite, and the task the launcher started

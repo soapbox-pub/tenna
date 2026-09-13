@@ -2,10 +2,11 @@ import { App } from '@capacitor/app';
 import type { PluginListenerHandle } from '@capacitor/core';
 import { ArrowLeft, Eye, EyeOff, Loader2 } from 'lucide-react';
 import { getPublicKey, nip19 } from 'nostr-tools';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import AuthDialog from '@/components/auth/AuthDialog';
 import { IntroImage } from '@/components/IntroImage';
+import { ProfileSetup } from '@/components/onboarding/ProfileSetup';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
@@ -18,12 +19,18 @@ import { cn } from '@/lib/utils';
 /**
  * The screens, in order.
  *
- * Three that explain and three that do something. The explaining comes first
- * and is skippable throughout, because a person who already knows what Nostr is
- * should not have to be told, and a person who does not will not be persuaded
- * by a fourth paragraph.
+ * Three that explain and three that do something, and then the profile. The
+ * explaining comes first and is skippable throughout, because a person who
+ * already knows what Nostr is should not have to be told, and a person who does
+ * not will not be persuaded by a fourth paragraph.
+ *
+ * The profile is last rather than part of making the account, because it is the
+ * only screen here that needs a signer — a name and a picture are a kind 0, and
+ * there is nothing to sign one with until the key exists and is being signed
+ * with. It is also the most skippable thing in the flow, which is a reason to
+ * put it where skipping it costs nothing.
  */
-const STEPS = ['welcome', 'nostr', 'keys', 'create', 'save', 'done'] as const;
+const STEPS = ['welcome', 'nostr', 'keys', 'create', 'save', 'profile', 'done'] as const;
 
 type Step = (typeof STEPS)[number];
 
@@ -61,6 +68,19 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
 
   const { generateKey, signInWithKey } = useSignup();
   const { user } = useCurrentUser();
+
+  // Whose account the key on screen is. The profile screen refuses to publish
+  // as anybody else — see `ProfileSetup`.
+  const expectedPubkey = useMemo(() => {
+    if (!nsec) return undefined;
+    try {
+      const decoded = nip19.decode(nsec);
+      if (decoded.type !== 'nsec') return undefined;
+      return getPublicKey(decoded.data);
+    } catch {
+      return undefined;
+    }
+  }, [nsec]);
 
   const index = STEPS.indexOf(step);
 
@@ -165,7 +185,7 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
     try {
       await signInWithKey(nsec);
       notificationSuccess();
-      setStep('done');
+      setStep('profile');
     } catch {
       toast({
         title: "Couldn't sign you in",
@@ -182,7 +202,7 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
     setIsSaving(true);
     try {
       await signInWithKey(nsec);
-      setStep('done');
+      setStep('profile');
     } catch {
       toast({ title: "Couldn't sign you in", variant: 'destructive' });
     } finally {
@@ -223,7 +243,10 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
 
           <Dots count={STEPS.length} active={index} />
 
-          {step === 'done' ? (
+          {/* No Skip on the profile screen: it carries its own "Skip for now"
+              under the button it belongs to, and two different skips on one
+              screen is a question the user did not ask to be asked. */}
+          {step === 'done' || step === 'profile' ? (
             <span className="w-16" />
           ) : (
             <button
@@ -236,6 +259,18 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
           )}
         </header>
 
+        {/*
+          The profile stands in for the whole body rather than being one more
+          `Screen`: it is a form with its own buttons under it, and the two
+          together are what fills the screen.
+        */}
+        {step === 'profile' ? (
+          <ProfileSetup
+            expectedPubkey={expectedPubkey}
+            onFinish={() => setStep('done')}
+          />
+        ) : (
+        <>
         {/*
           Keyed on the step so React rebuilds the subtree rather than reusing
           it, which is what makes the entrance animation play again each time
@@ -349,6 +384,8 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
             </Button>
           )}
         </footer>
+        </>
+        )}
       </div>
 
       <AuthDialog

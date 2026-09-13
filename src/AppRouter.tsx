@@ -1,6 +1,6 @@
 import { BrowserRouter, Route, Routes } from "react-router-dom";
 import { DeepLinkHandler } from "./components/DeepLinkHandler";
-import { Onboarding } from "./components/Onboarding";
+import { Onboarding } from "./components/onboarding/Onboarding";
 import { ScrollToTop } from "./components/ScrollToTop";
 import { useNsiteLaunch } from "@/hooks/useNsiteLaunch";
 import { useOnboarding } from "@/hooks/useOnboarding";

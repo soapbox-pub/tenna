@@ -16,7 +16,12 @@ function ToastViewport({
     <ToastPrimitives.Viewport
       data-slot="toast-viewport"
       className={cn(
-        "fixed top-0 z-100 flex max-h-screen w-full flex-col-reverse p-4 sm:bottom-0 sm:right-0 sm:top-auto sm:flex-col md:max-w-105",
+        // Inset for the system bars, not just padded. Toasts come out of the
+        // top edge on a phone, and `p-4` alone put them under the status bar
+        // clock on a device with no browser chrome to push them down. The
+        // bottom inset is for the desktop corner the viewport moves to at
+        // `sm`, where the gesture bar is what it would otherwise sit in.
+        "fixed top-0 z-100 flex max-h-screen w-full flex-col-reverse px-4 pb-4 pt-safe-offset-4 sm:bottom-0 sm:right-0 sm:top-auto sm:flex-col sm:pb-safe-offset-4 sm:pt-4 md:max-w-105",
         className
       )}
       {...props}

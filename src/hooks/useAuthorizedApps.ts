@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 
+import type { MarkTile } from '@/components/AppMark';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import {
   clearNsitePermissions,
@@ -8,6 +9,7 @@ import {
   type NsitePermissionType,
 } from '@/lib/nsitePermissions';
 import type { PermissionKind } from '@/lib/permissionLabels';
+import { readTileSnapshot } from '@/lib/tileSnapshot';
 import {
   listSignerApps,
   listSignerConnections,
@@ -37,6 +39,8 @@ export interface AuthorizedApp {
   icon: string | null;
   /** Whether that icon is a full square with a shape still to cut. */
   adaptive: boolean;
+  /** Set for a site, whose artwork is a picture that needs a tile under it. */
+  tile?: MarkTile;
   permissions: AuthorizedPermission[];
   lastUsed: number;
   /** Set for a site, and the handle its grants are keyed by. */
@@ -91,21 +95,34 @@ export function useAuthorizedApps() {
   const read = useCallback(async (): Promise<AuthorizedApp[]> => {
     if (!pubkey) return [];
 
-    const sites: AuthorizedApp[] = listNsiteAllowances(pubkey).map((allowance) => ({
-      id: `site:${allowance.siteId}`,
-      source: 'site' as const,
-      name: allowance.siteName || allowance.siteId,
-      subtitle: sourceSubtitle('site', allowance.siteId),
-      icon: null,
-      adaptive: false,
-      permissions: allowance.permissions.map((permission) => ({
-        type: permission.type as PermissionKind,
-        kind: permission.kind,
-        allowed: permission.allowed,
-      })),
-      lastUsed: allowance.createdAt,
-      siteId: allowance.siteId,
-    }));
+    const sites: AuthorizedApp[] = listNsiteAllowances(pubkey).map((allowance) => {
+      // The tile the wall drew, off the disk. A site's artwork is a document
+      // on Blossom and a blob beside it, which is a round trip per row and a
+      // list that fills in raggedly — and it is a round trip for a picture
+      // this device has already fetched, drawn, and written down. The same
+      // record the sheet over a site reads, for the same reason: see
+      // `useNsiteTile`. A site the wall has never drawn keeps its initial.
+      const snapshot = readTileSnapshot(allowance.siteId);
+
+      return {
+        id: `site:${allowance.siteId}`,
+        source: 'site' as const,
+        // What the wall calls it, which is what the user has seen it called,
+        // over the name recorded when the grant was made.
+        name: snapshot?.name || allowance.siteName || allowance.siteId,
+        subtitle: sourceSubtitle('site', allowance.siteId),
+        icon: snapshot?.icon ?? null,
+        adaptive: false,
+        tile: { fit: snapshot?.fit ?? 'cover', background: snapshot?.background ?? null },
+        permissions: allowance.permissions.map((permission) => ({
+          type: permission.type as PermissionKind,
+          kind: permission.kind,
+          allowed: permission.allowed,
+        })),
+        lastUsed: allowance.createdAt,
+        siteId: allowance.siteId,
+      };
+    });
 
     const [native, connections] = await Promise.all([
       listSignerApps(pubkey),

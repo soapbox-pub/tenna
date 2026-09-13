@@ -498,7 +498,17 @@ export function AuthorizedAppsPage() {
                       className="flex w-full items-center gap-3 rounded-lg px-2 py-3 text-left outline-none transition-colors hover:bg-foreground/5 focus-visible:ring-2 focus-visible:ring-primary"
                     >
                       <span aria-hidden="true" className="relative block size-10 shrink-0">
-                        <AppMark name={app.name} icon={app.icon} adaptive={app.adaptive} />
+                        <AppMark
+                          name={app.name}
+                          icon={app.icon}
+                          adaptive={app.adaptive}
+                          tile={app.tile}
+                          badge={app.source === 'package'}
+                          // Cut out of the list's own surface rather than the
+                          // wallpaper: this screen is a card, and a ring of
+                          // the colour behind the card would be a halo.
+                          badgeClassName="ring-card"
+                        />
                       </span>
 
                       <span className="min-w-0 flex-1">

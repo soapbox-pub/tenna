@@ -40,8 +40,17 @@ export function SignerPrompt({
 }) {
   const [remember, setRemember] = useState(false);
 
+  // Badged when the asker is an app on this phone, exactly as the wall badges
+  // one: the icon in this sheet is the icon on their home screen, and what a
+  // person is being asked to recognise is that it is the same app. A web page
+  // and a remote client get no badge because neither is on the device.
   const artwork = (
-    <AppMark name={request.appName} icon={request.icon} adaptive={request.adaptive} />
+    <AppMark
+      name={request.appName}
+      icon={request.icon}
+      adaptive={request.adaptive}
+      badge={request.appKind === 'package'}
+    />
   );
 
   // The package, not a second copy of the name. An app is only as identifiable

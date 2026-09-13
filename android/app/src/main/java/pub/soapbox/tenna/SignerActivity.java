@@ -708,11 +708,11 @@ public class SignerActivity extends BridgeActivity {
      * <p><b>It does not make the app that asked visible underneath.</b> The
      * window is translucent as far as the framework is concerned — it does not
      * occlude its parent — and the document, the WebView and every view
-     * between them have been checked to be transparent, and the screen above
-     * the sheet is still a flat grey. Whatever paints it is below all of that.
-     * So the sheet fills the window instead of rising partway up it, and the
-     * emptiness this was meant to show something through is never on screen.
-     * See {@code PermissionSheet}.
+     * between them have been checked to be transparent, and what is on screen
+     * beside the sheet is still a flat grey. Whatever paints it is below all
+     * of that. So the request is drawn as a screen rather than as a sheet over
+     * something, and the emptiness this was meant to show something through is
+     * never on screen. See {@code PermissionSheet}.
      */
     private void seeThrough() {
         getWindow().setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));

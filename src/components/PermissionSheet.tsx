@@ -1,7 +1,7 @@
 import { App } from '@capacitor/app';
 import type { PluginListenerHandle } from '@capacitor/core';
 import { Check, X } from 'lucide-react';
-import { type ReactNode, useCallback, useEffect, useState } from 'react';
+import { type ElementType, type ReactNode, useCallback, useEffect, useState } from 'react';
 
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -10,8 +10,6 @@ import {
   Drawer,
   DrawerContent,
   DrawerDescription,
-  DrawerFooter,
-  DrawerHeader,
   DrawerTitle,
 } from '@/components/ui/drawer';
 import { Label } from '@/components/ui/label';
@@ -21,7 +19,6 @@ import {
   permissionTitle,
   type PermissionKind,
 } from '@/lib/permissionLabels';
-import { cn } from '@/lib/utils';
 
 /** Truncate a string to a maximum character length. */
 function truncate(str: string, max: number): string {
@@ -160,45 +157,139 @@ interface PermissionSheetProps {
    */
   soleAction?: { label: string; onPress: () => void };
   /**
-   * Fill the window rather than rising partway up it.
+   * This question has a window to itself, so it is drawn as a screen.
    *
-   * A sheet leaves a gap above itself, and where the thing that asked is
-   * behind that gap — a site in Tenna's own frame, dimmed but still there —
-   * the gap is the whole point. Where it is not, the gap is a hole onto
-   * nothing, and a question hanging over a void reads as something having
-   * gone wrong rather than as the app underneath being interrupted.
+   * Everything that makes a sheet a sheet is a claim about what is behind it:
+   * the gap at the top shows it, the corners lift off it, the handle says it
+   * is still there under your thumb, and dragging down puts the sheet away
+   * and gives it back. Where there is nothing behind — another application's
+   * request, in a window that cannot be seen through however transparent it
+   * is made, see {@code SignerActivity.seeThrough} — every one of those is a
+   * promise the window cannot keep, and a full-height sheet with a drag
+   * handle is the worst of both: it looks like it should move and there is
+   * nowhere for it to go.
    *
-   * That is the case for another application's request, whose window cannot
-   * be seen through however transparent everything in it is made — see
-   * {@code SignerActivity.seeThrough}. So it fills the screen and looks like
-   * a screen.
+   * So it is not a sheet at all. It is a screen, and it is dismissed the way
+   * a screen is: the back gesture, or the button that says no.
    */
-  fill?: boolean;
+  ownWindow?: boolean;
   /** Backing out: dragged down, escaped, or the Android back gesture. */
   onDismiss: () => void;
 }
 
 /**
- * The sheet a request for permission comes up in.
+ * Who is asking, over the top of what they are asking about.
  *
- * A bottom sheet rather than a dialog in the middle, because of where the
- * question comes from. Something was being used and has been interrupted by a
- * question about it, and a sheet rising from the bottom edge reads as exactly
- * that, where a floating card reads as Tenna having replaced whatever was
- * there. It is the same shape Android's own permission prompts use, for the
- * same reason.
+ * Left-aligned rather than centred: this is an identity beside its icon, and
+ * it reads off the icon, where a centred heading reads as a title.
+ */
+function Asker({
+  artwork,
+  name,
+  subtitle,
+  Title,
+  Description,
+}: {
+  artwork: ReactNode;
+  name: string;
+  subtitle: string;
+  Title: ElementType;
+  Description: ElementType;
+}) {
+  return (
+    <div className="flex shrink-0 flex-row items-center gap-3 p-4 pt-2">
+      <span aria-hidden="true" className="relative block size-10 shrink-0">
+        {artwork}
+      </span>
+      <div className="min-w-0 flex-1 text-left">
+        <Title className="truncate text-base font-semibold text-foreground">{name}</Title>
+        <Description className="truncate text-xs text-muted-foreground">{subtitle}</Description>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * A request for permission, and the two ways of answering it.
  *
- * Where the thing that asked is genuinely behind the sheet — a site in Tenna's
- * own frame — the gap above it is left open and the site shows through,
- * dimmed. Where it cannot be, the sheet fills the window instead: see `fill`.
+ * Always at the bottom, whichever shape the question came in, because that is
+ * where the thumb is. Nothing about deciding should require reaching the top
+ * of the screen.
+ */
+function Answer({
+  remember,
+  allowLabel,
+  denyLabel,
+  onAllow,
+  onDeny,
+  soleAction,
+}: Pick<
+  PermissionSheetProps,
+  'remember' | 'allowLabel' | 'denyLabel' | 'onAllow' | 'onDeny' | 'soleAction'
+>) {
+  return (
+    <div className="mt-auto flex shrink-0 flex-col gap-3 p-4 pb-safe-offset-4">
+      {/* A remembered decision is offered for anything that gets this far. What
+          is shown above — the kind, the content, the tags — is what a person
+          needs in order to decide; deciding once is then theirs to choose, and
+          a prompt the app refuses to stop showing is a prompt people learn to
+          dismiss. */}
+      {remember && !soleAction && (
+        <div className="flex items-center gap-2">
+          <Checkbox
+            id="permission-remember"
+            checked={remember.checked}
+            onCheckedChange={(checked) => remember.onChange(checked === true)}
+          />
+          <Label
+            htmlFor="permission-remember"
+            className="cursor-pointer select-none text-xs text-muted-foreground"
+          >
+            {remember.label}
+          </Label>
+        </div>
+      )}
+
+      {soleAction ? (
+        <Button variant="outline" size="lg" className="w-full" onClick={soleAction.onPress}>
+          {soleAction.label}
+        </Button>
+      ) : (
+        <div className="flex gap-2">
+          <Button variant="outline" size="lg" className="flex-1 gap-1.5" onClick={onDeny}>
+            <X className="size-4" />
+            {denyLabel}
+          </Button>
+          <Button size="lg" className="flex-1 gap-1.5" onClick={onAllow}>
+            <Check className="size-4" />
+            {allowLabel}
+          </Button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * The thing a request for permission comes up in.
  *
- * It is also the shape that puts the two buttons under the thumb. The decision
- * is at the bottom of a sheet that starts at the bottom; nothing about it
- * requires reaching the top of the screen.
+ * Two shapes, and which one is not a matter of taste — it follows from whether
+ * there is anything behind the question.
  *
- * Dragging it down is a no. A dismissal is never an approval, and never a
- * remembered one either: a gesture that got away from someone must not be able
- * to write a decision the asker gets to keep.
+ * **A sheet**, when a site inside Tenna asked. The site is right there under
+ * it, dimmed and waiting, and a sheet rising from the bottom edge over it
+ * reads as that site being interrupted, where a card in the middle reads as
+ * Tenna having replaced it. The gap at the top is what shows the site; the
+ * rounded corners lift off it; dragging down puts the sheet away and hands the
+ * site back. Every part of it is a statement about what is underneath.
+ *
+ * **A screen**, when the question has the window to itself. None of those
+ * statements are true then, and a sheet that makes them anyway is a thing that
+ * looks like it should move with nowhere to move to. See `ownWindow`.
+ *
+ * Backing out is a no, in both shapes. A dismissal is never an approval, and
+ * never a remembered one either: a gesture that got away from someone must not
+ * be able to write a decision the asker gets to keep.
  */
 export function PermissionSheet({
   artwork,
@@ -211,13 +302,14 @@ export function PermissionSheet({
   onAllow,
   onDeny,
   soleAction,
-  fill = false,
+  ownWindow = false,
   onDismiss,
 }: PermissionSheetProps) {
   const dismiss = useCallback(() => onDismiss(), [onDismiss]);
 
-  // The frame under the sheet stands aside for this one while it is up, so the
-  // gesture lands here and nowhere else.
+  // The frame under the question stands aside for this one while it is up, so
+  // the gesture lands here and nowhere else. It is the only way out of the
+  // screen shape that is not a button, and one of two in the sheet.
   useEffect(() => {
     let handle: PluginListenerHandle | undefined;
     let disposed = false;
@@ -235,6 +327,37 @@ export function PermissionSheet({
     };
   }, [dismiss]);
 
+  const answer = (
+    <Answer
+      remember={remember}
+      allowLabel={allowLabel}
+      denyLabel={denyLabel}
+      onAllow={onAllow}
+      onDeny={onDeny}
+      soleAction={soleAction}
+    />
+  );
+
+  if (ownWindow) {
+    return (
+      // Fixed rather than laid out, because this window has no page in it to
+      // be laid out against — see `AppRouter`. It fades rather than rising:
+      // the window itself is what arrived, and a screen that slides up from
+      // an edge is a screen implying it came from somewhere.
+      <div className="fixed inset-0 z-50 flex flex-col bg-background pt-safe motion-safe:animate-in motion-safe:fade-in motion-safe:duration-200">
+        <Asker
+          artwork={artwork}
+          name={name}
+          subtitle={subtitle}
+          Title="h1"
+          Description="p"
+        />
+        {children}
+        {answer}
+      </div>
+    );
+  }
+
   return (
     <Drawer
       open
@@ -245,75 +368,17 @@ export function PermissionSheet({
       {/* Tall enough to be a sheet rather than a toast even when the question
           is one line. The cap comes from the drawer's own styles, and the gap
           it leaves at the top is the point: what shows through it is whatever
-          asked, still there, waiting on an answer.
-
-          Unless there is nothing to show through it, in which case the sheet
-          is the window — the drawer's own height, margin, corners and top
-          edge all go, and the top padding keeps the handle out from under the
-          status bar. Still a drawer: it is dragged down to dismiss, and that
-          still reads as putting something back rather than as cancelling. */}
-      <DrawerContent
-        className={cn(
-          'mx-auto w-full max-w-lg',
-          fill
-            ? 'h-full pt-safe data-[vaul-drawer-direction=bottom]:mt-0 data-[vaul-drawer-direction=bottom]:max-h-none data-[vaul-drawer-direction=bottom]:rounded-none data-[vaul-drawer-direction=bottom]:border-t-0'
-            : 'min-h-[55svh]',
-        )}
-      >
-        <DrawerHeader className="flex flex-row items-center gap-3 pt-2">
-          <span aria-hidden="true" className="relative block size-10 shrink-0">
-            {artwork}
-          </span>
-          {/* Left-aligned against the drawer's own centring, which is for a
-              sheet whose header is a heading. This one is an identity beside
-              an icon, and it reads off the icon. */}
-          <div className="min-w-0 flex-1 text-left">
-            <DrawerTitle className="truncate text-base">{name}</DrawerTitle>
-            <DrawerDescription className="text-xs">{subtitle}</DrawerDescription>
-          </div>
-        </DrawerHeader>
-
+          asked, still there, waiting on an answer. */}
+      <DrawerContent className="mx-auto min-h-[55svh] w-full max-w-lg">
+        <Asker
+          artwork={artwork}
+          name={name}
+          subtitle={subtitle}
+          Title={DrawerTitle}
+          Description={DrawerDescription}
+        />
         {children}
-
-        <DrawerFooter className="gap-3 pb-safe-offset-4">
-          {/* A remembered decision is offered for anything that gets this far.
-              What the sheet shows — the kind, the content, the tags — is what a
-              person needs to decide; deciding once is then theirs to choose,
-              and a prompt the app refuses to stop showing is a prompt people
-              learn to dismiss. */}
-          {remember && !soleAction && (
-            <div className="flex items-center gap-2">
-              <Checkbox
-                id="permission-remember"
-                checked={remember.checked}
-                onCheckedChange={(checked) => remember.onChange(checked === true)}
-              />
-              <Label
-                htmlFor="permission-remember"
-                className="cursor-pointer select-none text-xs text-muted-foreground"
-              >
-                {remember.label}
-              </Label>
-            </div>
-          )}
-
-          {soleAction ? (
-            <Button variant="outline" size="lg" className="w-full" onClick={soleAction.onPress}>
-              {soleAction.label}
-            </Button>
-          ) : (
-            <div className="flex gap-2">
-              <Button variant="outline" size="lg" className="flex-1 gap-1.5" onClick={onDeny}>
-                <X className="size-4" />
-                {denyLabel}
-              </Button>
-              <Button size="lg" className="flex-1 gap-1.5" onClick={onAllow}>
-                <Check className="size-4" />
-                {allowLabel}
-              </Button>
-            </div>
-          )}
-        </DrawerFooter>
+        {answer}
       </DrawerContent>
     </Drawer>
   );

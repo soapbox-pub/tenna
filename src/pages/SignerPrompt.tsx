@@ -24,16 +24,17 @@ function parseEvent(json: string | undefined): Record<string, unknown> | null {
 /**
  * The sheet another application's request appears in.
  *
- * It fills the window, and that is a concession: the window was meant to be
- * transparent, so that the app that asked stayed on screen behind the sheet
- * and the user could see what they were answering for. Everything in this
- * window is transparent and the framework agrees the window does not occlude
- * what is under it, and the screen above the sheet is a flat grey anyway —
- * see `SignerActivity.seeThrough`. A sheet floating over that reads as a
- * mistake, so it takes the whole screen instead.
+ * A screen rather than a sheet, which was not the plan. The window was meant
+ * to be transparent, with the app that asked still visible behind a sheet
+ * over it — the thing a person most needs in order to answer a question about
+ * signing as themselves. It cannot be: everything in this window is
+ * transparent, the framework agrees the window does not occlude what is under
+ * it, and what is above the sheet is a flat grey all the same. See
+ * `SignerActivity.seeThrough`.
  *
- * Nothing else of Tenna is drawn here: no wall, no router, no wallpaper. This
- * window's whole life is one question.
+ * So there is nothing behind this question, and it is drawn as what it is.
+ * Nothing else of Tenna is here either: no wall, no router, no wallpaper.
+ * This window's whole life is one question.
  *
  * The asker is drawn with the same tile the wall uses for a site. An app's
  * launcher icon goes in the squircle full-bleed, the way Android draws it
@@ -81,7 +82,7 @@ export function SignerPrompt({
         name={request.appName}
         subtitle={subtitle}
         soleAction={{ label: 'Close', onPress: () => onResolve(false, false) }}
-        fill
+        ownWindow
         onDismiss={() => onResolve(false, false)}
       >
         <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-2">
@@ -118,7 +119,7 @@ export function SignerPrompt({
       }
       onAllow={() => onResolve(true, remember)}
       onDeny={() => onResolve(false, remember)}
-      fill
+      ownWindow
       onDismiss={() => onResolve(false, false)}
     >
       <PermissionDetails

@@ -102,6 +102,16 @@ final class TennaSigning {
             REJECTED,
             /** Nobody has decided. Put it in front of the user. */
             NEEDS_APPROVAL,
+            /**
+             * Allowed, and the signer behind this account has to be asked in a
+             * window — which this caller has not got.
+             *
+             * <p>Distinct from {@link #NEEDS_APPROVAL} because the user has
+             * already said yes: what is missing is an activity to launch the
+             * other signer from, not a decision. A caller with one carries on;
+             * a caller without one degrades the way its transport says to.
+             */
+            NEEDS_ACTIVITY,
             /** The request could not be answered at all. {@link #error} says why. */
             ERROR,
         }
@@ -134,6 +144,10 @@ final class TennaSigning {
 
         static Outcome needsApproval() {
             return new Outcome(Status.NEEDS_APPROVAL, null, null, null);
+        }
+
+        static Outcome needsActivity() {
+            return new Outcome(Status.NEEDS_ACTIVITY, null, null, null);
         }
 
         static Outcome error(@NonNull String message) {
@@ -183,8 +197,8 @@ final class TennaSigning {
      * <p>An event that names its own author outranks {@code current_user},
      * because it is the more specific statement and because signing it as
      * anybody else produces an event whose id the client did not ask for. Both
-     * are only honoured when this device holds the key; a client naming an
-     * account Tenna cannot sign for is answered as whoever it can, or not at
+     * are only honoured for somebody actually signed in here; a client naming
+     * an account Tenna does not have is answered as whoever it can, or not at
      * all.
      */
     @Nullable
@@ -194,7 +208,7 @@ final class TennaSigning {
         @NonNull Request request
     ) {
         String author = request.eventAuthor();
-        if (author != null && TennaKeys.has(context, author)) return author;
+        if (author != null && TennaAccounts.find(context, author) != null) return author;
 
         return TennaAccounts.resolve(context, currentUser);
     }
@@ -265,11 +279,6 @@ final class TennaSigning {
         @NonNull String accountPubkey,
         @NonNull Request request
     ) {
-        if (!NostrCrypto.isAvailable()) return Outcome.error("This device has no native signer");
-
-        byte[] sk = TennaKeys.get(context, accountPubkey);
-        if (sk == null) return Outcome.error("No key on this device for that account");
-
         // Checked here rather than left to the cipher, which answers a missing
         // peer the same way it answers a bad MAC — with nothing — and this is
         // a malformed request rather than a failed one.
@@ -277,14 +286,52 @@ final class TennaSigning {
             return Outcome.error("A valid pubkey is required for that request");
         }
 
+        // Two questions that are about the account rather than about its key,
+        // and are answered the same whatever is holding it: who this is, and
+        // whether anyone is listening. Answering them here is what lets a
+        // client log in to an account whose key lives in another app, with
+        // nothing on screen and nobody else asked.
+        switch (request.method) {
+            case GET_PUBLIC_KEY:
+                return Outcome.result(accountPubkey);
+            case PING:
+                return Outcome.result("pong");
+            default:
+                break;
+        }
+
+        // Everything past here needs the key, so it goes to whatever is
+        // holding it.
+        TennaAccounts.Account account = TennaAccounts.find(context, accountPubkey);
+        String type = account == null ? "" : account.type;
+
+        if (TennaAccounts.TYPE_ANDROID_SIGNER.equals(type)) {
+            return AndroidSigner.query(context, account.packageName, accountPubkey, request);
+        }
+
+        if (!TennaKeys.has(context, accountPubkey)) {
+            // Signed in, but through something this version cannot ask. A
+            // remote signer is the case that gets here today.
+            return Outcome.error("Tenna cannot reach the signer for that account");
+        }
+
+        return local(context, accountPubkey, request);
+    }
+
+    /** Sign with a key sealed in this app's own process. */
+    @NonNull
+    private static Outcome local(
+        @NonNull Context context,
+        @NonNull String accountPubkey,
+        @NonNull Request request
+    ) {
+        if (!NostrCrypto.isAvailable()) return Outcome.error("This device has no native signer");
+
+        byte[] sk = TennaKeys.get(context, accountPubkey);
+        if (sk == null) return Outcome.error("No key on this device for that account");
+
         try {
             switch (request.method) {
-                case GET_PUBLIC_KEY:
-                    return Outcome.result(accountPubkey);
-
-                case PING:
-                    return Outcome.result("pong");
-
                 case SIGN_EVENT:
                     return signEvent(sk, request.payload);
 

@@ -43,10 +43,19 @@ export function NativeAccounts() {
       JSON.stringify(
         logins.map((login) => {
           const author = authors.find((candidate) => candidate.pubkey === login.pubkey);
+          // The login's type, and the one thing that identifies what is behind
+          // it. That is what lets the app process sign for an account whose
+          // key it does not hold: it knows which door to knock on.
+          //
+          // No secrets. A signer app's package name is public, and anything
+          // that is actually a key goes to `TennaKeys` to be sealed instead.
+          const { packageName } = (login.data ?? {}) as { packageName?: string };
           return {
             pubkey: login.pubkey,
             name: author?.metadata.name ?? author?.metadata.display_name ?? '',
             picture: author?.metadata.picture ?? '',
+            type: login.type,
+            packageName: packageName ?? '',
           };
         }),
       ),

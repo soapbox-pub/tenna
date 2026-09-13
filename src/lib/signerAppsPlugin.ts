@@ -21,6 +21,8 @@ export interface SignerApp {
   lastUsed: number;
   /** The launcher icon, as a data URL, when one was captured. */
   icon: string | null;
+  /** Whether that icon is a full square with a shape still to cut. */
+  adaptive: boolean;
   permissions: SignerGrant[];
 }
 

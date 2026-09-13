@@ -17,6 +17,7 @@ function normalize(answer: Partial<SignerRequest>): SignerRequest | null {
     appKind: answer.appKind ?? 'package',
     requesterId: answer.requesterId ?? null,
     icon: answer.icon ?? null,
+    adaptive: !!answer.adaptive,
     account: answer.account ?? null,
     accountName: answer.accountName,
     peer: answer.peer ?? null,
@@ -24,7 +25,6 @@ function normalize(answer: Partial<SignerRequest>): SignerRequest | null {
     event: answer.event,
     canRemember: !!answer.canRemember,
     signedIn: !!answer.signedIn,
-    signedInElsewhere: !!answer.signedInElsewhere,
   };
 }
 

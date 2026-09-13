@@ -35,6 +35,8 @@ export interface AuthorizedApp {
   /** The line under the name: what this is, in terms nobody chose for it. */
   subtitle: string;
   icon: string | null;
+  /** Whether that icon is a full square with a shape still to cut. */
+  adaptive: boolean;
   permissions: AuthorizedPermission[];
   lastUsed: number;
   /** Set for a site, and the handle its grants are keyed by. */
@@ -95,6 +97,7 @@ export function useAuthorizedApps() {
       name: allowance.siteName || allowance.siteId,
       subtitle: sourceSubtitle('site', allowance.siteId),
       icon: null,
+      adaptive: false,
       permissions: allowance.permissions.map((permission) => ({
         type: permission.type as PermissionKind,
         kind: permission.kind,
@@ -124,6 +127,7 @@ export function useAuthorizedApps() {
         name: app.name || app.requesterId,
         subtitle: sourceSubtitle(source, app.requesterId),
         icon: app.icon,
+        adaptive: app.adaptive,
         permissions: app.permissions.map((permission) => ({
           type: permission.type,
           kind: permission.kind ?? null,
@@ -146,6 +150,7 @@ export function useAuthorizedApps() {
         name: connection.name,
         subtitle: 'Waiting for an app to connect',
         icon: null,
+        adaptive: false,
         permissions: [],
         lastUsed: connection.lastUsed,
         connection,

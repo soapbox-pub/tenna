@@ -256,6 +256,21 @@ final class NativeApps {
         }
     }
 
+    /**
+     * Any app's icon, uncut, with the shape left to whoever draws it.
+     *
+     * <p>Shared with the signer, which has the same problem for the same
+     * reason: it is drawing another app's icon inside a tile of Tenna's, and
+     * an icon that arrives already cut to this device's mask is a circle
+     * inside a squircle. See {@link #layers}.
+     */
+    @NonNull
+    static Art artOf(@NonNull Drawable drawable) {
+        boolean adaptive = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
+            && drawable instanceof AdaptiveIconDrawable;
+        return new Art(encode(rasterize(drawable)), adaptive);
+    }
+
     /** Whatever the drawable is, as a bitmap of a known size, uncut. */
     @NonNull
     private static Bitmap rasterize(@NonNull Drawable drawable) {

@@ -3,7 +3,7 @@ import { ArrowLeft, Copy, Link2, Plus, Trash2 } from 'lucide-react';
 import { useCallback, useMemo, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 
-import { TileArtwork } from '@/components/Tile';
+import { AppMark } from '@/components/AppMark';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -498,12 +498,7 @@ export function AuthorizedAppsPage() {
                       className="flex w-full items-center gap-3 rounded-lg px-2 py-3 text-left outline-none transition-colors hover:bg-foreground/5 focus-visible:ring-2 focus-visible:ring-primary"
                     >
                       <span aria-hidden="true" className="relative block size-10 shrink-0">
-                        <TileArtwork
-                          name={app.name}
-                          iconUrl={app.icon}
-                          fit="cover"
-                          background={null}
-                        />
+                        <AppMark name={app.name} icon={app.icon} adaptive={app.adaptive} />
                       </span>
 
                       <span className="min-w-0 flex-1">

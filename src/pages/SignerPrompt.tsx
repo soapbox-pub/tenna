@@ -1,7 +1,7 @@
 import { useState } from 'react';
 
+import { AppMark } from '@/components/AppMark';
 import { PermissionDetails, PermissionSheet } from '@/components/PermissionSheet';
-import { TileArtwork } from '@/components/Tile';
 import type { PermissionKind } from '@/lib/permissionLabels';
 import type { SignerRequest } from '@/lib/signerPromptPlugin';
 
@@ -49,12 +49,7 @@ export function SignerPrompt({
   const [remember, setRemember] = useState(false);
 
   const artwork = (
-    <TileArtwork
-      name={request.appName}
-      iconUrl={request.icon}
-      fit="cover"
-      background={null}
-    />
+    <AppMark name={request.appName} icon={request.icon} adaptive={request.adaptive} />
   );
 
   // The package, not a second copy of the name. An app is only as identifiable
@@ -84,13 +79,10 @@ export function SignerPrompt({
       >
         <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-2">
           <div className="rounded-lg bg-muted/50 p-3">
-            <p className="text-sm font-medium">
-              {request.signedInElsewhere ? 'Your key is not here' : 'Nothing to sign with'}
-            </p>
+            <p className="text-sm font-medium">Nobody is signed in</p>
             <p className="mt-0.5 text-xs text-muted-foreground">
-              {request.signedInElsewhere
-                ? 'The account you are signed in to Tenna with keeps its key somewhere else — another app, an extension, or a remote signer. Tenna can only answer for an account whose key it holds itself. Point this app at that signer instead.'
-                : 'This app asked Tenna to sign something, but there is no account signed in. Open Tenna and sign in, then try again.'}
+              This app asked Tenna to sign something, but there is no account signed in to
+              Tenna. Open it, sign in, and try again.
             </p>
           </div>
         </div>

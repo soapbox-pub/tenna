@@ -373,11 +373,36 @@ final class SignerApps {
      * request, while we are still allowed to see it.
      */
     @NonNull
-    static File iconFile(@NonNull Context context, @NonNull String requesterId) {
+    static File iconFile(@NonNull Context context, @NonNull String requesterId, boolean adaptive) {
         File dir = new File(context.getFilesDir(), ICONS);
         //noinspection ResultOfMethodCallIgnored
         dir.mkdirs();
-        return new File(dir, NsiteSites.key(requesterId) + ".png");
+        // The shape is written into the name rather than into the grant,
+        // because it is a fact about this picture and not about what the app
+        // was allowed to do. Kept together, they cannot drift apart; a grant
+        // revoked and given again would otherwise lose it.
+        return new File(dir, NsiteSites.key(requesterId) + (adaptive ? ".adaptive.png" : ".png"));
+    }
+
+    /** An app's kept icon and its shape, or null if none was ever captured. */
+    @Nullable
+    static Icon iconOf(@NonNull Context context, @NonNull String requesterId) {
+        File adaptive = iconFile(context, requesterId, true);
+        if (adaptive.isFile()) return new Icon(adaptive, true);
+
+        File plain = iconFile(context, requesterId, false);
+        return plain.isFile() ? new Icon(plain, false) : null;
+    }
+
+    /** A kept icon, and whether it still has a shape to be cut to. */
+    static final class Icon {
+        @NonNull final File file;
+        final boolean adaptive;
+
+        Icon(@NonNull File file, boolean adaptive) {
+            this.file = file;
+            this.adaptive = adaptive;
+        }
     }
 
     // ── Files ────────────────────────────────────────────────────────────────

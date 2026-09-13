@@ -49,16 +49,39 @@ final class TennaAccounts {
         return context.getApplicationContext().getSharedPreferences(PREFS, Context.MODE_PRIVATE);
     }
 
-    /** One signed-in identity, as much of it as is worth drawing. */
+    // ── What is behind an account ────────────────────────────────────────────
+    //
+    // The web layer's login types, as far as this side needs to tell them
+    // apart. Which one an account is decides how a signature is got for it,
+    // and that is the whole reason they are down here.
+
+    /** A key sealed in this app's own process. See {@link TennaKeys}. */
+    static final String TYPE_NATIVE_KEY = "x-native-key";
+    /** A signer app on this phone, named by {@link Account#packageName}. */
+    static final String TYPE_ANDROID_SIGNER = "x-android-signer";
+    /** A remote signer over NIP-46. */
+    static final String TYPE_BUNKER = "bunker";
+
+    /** One signed-in identity, as much of it as is worth drawing or asking. */
     static final class Account {
         @NonNull final String pubkey;
         @NonNull final String name;
         @NonNull final String picture;
+        /**
+         * Which kind of signer is behind it — one of the constants above, or
+         * empty for a login this version does not recognise.
+         */
+        @NonNull final String type;
+        /** The signer app's package, for {@link #TYPE_ANDROID_SIGNER}. */
+        @NonNull final String packageName;
 
-        Account(@NonNull String pubkey, @NonNull String name, @NonNull String picture) {
+        Account(@NonNull String pubkey, @NonNull String name, @NonNull String picture,
+                @NonNull String type, @NonNull String packageName) {
             this.pubkey = pubkey;
             this.name = name;
             this.picture = picture;
+            this.type = type;
+            this.packageName = packageName;
         }
     }
 
@@ -91,7 +114,9 @@ final class TennaAccounts {
                 accounts.add(new Account(
                     pubkey,
                     json.optString("name", ""),
-                    json.optString("picture", "")
+                    json.optString("picture", ""),
+                    json.optString("type", ""),
+                    json.optString("packageName", "")
                 ));
             }
         } catch (JSONException e) {
@@ -133,28 +158,31 @@ final class TennaAccounts {
      * and answering as somebody else would sign the wrong person's name. So a
      * named account wins whenever there is a key for it.
      *
-     * <p>When the client names nobody, or names somebody this device cannot
-     * sign for, the account in front of the user is the next best answer, and
-     * the first one that can sign after that. Null means there is nothing to
-     * answer with at all — either nobody is signed in, or everybody who is
-     * keeps their key somewhere else.
+     * <p>When the client names nobody, or names somebody who is not signed in
+     * here, the account in front of the user is the next best answer. Null
+     * means nobody is signed in at all.
+     *
+     * <p><b>Where the key is does not come into it.</b> An account signed in
+     * through a signer app or a remote signer is an account Tenna can sign for
+     * — it asks whatever is behind it, which is the whole job — so the only
+     * question here is who is signed in.
      */
     @Nullable
     static synchronized String resolve(@NonNull Context context, @Nullable String requested) {
-        if (requested != null && requested.length() == 64 && TennaKeys.has(context, requested)) {
-            return requested;
+        List<Account> accounts = all(context);
+
+        if (requested != null && requested.length() == 64) {
+            for (Account account : accounts) {
+                if (account.pubkey.equals(requested)) return requested;
+            }
         }
 
-        for (Account account : all(context)) {
-            if (TennaKeys.has(context, account.pubkey)) return account.pubkey;
-        }
-
-        return null;
+        return accounts.isEmpty() ? null : accounts.get(0).pubkey;
     }
 
-    /** Whether this device can sign for anybody at all. */
-    static synchronized boolean anySignable(@NonNull Context context) {
-        return resolve(context, null) != null;
+    /** Whether anybody is signed in to answer as. */
+    static synchronized boolean anySignedIn(@NonNull Context context) {
+        return !all(context).isEmpty();
     }
 
     /** {@code abcdef01…89abcdef}, for when there is no name to show. */

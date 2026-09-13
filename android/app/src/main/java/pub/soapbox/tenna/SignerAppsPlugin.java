@@ -139,8 +139,8 @@ public class SignerAppsPlugin extends Plugin {
     @PluginMethod
     public void createConnection(PluginCall call) {
         String account = call.getString("account");
-        if (account == null || !TennaKeys.has(getContext(), account)) {
-            call.reject("No key on this device for that account");
+        if (account == null || TennaAccounts.find(getContext(), account) == null) {
+            call.reject("Nobody is signed in to that account");
             return;
         }
 
@@ -178,8 +178,8 @@ public class SignerAppsPlugin extends Plugin {
     public void connect(PluginCall call) {
         String account = call.getString("account");
         String uri = call.getString("uri");
-        if (account == null || !TennaKeys.has(getContext(), account)) {
-            call.reject("No key on this device for that account");
+        if (account == null || TennaAccounts.find(getContext(), account) == null) {
+            call.reject("Nobody is signed in to that account");
             return;
         }
         if (uri == null) {
@@ -252,7 +252,9 @@ public class SignerAppsPlugin extends Plugin {
             json.put("name", record.name);
             json.put("createdAt", record.createdAt);
             json.put("lastUsed", record.lastUsed);
-            json.put("icon", icon(record.requesterId));
+            SignerApps.Icon art = SignerApps.iconOf(getContext(), record.requesterId);
+            json.put("icon", art == null ? null : icon(art.file));
+            json.put("adaptive", art != null && art.adaptive);
 
             JSONArray permissions = new JSONArray();
             for (SignerApps.Permission permission : record.permissions) {
@@ -293,10 +295,7 @@ public class SignerAppsPlugin extends Plugin {
      * {@link SignerActivity}.
      */
     @Nullable
-    private String icon(@NonNull String requesterId) {
-        File file = SignerApps.iconFile(getContext(), requesterId);
-        if (!file.isFile()) return null;
-
+    private String icon(@NonNull File file) {
         try (InputStream in = new FileInputStream(file);
              ByteArrayOutputStream out = new ByteArrayOutputStream((int) file.length())) {
             byte[] buffer = new byte[8 * 1024];

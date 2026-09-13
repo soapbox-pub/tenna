@@ -10,12 +10,27 @@ code and asked about with the same sheet.
 
 ## What it can answer for
 
-Only an account whose key Tenna itself holds. That means any account signed
-in on Android, where a key given to Tenna is sealed in the app process on the
-first launch after signing in. An account signed in through a browser
-extension, a remote signer, or another signer app on the phone keeps its key
-somewhere else, and Tenna will say so rather than pretend: a request for one of
-those is refused with an explanation, not passed along.
+Any account signed in to Tenna. Where its key actually lives decides how the
+answer is got, not whether there is one:
+
+- **A key Tenna holds.** Given to Tenna directly, it is sealed in the app
+  process on the first launch after signing in, and signing happens there.
+- **A signer app on the phone.** Tenna is a NIP-55 client as well as a NIP-55
+  signer, so it asks that app the same way anything else would. Two sheets
+  appear rather than one, and that is deliberate: only Tenna's knows which app
+  really asked, because the other signer sees the request as coming from Tenna.
+- **A remote signer.** Not yet. A request for one of these is refused with an
+  explanation rather than left to hang.
+
+Two questions never reach a key at all. `get_public_key` and `ping` are about
+the account rather than about its key, so they are answered from the list of
+who is signed in — which is what lets a client log in to an account held in
+another app with nothing on screen.
+
+Forwarding to another signer sometimes needs a window, and a content resolver
+query or a relay socket has not got one. Both already have a way to say so:
+the resolver returns a null cursor, which NIP-55 defines as "open the intent",
+and a request off a relay raises a notification that opens the sheet.
 
 ## An app on the phone
 

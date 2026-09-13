@@ -120,7 +120,11 @@ public class SignerProvider extends ContentProvider {
                 return null;
 
             default:
-                // Nobody has decided. The client opens the sheet.
+                // Either nobody has decided, or the signer behind this account
+                // has to be asked in a window and a binder thread has not got
+                // one. Both are the same answer here, and it is the one NIP-55
+                // already defines: a null cursor means open the intent, which
+                // can do what this cannot.
                 return null;
         }
     }

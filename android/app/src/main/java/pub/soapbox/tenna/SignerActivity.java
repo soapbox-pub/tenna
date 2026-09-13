@@ -4,11 +4,8 @@ import android.app.Activity;
 import android.content.Intent;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
-import android.graphics.Bitmap;
-import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.drawable.ColorDrawable;
-import android.graphics.drawable.Drawable;
 import android.net.Uri;
 import android.os.Bundle;
 import android.util.Base64;
@@ -26,7 +23,6 @@ import com.getcapacitor.BridgeActivity;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
-import java.io.ByteArrayOutputStream;
 import java.io.FileOutputStream;
 import java.util.ArrayDeque;
 import java.util.Collections;
@@ -86,6 +82,8 @@ public class SignerActivity extends BridgeActivity {
         @NonNull final String appKind;
         /** The caller's launcher icon as a data URI, or null. */
         @Nullable final String icon;
+        /** Whether that icon is a full square with a shape still to cut. */
+        final boolean adaptive;
 
         /** From an intent. */
         Pending(
@@ -94,7 +92,8 @@ public class SignerActivity extends BridgeActivity {
             @Nullable String requesterId,
             @NonNull String appName,
             @NonNull String appKind,
-            @Nullable String icon
+            @Nullable String icon,
+            boolean adaptive
         ) {
             this.parsed = parsed;
             this.bunker = null;
@@ -105,6 +104,7 @@ public class SignerActivity extends BridgeActivity {
             this.appName = appName;
             this.appKind = appKind;
             this.icon = icon;
+            this.adaptive = adaptive;
         }
 
         /** From a relay. */
@@ -121,6 +121,7 @@ public class SignerActivity extends BridgeActivity {
             // the strength of a signing request would tell whoever hosts it
             // when the user is being asked to sign. Its initial will do.
             this.icon = null;
+            this.adaptive = false;
         }
     }
 
@@ -128,6 +129,21 @@ public class SignerActivity extends BridgeActivity {
 
     /** Every answer given in this window, for a client that batched — see {@link #batched}. */
     private final JSONArray answered = new JSONArray();
+
+    /**
+     * Requests already allowed, waiting on another signer app to do the work.
+     *
+     * <p>Separate from {@link #queue}, which is requests waiting on a person.
+     * These need no sheet and no WebView — only a window to launch from, which
+     * is the one thing a content resolver and a relay socket have not got.
+     */
+    private final Deque<Pending> forwards = new ArrayDeque<>();
+
+    /** The forward currently in front of the user, in the other app. */
+    @Nullable private Pending forwarding;
+
+    /** Any value not used by a Capacitor plugin. */
+    private static final int FORWARD_REQUEST = 0x5167;
 
     /** Whether everything was answered before anything had to be drawn. */
     private boolean silent;
@@ -144,17 +160,23 @@ public class SignerActivity extends BridgeActivity {
             intent = null;
         }
 
-        silent = intent == null || settle(intent, false);
+        boolean settled = intent == null || settle(intent, false);
+
+        // Nothing to draw is not the same as nothing to do: a request being
+        // handed to another signer keeps this window alive with no WebView in
+        // it at all, which is the cheap path and the common one.
+        silent = queue.isEmpty();
 
         if (!silent) registerPlugin(SignerPromptPlugin.class);
         super.onCreate(savedInstanceState);
 
-        if (silent) {
+        if (settled && forwards.isEmpty()) {
             finish();
             return;
         }
 
         seeThrough();
+        pumpForwards();
     }
 
     @Override
@@ -167,7 +189,9 @@ public class SignerActivity extends BridgeActivity {
         // Deliberately not rate limited. A client batching requests into one
         // window is the case that machinery exists to permit, not the one it
         // exists to stop — and the user is already looking at a sheet.
-        if (settle(intent, true)) return;
+        boolean settled = settle(intent, true);
+        pumpForwards();
+        if (settled) return;
 
         SignerPromptPlugin.announce(getBridge());
     }
@@ -182,8 +206,9 @@ public class SignerActivity extends BridgeActivity {
      */
     private boolean settle(@NonNull Intent intent, boolean additional) {
         // A notification about a remote request, rather than an app on the
-        // phone asking directly. Nothing here is decided again — it was judged
-        // when it arrived, and only got this far because nobody had.
+        // phone asking directly. It was judged when it arrived, so the only
+        // question left is which of the two things a relay socket could not do
+        // this needs: a person, or a window.
         String bunkerId = bunkerRequestId(intent);
         if (bunkerId != null) {
             NappBunker.Pending waiting = NappBunker.take(bunkerId);
@@ -194,7 +219,28 @@ public class SignerActivity extends BridgeActivity {
                 return !additional;
             }
             NappNotifications.cancelSignerRequest(this, bunkerId);
-            queue.addLast(new Pending(waiting));
+
+            Pending pending = new Pending(waiting);
+            TennaSigning.Outcome outcome = TennaSigning.answer(
+                this, waiting.accountPubkey, waiting.clientPubkey, waiting.request);
+
+            if (outcome.status == TennaSigning.Outcome.Status.NEEDS_ACTIVITY) {
+                // Allowed already, and only here because handing it to another
+                // signer takes a window. Asking again would be asking a
+                // question the user has answered and said to remember.
+                forwards.addLast(pending);
+                return !additional;
+            }
+
+            if (outcome.status != TennaSigning.Outcome.Status.NEEDS_APPROVAL) {
+                // Decided in the time it took somebody to reach the
+                // notification — by the same app being answered on another
+                // request, most likely, with "remember" on it.
+                answer(pending, outcome);
+                return !additional;
+            }
+
+            queue.addLast(pending);
             return false;
         }
 
@@ -233,6 +279,12 @@ public class SignerActivity extends BridgeActivity {
             if (outcome.status == TennaSigning.Outcome.Status.ERROR) {
                 Log.i(TAG, "Could not answer a request: " + outcome.error);
                 setResult(Activity.RESULT_CANCELED);
+                return !additional;
+            }
+            if (outcome.status == TennaSigning.Outcome.Status.NEEDS_ACTIVITY) {
+                // Allowed already; it just has to be asked of the signer
+                // behind this account, and that takes a window.
+                forwards.addLast(describe(parsed, account, requesterId));
                 return !additional;
             }
         }
@@ -275,22 +327,26 @@ public class SignerActivity extends BridgeActivity {
     ) {
         if (requesterId == null || requesterId.isEmpty()) {
             String name = parsed.appName.isEmpty() ? "A web page" : parsed.appName;
-            return new Pending(parsed, account, null, name, SignerApps.KIND_WEB, null);
+            return new Pending(parsed, account, null, name, SignerApps.KIND_WEB, null, false);
         }
 
         String label = requesterId;
         String icon = null;
+        boolean adaptive = false;
 
         try {
             PackageManager packages = getPackageManager();
             ApplicationInfo info = packages.getApplicationInfo(requesterId, 0);
             label = packages.getApplicationLabel(info).toString();
 
-            Bitmap bitmap = rasterize(packages.getApplicationIcon(info));
-            if (bitmap != null) {
-                icon = dataUri(bitmap);
-                remember(requesterId, bitmap);
-            }
+            // Uncut, and shared with the wall's own icon path rather than
+            // drawn again here — an adaptive icon asked to draw itself comes
+            // out in this device's mask, which is how a circle ends up inside
+            // a squircle. See `NativeApps.layers`.
+            NativeApps.Art art = NativeApps.artOf(packages.getApplicationIcon(info));
+            icon = "data:image/png;base64," + art.png;
+            adaptive = art.adaptive;
+            remember(requesterId, art.png, art.adaptive);
         } catch (Exception e) {
             // An app we cannot see is still an app that asked. It is named by
             // its package, which is the part that matters for telling two
@@ -298,36 +354,20 @@ public class SignerActivity extends BridgeActivity {
             Log.i(TAG, "Could not read the caller's name or icon");
         }
 
-        return new Pending(parsed, account, requesterId, label, SignerApps.KIND_PACKAGE, icon);
-    }
-
-    @Nullable
-    private static Bitmap rasterize(@Nullable Drawable drawable) {
-        if (drawable == null) return null;
-
-        int size = 192;
-        Bitmap bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888);
-        Canvas canvas = new Canvas(bitmap);
-        drawable.setBounds(0, 0, size, size);
-        drawable.draw(canvas);
-        return bitmap;
-    }
-
-    @Nullable
-    private static String dataUri(@NonNull Bitmap bitmap) {
-        try (ByteArrayOutputStream bytes = new ByteArrayOutputStream()) {
-            bitmap.compress(Bitmap.CompressFormat.PNG, 100, bytes);
-            return "data:image/png;base64,"
-                + Base64.encodeToString(bytes.toByteArray(), Base64.NO_WRAP);
-        } catch (Exception e) {
-            return null;
-        }
+        return new Pending(parsed, account, requesterId, label, SignerApps.KIND_PACKAGE, icon, adaptive);
     }
 
     /** Keep the icon for the settings screen, which will not be able to ask. */
-    private void remember(@NonNull String requesterId, @NonNull Bitmap bitmap) {
-        try (FileOutputStream out = new FileOutputStream(SignerApps.iconFile(this, requesterId))) {
-            bitmap.compress(Bitmap.CompressFormat.PNG, 100, out);
+    private void remember(@NonNull String requesterId, @NonNull String png, boolean adaptive) {
+        try (FileOutputStream out =
+                 new FileOutputStream(SignerApps.iconFile(this, requesterId, adaptive))) {
+            out.write(Base64.decode(png, Base64.NO_WRAP));
+
+            // The other shape, if this app was ever kept under it. An update
+            // can change an icon's kind, and the reader prefers the adaptive
+            // file, so a stale one left lying there would outlive its app.
+            //noinspection ResultOfMethodCallIgnored
+            SignerApps.iconFile(this, requesterId, !adaptive).delete();
         } catch (Exception e) {
             // The list will draw an initial instead.
             Log.i(TAG, "Could not keep the caller's icon");
@@ -353,19 +393,12 @@ public class SignerActivity extends BridgeActivity {
         if (pending == null || !pending.id.equals(id)) return;
         queue.pollFirst();
 
-        // A request that came off a relay is answered by the service, which
-        // owns the socket it has to go out on. Everything about the decision —
-        // the grant, the signing — happens there too, so that the answer and
-        // the publish are one step and neither can happen without the other.
-        if (pending.bunker != null) {
-            NappPushService.resolveBunker(this, pending.bunker, allowed, remember);
-            if (queue.isEmpty()) finish();
-            return;
-        }
-
         String account = pending.accountPubkey;
         String permission = pending.request.method.permission;
 
+        // Written down before the work, so that a signature that then fails
+        // somewhere else still leaves the decision the user made rather than
+        // asking them again about something they have answered.
         if (account != null && remember && permission != null
                 && pending.requesterId != null && !pending.requesterId.isEmpty()) {
             SignerApps.grant(
@@ -374,17 +407,26 @@ public class SignerActivity extends BridgeActivity {
             );
         }
 
-        if (!allowed || account == null) {
-            refuse(pending.parsed);
+        TennaSigning.Outcome outcome;
+        if (!allowed) {
+            outcome = TennaSigning.Outcome.rejected();
+        } else if (account == null) {
+            outcome = TennaSigning.Outcome.error("Nobody is signed in");
         } else {
-            TennaSigning.Outcome outcome = TennaSigning.run(this, account, pending.request);
-            if (outcome.isResult()) {
-                deliver(pending.parsed, outcome, pending.requesterId, account);
-            } else {
-                Log.i(TAG, "Could not answer an approved request: " + outcome.error);
-                setResult(Activity.RESULT_CANCELED);
-            }
+            outcome = TennaSigning.run(this, account, pending.request);
         }
+
+        // Allowed here, and now the signer behind the account has to be asked
+        // too. This window is the thing it needs and a relay socket has not
+        // got, which is why a remote request that gets this far comes back
+        // through the sheet rather than being answered where it arrived.
+        if (outcome.status == TennaSigning.Outcome.Status.NEEDS_ACTIVITY) {
+            forwards.addLast(pending);
+            pumpForwards();
+            return;
+        }
+
+        answer(pending, outcome);
 
         // Anything else waiting that the answer just settled.
         //
@@ -395,7 +437,7 @@ public class SignerActivity extends BridgeActivity {
         // people to press Allow without reading.
         drain();
 
-        if (queue.isEmpty()) finish();
+        pumpForwards();
     }
 
     /** Answer everything at the front of the queue that no longer needs asking. */
@@ -414,6 +456,97 @@ public class SignerActivity extends BridgeActivity {
                 refuse(next.parsed);
             }
             next = queue.peekFirst();
+        }
+    }
+
+    // ── Handing it on to another signer ──────────────────────────────────────
+
+    /**
+     * Put the next waiting request to the signer app behind its account.
+     *
+     * <p>One at a time, because the other signer shows its own sheet and two
+     * of those at once is a window nobody can answer.
+     */
+    private void pumpForwards() {
+        if (forwarding != null) return;
+
+        Pending next = forwards.pollFirst();
+        if (next == null) {
+            if (queue.isEmpty()) finish();
+            return;
+        }
+
+        TennaAccounts.Account account = next.accountPubkey == null
+            ? null : TennaAccounts.find(this, next.accountPubkey);
+
+        if (account == null || !AndroidSigner.canAsk(this, account.packageName)) {
+            answerForward(next, TennaSigning.Outcome.error("That account's signer is not here"));
+            return;
+        }
+
+        try {
+            forwarding = next;
+            startActivityForResult(
+                AndroidSigner.intentFor(account.packageName, next.accountPubkey, next.request),
+                FORWARD_REQUEST
+            );
+        } catch (Exception e) {
+            forwarding = null;
+            Log.i(TAG, "Could not open " + account.packageName, e);
+            answerForward(next, TennaSigning.Outcome.error("Could not open that account's signer"));
+        }
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, @Nullable Intent data) {
+        if (requestCode == FORWARD_REQUEST) {
+            Pending pending = forwarding;
+            forwarding = null;
+            if (pending == null) return;
+
+            // A result code other than OK means the other signer failed,
+            // which NIP-55 keeps distinct from its user saying no — a refusal
+            // comes back as OK with a flag on it.
+            answerForward(pending, resultCode == Activity.RESULT_OK
+                ? AndroidSigner.read(pending.request, data)
+                : TennaSigning.Outcome.error("That account's signer did not answer"));
+            return;
+        }
+
+        // The bridge is absent on the path that never loaded a WebView, and
+        // its own override would not know that.
+        if (getBridge() != null) super.onActivityResult(requestCode, resultCode, data);
+    }
+
+    /** Pass a forwarded answer back to whoever asked us, then take the next. */
+    private void answerForward(@NonNull Pending pending, @NonNull TennaSigning.Outcome outcome) {
+        answer(pending, outcome);
+        pumpForwards();
+    }
+
+    /**
+     * Give one request its answer, by whichever road it arrived on.
+     *
+     * <p>An intent is answered with an activity result; something that came
+     * off a relay is answered by the service, which owns the socket it has to
+     * go out on and is told what the signer said rather than asked to work it
+     * out a second time.
+     */
+    private void answer(@NonNull Pending pending, @NonNull TennaSigning.Outcome outcome) {
+        if (pending.bunker != null) {
+            // It came off a relay, so the answer goes back out on one. The
+            // service owns the socket; it is told what the signer said rather
+            // than asked to work it out again.
+            NappPushService.resolveBunker(this, pending.bunker, outcome.isResult(), false, outcome);
+        } else if (pending.parsed != null) {
+            if (outcome.isResult() && pending.accountPubkey != null) {
+                deliver(pending.parsed, outcome, pending.requesterId, pending.accountPubkey);
+            } else if (outcome.status == TennaSigning.Outcome.Status.REJECTED) {
+                refuse(pending.parsed);
+            } else {
+                Log.i(TAG, "Could not answer a request: " + outcome.error);
+                setResult(Activity.RESULT_CANCELED);
+            }
         }
     }
 
@@ -496,20 +629,26 @@ public class SignerActivity extends BridgeActivity {
      */
     @Override
     public void finish() {
-        Pending pending = queue.peekFirst();
-        while (pending != null) {
-            if (pending.parsed != null) {
-                refuse(pending.parsed);
-            } else if (pending.bunker != null) {
-                // A remote client is holding the request open, so a dismissal
-                // has to be said out loud rather than left to time out. Never
-                // remembered — see the note above.
-                NappPushService.resolveBunker(this, pending.bunker, false, false);
-            }
-            queue.pollFirst();
-            pending = queue.peekFirst();
-        }
+        // Everything still waiting, whether on a person or on another signer.
+        // A window that goes away with a request in it owes somebody an
+        // answer either way, and the one thing it must never be is silence.
+        refuseAll(queue);
+        refuseAll(forwards);
+
+        Pending open = forwarding;
+        forwarding = null;
+        if (open != null) answer(open, TennaSigning.Outcome.rejected());
+
         super.finish();
+    }
+
+    private void refuseAll(@NonNull Deque<Pending> waiting) {
+        Pending pending = waiting.pollFirst();
+        while (pending != null) {
+            // Never remembered — see the note above.
+            answer(pending, TennaSigning.Outcome.rejected());
+            pending = waiting.pollFirst();
+        }
     }
 
     // ── The window ───────────────────────────────────────────────────────────

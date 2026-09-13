@@ -16,6 +16,14 @@ export interface SignerRequest {
   requesterId: string | null;
   /** The caller's launcher icon, as a data URL. */
   icon: string | null;
+  /**
+   * Whether that icon is a full square with a shape still to cut.
+   *
+   * Android's two kinds of icon are not the same object: an adaptive one is a
+   * canvas meant to go behind a mask, a legacy one is a finished picture that
+   * has already been cut. Drawing the second as the first squashes it.
+   */
+  adaptive: boolean;
   /** The account that would answer, or null if this device holds no key. */
   account: string | null;
   /** What that account is called. */
@@ -28,14 +36,8 @@ export interface SignerRequest {
   event?: string;
   /** Whether "remember this" is worth offering — see `TennaSigning.decide`. */
   canRemember: boolean;
-  /** Whether there is an account here that could answer at all. */
+  /** Whether anybody is signed in to answer as. */
   signedIn: boolean;
-  /**
-   * Somebody is signed in, but their key lives somewhere else — an extension,
-   * a remote signer, or another signer app on the phone. A different "no" from
-   * nobody being signed in, and one that signing in again would not fix.
-   */
-  signedInElsewhere: boolean;
 }
 
 /**

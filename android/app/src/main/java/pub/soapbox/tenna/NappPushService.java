@@ -263,7 +263,8 @@ public class NappPushService extends Service {
             NappBunker.Staged staged = NappBunker.unstage(intent.getStringExtra(EXTRA_REQUEST_ID));
             if (staged != null) {
                 afterConnecting = () -> NappBunker.resolve(
-                    this, this::publish, staged.request, staged.allowed, staged.remember);
+                    this, this::publish, staged.request, staged.allowed,
+                    staged.remember, staged.outcome);
             }
         }
 
@@ -473,7 +474,8 @@ public class NappPushService extends Service {
         @NonNull Context context,
         @NonNull NappBunker.Pending request,
         boolean allowed,
-        boolean remember
+        boolean remember,
+        @Nullable TennaSigning.Outcome outcome
     ) {
         Context app = context.getApplicationContext();
         // The reply has to go out on a socket, and the socket belongs to the
@@ -485,7 +487,7 @@ public class NappPushService extends Service {
             .putExtra(EXTRA_ALLOWED, allowed)
             .putExtra(EXTRA_REMEMBER, remember);
 
-        NappBunker.stage(request, allowed, remember);
+        NappBunker.stage(request, allowed, remember, outcome);
         try {
             ContextCompat.startForegroundService(app, intent);
         } catch (RuntimeException e) {

@@ -133,11 +133,22 @@ final class NappBunker {
         @NonNull final Pending request;
         final boolean allowed;
         final boolean remember;
+        /**
+         * The answer, when whoever asked the user also did the work.
+         *
+         * <p>Set when the signer behind the account had to be asked in a
+         * window — the sheet has one and the service has not, so the result
+         * comes back with the decision rather than being recomputed here,
+         * which would mean asking that signer a second time.
+         */
+        @Nullable final TennaSigning.Outcome outcome;
 
-        Staged(@NonNull Pending request, boolean allowed, boolean remember) {
+        Staged(@NonNull Pending request, boolean allowed, boolean remember,
+               @Nullable TennaSigning.Outcome outcome) {
             this.request = request;
             this.allowed = allowed;
             this.remember = remember;
+            this.outcome = outcome;
         }
     }
 
@@ -152,8 +163,9 @@ final class NappBunker {
      */
     private static final Map<String, Staged> staged = new LinkedHashMap<>();
 
-    static synchronized void stage(@NonNull Pending request, boolean allowed, boolean remember) {
-        staged.put(request.requestId, new Staged(request, allowed, remember));
+    static synchronized void stage(@NonNull Pending request, boolean allowed, boolean remember,
+                                   @Nullable TennaSigning.Outcome outcome) {
+        staged.put(request.requestId, new Staged(request, allowed, remember, outcome));
     }
 
     @Nullable
@@ -303,9 +315,10 @@ final class NappBunker {
                 return;
 
             default: {
-                // Nobody has decided, so this has to reach a person — and the
-                // only way it can, with the app closed and the request off a
-                // socket, is a notification.
+                // Either nobody has decided, or the signer behind this account
+                // has to be asked in a window — and a relay socket has not got
+                // one. Both end up in the same place: on screen, which from
+                // here means a notification, because the app is closed.
                 Pending waiting = new Pending(requestId, connection.localPubkey, clientPubkey,
                     account, connection.displayName(), request, nip04, connection.relays);
 
@@ -467,7 +480,8 @@ final class NappBunker {
         @NonNull Publisher publisher,
         @NonNull Pending request,
         boolean allowed,
-        boolean remember
+        boolean remember,
+        @Nullable TennaSigning.Outcome answered
     ) {
         BunkerConnections.Connection connection =
             BunkerConnections.byLocalPubkey(context, request.localPubkey);
@@ -486,8 +500,12 @@ final class NappBunker {
             return;
         }
 
-        TennaSigning.Outcome outcome =
-            TennaSigning.run(context, request.accountPubkey, request.request);
+        // The work, unless whoever asked the user already did it. Doing it
+        // again would mean putting the same question to the account's own
+        // signer twice.
+        TennaSigning.Outcome outcome = answered != null
+            ? answered
+            : TennaSigning.run(context, request.accountPubkey, request.request);
 
         if (outcome.isResult()) {
             BunkerConnections.save(context, connection.used());

@@ -99,6 +99,7 @@ public class SignerPromptPlugin extends Plugin {
         json.put("appKind", pending.appKind);
         json.put("requesterId", pending.requesterId);
         json.put("icon", pending.icon);
+        json.put("adaptive", pending.adaptive);
         json.put("account", pending.accountPubkey);
         json.put("peer", request.peer);
 
@@ -123,15 +124,6 @@ public class SignerPromptPlugin extends Plugin {
         if (pending.accountPubkey != null) {
             json.put("accountName", TennaAccounts.nameOf(activity, pending.accountPubkey));
         }
-
-        // Somebody is signed in, but their key is not here — an extension, a
-        // remote signer, or another signer app on this phone. Two different
-        // situations that produce the same "no" and want different sentences:
-        // one is fixed by signing in, and the other cannot be fixed at all,
-        // because Tenna cannot pass the question along to whatever holds the
-        // key without becoming a worse version of that thing.
-        json.put("signedInElsewhere",
-            pending.accountPubkey == null && !TennaAccounts.all(activity).isEmpty());
 
         return json;
     }

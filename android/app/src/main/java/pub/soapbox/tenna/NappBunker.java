@@ -296,7 +296,11 @@ final class NappBunker {
         }
 
         TennaSigning.Outcome outcome =
-            TennaSigning.answer(context, account, clientPubkey, request);
+            // Waiting is allowed here: this is a relay socket's thread, with
+            // nothing drawn on it, and a signer app that answers in the
+            // background is the whole reason a remote request can be settled
+            // with the app closed.
+            TennaSigning.answer(context, account, clientPubkey, request, true);
 
         switch (outcome.status) {
             case RESULT:
@@ -494,24 +498,33 @@ final class NappBunker {
                 permission, request.request.eventKind(), allowed);
         }
 
-        if (!allowed) {
-            reply(publisher, connection, request.clientPubkey, request.requestId,
-                null, "user rejected", request.nip04);
-            return;
-        }
-
         // The work, unless whoever asked the user already did it. Doing it
         // again would mean putting the same question to the account's own
         // signer twice.
-        TennaSigning.Outcome outcome = answered != null
-            ? answered
-            : TennaSigning.run(context, request.accountPubkey, request.request);
+        //
+        // A supplied answer speaks for itself, refusal and failure alike. The
+        // difference matters on the wire: a client told "user rejected" has
+        // been told the answer is no and to stop, where a client told what
+        // actually went wrong — a signer app that is not installed, an event
+        // that came back wrong — can say so to whoever is using it and try
+        // again later.
+        TennaSigning.Outcome outcome;
+        if (answered != null) {
+            outcome = answered;
+        } else if (allowed) {
+            outcome = TennaSigning.run(context, request.accountPubkey, request.request, true);
+        } else {
+            outcome = TennaSigning.Outcome.rejected();
+        }
 
         if (outcome.isResult()) {
             BunkerConnections.save(context, connection.used());
             SignerApps.touch(context, request.accountPubkey, request.clientPubkey);
             reply(publisher, connection, request.clientPubkey, request.requestId,
                 resultFor(request.request.method, outcome), null, request.nip04);
+        } else if (outcome.status == TennaSigning.Outcome.Status.REJECTED) {
+            reply(publisher, connection, request.clientPubkey, request.requestId,
+                null, "user rejected", request.nip04);
         } else {
             reply(publisher, connection, request.clientPubkey, request.requestId, null,
                 outcome.error == null ? "could not answer" : outcome.error, request.nip04);

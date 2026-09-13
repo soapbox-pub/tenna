@@ -222,7 +222,7 @@ public class SignerActivity extends BridgeActivity {
 
             Pending pending = new Pending(waiting);
             TennaSigning.Outcome outcome = TennaSigning.answer(
-                this, waiting.accountPubkey, waiting.clientPubkey, waiting.request);
+                this, waiting.accountPubkey, waiting.clientPubkey, waiting.request, false);
 
             if (outcome.status == TennaSigning.Outcome.Status.NEEDS_ACTIVITY) {
                 // Allowed already, and only here because handing it to another
@@ -265,8 +265,11 @@ public class SignerActivity extends BridgeActivity {
         String account = TennaSigning.accountFor(this, parsed.currentUser, request);
 
         if (account != null) {
+            // Never waiting: this is the thread that draws, and it is running
+            // inside `onCreate` — an answer that has to come from another app
+            // comes back as NEEDS_ACTIVITY and is asked for off it.
             TennaSigning.Outcome outcome =
-                TennaSigning.answer(this, account, requesterId, request);
+                TennaSigning.answer(this, account, requesterId, request, false);
 
             if (outcome.isResult()) {
                 deliver(parsed, outcome, requesterId, account);
@@ -413,7 +416,7 @@ public class SignerActivity extends BridgeActivity {
         } else if (account == null) {
             outcome = TennaSigning.Outcome.error("Nobody is signed in");
         } else {
-            outcome = TennaSigning.run(this, account, pending.request);
+            outcome = TennaSigning.run(this, account, pending.request, false);
         }
 
         // Allowed here, and now the signer behind the account has to be asked
@@ -445,12 +448,17 @@ public class SignerActivity extends BridgeActivity {
         Pending next = queue.peekFirst();
         while (next != null && next.accountPubkey != null && next.parsed != null) {
             TennaSigning.Outcome outcome = TennaSigning.answer(
-                this, next.accountPubkey, next.requesterId, next.request);
+                this, next.accountPubkey, next.requesterId, next.request, false);
 
             if (outcome.status == TennaSigning.Outcome.Status.NEEDS_APPROVAL) break;
 
             queue.pollFirst();
-            if (outcome.isResult()) {
+            if (outcome.status == TennaSigning.Outcome.Status.NEEDS_ACTIVITY) {
+                // Decided, and now somebody else's to sign. Off the front of
+                // the queue and into the other line — see `pumpForwards`,
+                // which the caller runs once this is done.
+                forwards.addLast(next);
+            } else if (outcome.isResult()) {
                 deliver(next.parsed, outcome, next.requesterId, next.accountPubkey);
             } else {
                 refuse(next.parsed);
@@ -463,6 +471,12 @@ public class SignerActivity extends BridgeActivity {
 
     /**
      * Put the next waiting request to the signer app behind its account.
+     *
+     * <p>Quietly if that signer will have it — it may have been told to
+     * remember this, in which case the whole thing happens with nothing on
+     * screen — and in its own window if it will not. Asking which costs a call
+     * into another process, so it happens off this thread; everything after it
+     * comes back here.
      *
      * <p>One at a time, because the other signer shows its own sheet and two
      * of those at once is a window nobody can answer.
@@ -484,16 +498,45 @@ public class SignerActivity extends BridgeActivity {
             return;
         }
 
+        // Claimed from here, so nothing starts a second forward while this one
+        // is in the air.
+        forwarding = next;
+
+        String packageName = account.packageName;
+        String accountPubkey = next.accountPubkey;
+
+        AndroidSigner.queryInBackground(this, packageName, accountPubkey, next.request,
+            outcome -> runOnUiThread(() -> {
+                // The window may have gone while that was in flight, and going
+                // is what refuses everything it was holding. Then this answer
+                // is nobody's, and giving it twice is worse than late.
+                if (forwarding != next) return;
+
+                if (outcome.status != TennaSigning.Outcome.Status.NEEDS_ACTIVITY) {
+                    forwarding = null;
+                    answerForward(next, outcome);
+                    return;
+                }
+
+                ask(next, packageName, accountPubkey);
+            }));
+    }
+
+    /** Put the question to the other signer's own user, in its own window. */
+    private void ask(
+        @NonNull Pending pending,
+        @NonNull String packageName,
+        @NonNull String accountPubkey
+    ) {
         try {
-            forwarding = next;
             startActivityForResult(
-                AndroidSigner.intentFor(account.packageName, next.accountPubkey, next.request),
+                AndroidSigner.intentFor(packageName, accountPubkey, pending.request),
                 FORWARD_REQUEST
             );
         } catch (Exception e) {
             forwarding = null;
-            Log.i(TAG, "Could not open " + account.packageName, e);
-            answerForward(next, TennaSigning.Outcome.error("Could not open that account's signer"));
+            Log.i(TAG, "Could not open " + packageName, e);
+            answerForward(pending, TennaSigning.Outcome.error("Could not open that account's signer"));
         }
     }
 
@@ -507,8 +550,9 @@ public class SignerActivity extends BridgeActivity {
             // A result code other than OK means the other signer failed,
             // which NIP-55 keeps distinct from its user saying no — a refusal
             // comes back as OK with a flag on it.
-            answerForward(pending, resultCode == Activity.RESULT_OK
-                ? AndroidSigner.read(pending.request, data)
+            String account = pending.accountPubkey;
+            answerForward(pending, resultCode == Activity.RESULT_OK && account != null
+                ? AndroidSigner.read(account, pending.request, data)
                 : TennaSigning.Outcome.error("That account's signer did not answer"));
             return;
         }

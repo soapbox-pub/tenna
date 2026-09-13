@@ -19,6 +19,16 @@ answer is got, not whether there is one:
   signer, so it asks that app the same way anything else would. Two sheets
   appear rather than one, and that is deliberate: only Tenna's knows which app
   really asked, because the other signer sees the request as coming from Tenna.
+  If that signer has been told to remember the question, it answers in the
+  background and only Tenna's sheet appears.
+
+  **What comes back from it is checked, not trusted.** A signature only proves
+  somebody signed something: it does not say that the account was the one the
+  client named, or that the event is the one the sheet displayed. Both are
+  compared — pubkey, kind, content and tags — and a mismatch is an error rather
+  than an answer. A signer holding several keys that replies as the wrong one
+  would otherwise log a client in as a stranger, and the relay AUTH case shows
+  why tags count too: the whole meaning of that event is in its challenge.
 - **A remote signer.** Not yet. A request for one of these is refused with an
   explanation rather than left to hang.
 

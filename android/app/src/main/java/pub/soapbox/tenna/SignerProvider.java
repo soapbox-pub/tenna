@@ -105,7 +105,7 @@ public class SignerProvider extends ContentProvider {
         }
 
         TennaSigning.Outcome outcome =
-            TennaSigning.answer(context, account, requesterId, request);
+            TennaSigning.answer(context, account, requesterId, request, true);
 
         switch (outcome.status) {
             case RESULT:

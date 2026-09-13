@@ -10,6 +10,16 @@ import android.util.Log;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 
+import org.json.JSONArray;
+import org.json.JSONObject;
+
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+
 /**
  * Asking a signer app on this phone, on behalf of somebody who asked us.
  *
@@ -35,6 +45,10 @@ import androidx.annotation.Nullable;
  *       asked. Amber sees the request as Tenna's.
  * </ol>
  *
+ * <p><b>Nothing that comes back is taken on trust.</b> Whichever way it
+ * arrived, a signed event is checked against the request it answers before it
+ * is passed on — see {@link #mismatch}.
+ *
  * <p>Nothing here is Amber-specific. The package comes from the login, and
  * everything else is what the NIP says.
  */
@@ -47,11 +61,42 @@ final class AndroidSigner {
     // ── The background half ──────────────────────────────────────────────────
 
     /**
+     * How long to wait on another app before giving up on the quiet way.
+     *
+     * <p>The call underneath is a binder transaction into a process that may
+     * be cold, and it cannot be interrupted once it is in flight. Left
+     * unbounded it would hold whatever thread asked — including, through
+     * {@link SignerProvider}, a thread belonging to the client that asked us,
+     * which would make one wedged signer look like three wedged apps.
+     *
+     * <p>Giving up is cheap: it means the same as any other "I cannot answer
+     * without asking somebody", and the request goes on to the prompt.
+     */
+    private static final long PATIENCE_MS = 5_000;
+
+    /**
+     * Threads for waiting on another app.
+     *
+     * <p>Cached rather than fixed, and never joined: a binder call that hangs
+     * hangs its thread for good, and the one thing that must not happen is for
+     * the next request to queue behind it.
+     */
+    private static final ExecutorService ASKING = Executors.newCachedThreadPool(runnable -> {
+        Thread thread = new Thread(runnable, "android-signer");
+        thread.setDaemon(true);
+        return thread;
+    });
+
+    /**
      * Ask the other signer's content resolver.
      *
      * <p>Reads its answer exactly as NIP-55 defines ours: a row with a result,
      * a row with {@code rejected}, or a null cursor meaning it cannot say
      * without asking somebody.
+     *
+     * <p><b>Blocks, though never for long — see {@link #PATIENCE_MS}.</b> Not
+     * to be called from a thread that has a window on it; {@code TennaSigning}
+     * takes the decision about which those are.
      *
      * @return a result or a refusal, or {@link TennaSigning.Outcome#needsActivity}
      *         when only a prompt will settle it.
@@ -70,6 +115,55 @@ final class AndroidSigner {
             return TennaSigning.Outcome.needsActivity();
         }
 
+        Context app = context.getApplicationContext();
+        Future<TennaSigning.Outcome> asking =
+            ASKING.submit(() -> ask(app, packageName, accountPubkey, request));
+
+        try {
+            return asking.get(PATIENCE_MS, TimeUnit.MILLISECONDS);
+        } catch (Exception e) {
+            // Left running rather than cancelled, because cancelling it would
+            // not stop the binder call anyway. Its answer is simply nobody's.
+            Log.i(TAG, "Gave up waiting for " + packageName);
+            return TennaSigning.Outcome.needsActivity();
+        }
+    }
+
+    /**
+     * The same question as {@link #query}, asked on a thread of its own.
+     *
+     * <p>For a caller that has a window: it wants the quiet answer if there is
+     * one — the other signer may have been told to remember this, and then
+     * nobody needs to see anything — but finding that out is a call into
+     * another process and must not happen on the thread that draws.
+     *
+     * <p>{@code answer} is called on that other thread, once, whatever
+     * happens.
+     */
+    static void queryInBackground(
+        @NonNull Context context,
+        @NonNull String packageName,
+        @NonNull String accountPubkey,
+        @NonNull TennaSigning.Request request,
+        @NonNull Answer answer
+    ) {
+        Context app = context.getApplicationContext();
+        ASKING.execute(() -> answer.got(query(app, packageName, accountPubkey, request)));
+    }
+
+    /** What {@link #queryInBackground} comes back with. */
+    interface Answer {
+        void got(@NonNull TennaSigning.Outcome outcome);
+    }
+
+    /** The query itself, on a thread that is allowed to sit still. */
+    @NonNull
+    private static TennaSigning.Outcome ask(
+        @NonNull Context context,
+        @NonNull String packageName,
+        @NonNull String accountPubkey,
+        @NonNull TennaSigning.Request request
+    ) {
         Uri uri = Uri.parse("content://" + packageName + "." + request.method.authority);
 
         // The payload travels in the projection, which is an odd place for it
@@ -98,7 +192,7 @@ final class AndroidSigner {
 
             if (request.method == SignerTypes.Method.SIGN_EVENT) {
                 if (eventJson == null) return TennaSigning.Outcome.needsActivity();
-                return signed(eventJson, value);
+                return signed(accountPubkey, request.payload, eventJson, value);
             }
 
             return value == null
@@ -112,24 +206,37 @@ final class AndroidSigner {
         }
     }
 
+    // ── Checking the answer ──────────────────────────────────────────────────
+
     /**
      * A signed event from another signer, checked before it is passed on.
      *
      * <p>Verified rather than trusted, unlike a signature this app made
-     * itself: another process answered, and nothing but the signature says it
-     * is the app we asked. The client we hand it to will verify it too, and
-     * would rather be told now.
+     * itself: another process answered, and nothing but the bytes says what it
+     * answered with. Two separate questions, and both have to be yes — is this
+     * event really signed, and is it the event that was asked for.
      */
     @NonNull
-    private static TennaSigning.Outcome signed(@NonNull String eventJson, @Nullable String value) {
+    static TennaSigning.Outcome signed(
+        @NonNull String accountPubkey,
+        @NonNull String asked,
+        @NonNull String eventJson,
+        @Nullable String value
+    ) {
+        String wrong = mismatch(accountPubkey, asked, eventJson);
+        if (wrong != null) {
+            Log.w(TAG, "A signer app answered with " + wrong);
+            return TennaSigning.Outcome.error("The signer app answered with " + wrong);
+        }
+
         try {
-            org.json.JSONObject event = new org.json.JSONObject(eventJson);
+            JSONObject event = new JSONObject(eventJson);
             String id = event.optString("id", "");
             String pubkey = event.optString("pubkey", "");
             String sig = event.optString("sig", "");
 
-            org.json.JSONArray tags = event.optJSONArray("tags");
-            if (tags == null) tags = new org.json.JSONArray();
+            JSONArray tags = event.optJSONArray("tags");
+            if (tags == null) tags = new JSONArray();
 
             String computed = NostrCrypto.eventId(
                 pubkey, event.optLong("created_at", 0), event.optInt("kind", -1),
@@ -150,6 +257,77 @@ final class AndroidSigner {
         } catch (Exception e) {
             return TennaSigning.Outcome.error("The signer app returned an event that cannot be read");
         }
+    }
+
+    /**
+     * Whether the event that came back is the event that was asked for.
+     *
+     * <p>A signature only proves that somebody signed something. It does not
+     * say <em>who</em> — a signer holding several keys can answer as the wrong
+     * one, and a client that asked for an account and got a stranger's would
+     * be logged in as somebody it never named. And it does not say <em>what</em>
+     * — the sheet showed the user a kind, a body and a set of tags, and an
+     * answer nobody compared against those is an answer that consent does not
+     * bind. The relay AUTH case makes that concrete: its whole meaning is in a
+     * challenge tag.
+     *
+     * <p>{@code created_at} is deliberately not compared. A request may leave
+     * it out, in which case filling it in is the signer's job.
+     *
+     * @return null when it matches, or what is wrong with it, phrased to be
+     *         read by whoever asked.
+     */
+    @Nullable
+    static String mismatch(
+        @NonNull String accountPubkey,
+        @NonNull String asked,
+        @NonNull String eventJson
+    ) {
+        JSONObject want;
+        JSONObject have;
+        try {
+            want = new JSONObject(asked);
+            have = new JSONObject(eventJson);
+        } catch (Exception e) {
+            return "an event that cannot be read";
+        }
+
+        if (!accountPubkey.equalsIgnoreCase(have.optString("pubkey", ""))) {
+            return "a different account";
+        }
+        if (want.has("kind") && want.optInt("kind", -1) != have.optInt("kind", -2)) {
+            return "a different kind of event";
+        }
+        if (!want.optString("content", "").equals(have.optString("content", ""))) {
+            return "different content";
+        }
+        if (!tags(want).equals(tags(have))) {
+            return "different tags";
+        }
+
+        return null;
+    }
+
+    /** An event's tags as plain lists, for comparing one set to another. */
+    @NonNull
+    private static List<List<String>> tags(@NonNull JSONObject event) {
+        List<List<String>> tags = new ArrayList<>();
+
+        JSONArray outer = event.optJSONArray("tags");
+        if (outer == null) return tags;
+
+        for (int i = 0; i < outer.length(); i++) {
+            JSONArray tag = outer.optJSONArray(i);
+            if (tag == null) continue;
+
+            List<String> values = new ArrayList<>(tag.length());
+            for (int j = 0; j < tag.length(); j++) {
+                values.add(tag.optString(j, ""));
+            }
+            tags.add(values);
+        }
+
+        return tags;
     }
 
     @Nullable
@@ -195,14 +373,18 @@ final class AndroidSigner {
     /** What came back from that intent. */
     @NonNull
     static TennaSigning.Outcome read(
+        @NonNull String accountPubkey,
         @NonNull TennaSigning.Request request,
         @Nullable Intent data
     ) {
         if (data == null) return TennaSigning.Outcome.rejected();
 
         // A refusal is RESULT_OK with a flag, which is why the caller must not
-        // read a missing result as a crash.
-        if (data.getBooleanExtra("rejected", false)) {
+        // read a missing result as a crash. Read as either a boolean or the
+        // word: signers disagree, and a refusal misread as a failure is a
+        // standing "no" that gets asked again tomorrow.
+        if (data.getBooleanExtra("rejected", false)
+            || "true".equals(data.getStringExtra("rejected"))) {
             return TennaSigning.Outcome.rejected();
         }
 
@@ -214,7 +396,7 @@ final class AndroidSigner {
             if (eventJson == null || eventJson.isEmpty()) {
                 return TennaSigning.Outcome.error("The signer app returned no event");
             }
-            return signed(eventJson, value);
+            return signed(accountPubkey, request.payload, eventJson, value);
         }
 
         return value == null

@@ -252,13 +252,14 @@ final class TennaSigning {
         @NonNull Context context,
         @NonNull String accountPubkey,
         @Nullable String requesterId,
-        @NonNull Request request
+        @NonNull Request request,
+        boolean mayWait
     ) {
         switch (decide(context, accountPubkey, requesterId, request)) {
             case SignerApps.DENY:
                 return Outcome.rejected();
             case SignerApps.ALLOW:
-                return run(context, accountPubkey, request);
+                return run(context, accountPubkey, request, mayWait);
             default:
                 return Outcome.needsApproval();
         }
@@ -272,12 +273,21 @@ final class TennaSigning {
      * <p>No permission is consulted. Callers reach this either through
      * {@link #answer}, which has already checked, or straight from the user
      * pressing Allow, which is the check.
+     *
+     * @param mayWait whether this thread can afford to sit and wait on another
+     *                application. False for anything holding a window: the
+     *                answer may have to come from a signer app, and a binder
+     *                call into a cold process on the thread that draws is how
+     *                an app stops drawing. A caller that says no is told
+     *                {@link Outcome.Status#NEEDS_ACTIVITY} instead — which is
+     *                the thing it is uniquely able to act on anyway.
      */
     @NonNull
     static Outcome run(
         @NonNull Context context,
         @NonNull String accountPubkey,
-        @NonNull Request request
+        @NonNull Request request,
+        boolean mayWait
     ) {
         // Checked here rather than left to the cipher, which answers a missing
         // peer the same way it answers a bad MAC — with nothing — and this is
@@ -306,7 +316,9 @@ final class TennaSigning {
         String type = account == null ? "" : account.type;
 
         if (TennaAccounts.TYPE_ANDROID_SIGNER.equals(type)) {
-            return AndroidSigner.query(context, account.packageName, accountPubkey, request);
+            return mayWait
+                ? AndroidSigner.query(context, account.packageName, accountPubkey, request)
+                : Outcome.needsActivity();
         }
 
         if (!TennaKeys.has(context, accountPubkey)) {

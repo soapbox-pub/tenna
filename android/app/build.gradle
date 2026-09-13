@@ -57,6 +57,16 @@ android {
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }
     }
+    testOptions {
+        unitTests {
+            // The android.jar a unit test compiles against is all stubs, and
+            // every one of them throws. That is a sensible default for code
+            // that ought to be tested on a device, and the wrong one for a
+            // plain function that happens to log — `android.util.Log` alone
+            // would put the one thing worth pinning out of reach.
+            returnDefaultValues = true
+        }
+    }
 }
 
 repositories {

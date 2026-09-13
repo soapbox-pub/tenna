@@ -180,11 +180,6 @@ final class TennaAccounts {
         return accounts.isEmpty() ? null : accounts.get(0).pubkey;
     }
 
-    /** Whether anybody is signed in to answer as. */
-    static synchronized boolean anySignedIn(@NonNull Context context) {
-        return !all(context).isEmpty();
-    }
-
     /** {@code abcdef01…89abcdef}, for when there is no name to show. */
     @NonNull
     static String shorten(@NonNull String pubkey) {

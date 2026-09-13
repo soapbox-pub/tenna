@@ -149,10 +149,13 @@ function nsecFilename(npub: string): string {
  * the file it wrote is somewhere the user would not otherwise think to look.
  *
  * - **Android**: Credential Manager, and where there is no provider to answer
- *   — a de-Googled device with nothing registered — the key is written to the
- *   app's Documents folder instead, so that there is always *some* copy. That
- *   folder is private to Tenna and goes nowhere: `allowBackup` is off, so it
- *   is not in anyone's Drive either.
+ *   — a de-Googled device with nothing registered, which is a common enough
+ *   case to have been the one this was first tested on — the key is written to
+ *   the shared Documents folder instead, so that there is always *some* copy.
+ *   That folder is not private: it is the one the Files app opens on, which is
+ *   the point, and it is equally readable by anything the user has granted
+ *   storage access to. It is a plaintext key on disk, and it is only reached
+ *   for when the alternative is no copy of the key at all.
  * - **iOS**: the Keychain sheet, and nothing if it is dismissed. Deliberately
  *   no file fallback — iOS Documents is readable without authentication, and
  *   writing a plaintext key there after the user declined to save one would

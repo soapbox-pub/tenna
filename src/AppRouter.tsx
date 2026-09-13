@@ -59,23 +59,32 @@ export function AppRouter() {
   // Inside the router rather than in front of it, because the dialog it opens
   // for a user who already has a key is the app's own login dialog, and that
   // is a component of the app rather than of the gate.
+  //
+  // In place of the routes rather than over them. A full-screen overlay in
+  // front of a mounted wall is a stacking fight it does not reliably win —
+  // the search field is `z-50` and showed straight through the introduction —
+  // and it is the wrong shape besides: the wall would be querying relays and
+  // writing home screen shortcuts behind a screen nobody can see it through.
   return (
     <BrowserRouter>
       <DeepLinkHandler />
       <ScrollToTop />
-      {onboarding.show && <Onboarding onDone={onboarding.dismiss} />}
-      <Routes>
-        <Route path="/" element={<Index />} />
-        {/* Static, so it outranks the identifier route below whatever the
-            order here — but written above it anyway, since a reader ranks by
-            order and React Router does not. */}
-        <Route path="/settings" element={<SettingsPage />} />
-        <Route path="/settings/apps" element={<AuthorizedAppsPage />} />
-        {/* NIP-19 route for npub1, note1, naddr1, nevent1, nprofile1 */}
-        <Route path="/:nip19" element={<NIP19Page />} />
-        {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
-        <Route path="*" element={<NotFound />} />
-      </Routes>
+      {onboarding.show ? (
+        <Onboarding onDone={onboarding.dismiss} />
+      ) : (
+        <Routes>
+          <Route path="/" element={<Index />} />
+          {/* Static, so it outranks the identifier route below whatever the
+              order here — but written above it anyway, since a reader ranks by
+              order and React Router does not. */}
+          <Route path="/settings" element={<SettingsPage />} />
+          <Route path="/settings/apps" element={<AuthorizedAppsPage />} />
+          {/* NIP-19 route for npub1, note1, naddr1, nevent1, nprofile1 */}
+          <Route path="/:nip19" element={<NIP19Page />} />
+          {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
+          <Route path="*" element={<NotFound />} />
+        </Routes>
+      )}
     </BrowserRouter>
   );
 }

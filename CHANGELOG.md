@@ -1,5 +1,33 @@
 # Changelog
 
+## [0.6.0] - 2026-09-13
+
+Opening Tenna for the first time now explains itself before it asks for
+anything: what it is, what an account here is, and why the key is yours alone.
+From there it makes you one, keeps a copy wherever your phone keeps passwords,
+and lets you put a name and a face to it. Every screen of it can be skipped,
+because Tenna browses perfectly well signed out.
+
+### Added
+
+- An introduction, the first time Tenna is opened with nobody signed in. Three
+  screens that say what this is, what an account on this network is, and what a
+  key is — and then three that make you one. Skippable from every screen, and
+  anyone who already has a key can bring it instead.
+- A copy of your new key is handed to whatever your phone keeps passwords in,
+  so there is one that outlives this install. A phone with nothing registered
+  to keep passwords gets the key as a file in your Documents folder instead,
+  and Tenna says so. Saying no to the prompt is taken as an answer rather than
+  asked again.
+- A name and a picture, asked for once at the end of signing up. Twelve
+  pictures to pick from with one tap, or a photo of your own. Both optional,
+  both changeable from Settings forever afterwards.
+
+### Fixed
+
+- Messages from Tenna appeared under the status bar clock on a phone with no
+  browser chrome above them. They sit below it now.
+
 ## [0.5.0] - 2026-09-13
 
 Tenna can sign for other apps now. An app on this phone — or one running

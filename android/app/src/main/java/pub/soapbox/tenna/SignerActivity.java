@@ -27,8 +27,6 @@ import java.io.FileOutputStream;
 import java.util.ArrayDeque;
 import java.util.Collections;
 import java.util.Deque;
-import java.util.HashMap;
-import java.util.Map;
 
 /**
  * The screen another application's request appears on.
@@ -45,14 +43,15 @@ import java.util.Map;
  * Getting this the other way round is what makes background signing feel like
  * a signer app flashing on screen for every request.
  *
- * <p><b>Standard launch mode, and deliberately not {@code singleTask}:</b>
- * this activity runs inside the calling app's own task, which is what lets
- * {@code setResult} reach a client that used {@code startActivityForResult}
- * at all. It is not {@code singleTop} either — see the manifest — because an
- * activity hands back exactly one result, so an instance that collects a
- * second request has a caller it can never answer. A client that sets
- * {@code FLAG_ACTIVITY_SINGLE_TOP} still gets that behaviour, and {@link
- * #record} explains which of the answers the one result carries.
+ * <p>{@code singleTop}, and deliberately not {@code singleTask}: this activity
+ * runs inside the calling app's own task, which is what lets
+ * {@code setResult} reach a client that used {@code startActivityForResult} at
+ * all, and what puts the question over the caller rather than over a task of
+ * its own. NIP-55 asks for {@code singleTop} by name, so that a client sending
+ * several requests with {@code FLAG_ACTIVITY_SINGLE_TOP} gets them delivered
+ * to {@link #onNewIntent} and answered one after another without the window
+ * closing in between. An activity hands back exactly one result; {@link
+ * #record} says which of them it carries.
  */
 public class SignerActivity extends BridgeActivity {
 
@@ -142,14 +141,22 @@ public class SignerActivity extends BridgeActivity {
     private boolean callerSettled;
 
     /**
-     * What the user has already said in this window, by the bytes of the
-     * question.
+     * The intent {@link #onCreate} has already read, waiting to be ignored
+     * once.
      *
-     * <p>Scoped to the window on purpose: it is not a remembered grant, which
-     * is a deliberate act with a checkbox on it, but an answer to <em>this</em>
-     * question, seconds old, still on the screen it was given on.
+     * <p>Capacitor's {@code BridgeActivity.load()} ends by handing the launch
+     * intent to {@code onNewIntent}. For an ordinary Capacitor app that is the
+     * whole mechanism for a cold-start deep link — there is no bridge during
+     * {@code onCreate}, so there is nowhere to deliver it yet — and both of
+     * Tenna's other windows depend on it.
+     *
+     * <p>This one does not. It reads its intent before any bridge exists, on
+     * purpose, because most requests are answered without a WebView at all. So
+     * the replay is not a delivery here, it is the same request a second time:
+     * two identical questions, one of which has a caller that can no longer
+     * hear the answer, and a person pressing Allow twice to post one note.
      */
-    private final Map<String, Boolean> decidedHere = new HashMap<>();
+    @Nullable private Intent alreadyRead;
 
     /**
      * Requests already allowed, waiting on another signer app to do the work.
@@ -182,6 +189,7 @@ public class SignerActivity extends BridgeActivity {
         }
 
         boolean settled = intent == null || settle(intent, false);
+        alreadyRead = intent;
 
         // Nothing to draw is not the same as nothing to do: a request being
         // handed to another signer keeps this window alive with no WebView in
@@ -206,6 +214,14 @@ public class SignerActivity extends BridgeActivity {
         setIntent(intent);
 
         if (intent == null || intent.getData() == null) return;
+
+        // The launch intent coming back round, not a second request. Once, and
+        // only for the object `onCreate` read: anything else is a real client
+        // asking for something else. See the field.
+        if (intent == alreadyRead) {
+            alreadyRead = null;
+            return;
+        }
 
         // Deliberately not rate limited. A client batching requests into one
         // window is the case that machinery exists to permit, not the one it
@@ -439,12 +455,6 @@ public class SignerActivity extends BridgeActivity {
             );
         }
 
-        // Written down before anything is done about it, and whatever road
-        // the doing takes. An answer the user has given is given, and the
-        // queue behind this one is entitled to it even when this one has to
-        // go off to another signer before it can be honoured.
-        decidedHere.put(fingerprint(pending), allowed);
-
         TennaSigning.Outcome outcome;
         if (!allowed) {
             outcome = TennaSigning.Outcome.rejected();
@@ -477,42 +487,12 @@ public class SignerActivity extends BridgeActivity {
         pumpForwards();
     }
 
-    /**
-     * What identifies one question, for telling two of them apart.
-     *
-     * <p>Everything the user was shown and nothing else: who is asking, what
-     * they want done, and the exact bytes it would be done to.
-     */
-    @NonNull
-    private static String fingerprint(@NonNull Pending pending) {
-        TennaSigning.Request request = pending.request;
-        return (pending.requesterId == null ? "" : pending.requesterId)
-            + "\u0000" + request.method.wire
-            + "\u0000" + (request.peer == null ? "" : request.peer)
-            + "\u0000" + request.payload;
-    }
-
     /** Answer everything at the front of the queue that no longer needs asking. */
     private void drain() {
         Pending next = queue.peekFirst();
         while (next != null && next.accountPubkey != null && next.parsed != null) {
-            // The same question twice, in one window, seconds apart. Clients
-            // do send a request twice — a retry, or a second call for the same
-            // work — and asking a person the identical question again teaches
-            // them that answering is a formality. It is not a remembered
-            // grant: it dies with this window, and it only ever matches bytes
-            // the user has actually read.
-            Boolean said = decidedHere.get(fingerprint(next));
-
-            TennaSigning.Outcome outcome;
-            if (said == null) {
-                outcome = TennaSigning.answer(
-                    this, next.accountPubkey, next.requesterId, next.request, false);
-            } else if (said) {
-                outcome = TennaSigning.run(this, next.accountPubkey, next.request, false);
-            } else {
-                outcome = TennaSigning.Outcome.rejected();
-            }
+            TennaSigning.Outcome outcome = TennaSigning.answer(
+                this, next.accountPubkey, next.requesterId, next.request, false);
 
             if (outcome.status == TennaSigning.Outcome.Status.NEEDS_APPROVAL) break;
 
@@ -868,22 +848,13 @@ public class SignerActivity extends BridgeActivity {
      * <p>The id is in the URI rather than an extra so that two notifications
      * make two distinct {@code PendingIntent}s — extras alone do not tell them
      * apart, and the second would silently replace the first.
-     *
-     * <p>{@code SINGLE_TOP} because a second tap while the first is still
-     * being answered should join the queue rather than throw it away. Nothing
-     * is waiting on a result here — the answer goes back over a relay — so
-     * one window can hold as many of these as arrive. Stated on the intent
-     * because the activity itself is not {@code singleTop}; see the manifest
-     * for the app that taught us why.
      */
     @NonNull
     static Intent bunkerIntent(@NonNull android.content.Context context, @NonNull String requestId) {
         return new Intent(context, SignerActivity.class)
             .setAction(Intent.ACTION_VIEW)
             .setData(Uri.fromParts(BUNKER_SCHEME, requestId, null))
-            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK
-                | Intent.FLAG_ACTIVITY_CLEAR_TOP
-                | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
     }
 
     /** The request id a notification named, or null if this is not one. */

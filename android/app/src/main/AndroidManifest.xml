@@ -133,25 +133,18 @@
             Where another application asks Tenna to sign something. See
             SignerActivity.
 
-            Standard, and deliberately not singleTask: this activity runs
-            inside the calling app's own task. That is what lets a result
-            reach a client that used startActivityForResult — an activity
-            launched into a task of its own cannot return one — and it is what
-            puts the question over the app that asked rather than over a
-            window of Tenna's.
+            singleTop, which NIP-55 asks for by name, and deliberately not
+            singleTask: this activity runs inside the calling app's own task.
+            That is what lets a result reach a client that used
+            startActivityForResult — an activity launched into a task of its
+            own cannot return one — and it is what puts the question over the
+            app that asked rather than over a window of Tenna's. A client
+            sending several requests with FLAG_ACTIVITY_SINGLE_TOP gets them
+            delivered to onNewIntent and answered one after another.
 
-            Deliberately not singleTop either, which it was until it met an
-            app that sends several requests at once without asking to batch
-            them. An activity returns exactly one result, so every request
-            that lands in an instance already on screen is a request whose
-            caller never hears back: it waits forever, asks again, and the
-            person watching gets an endless queue of identical questions.
-            Standard gives each of those its own instance and its own answer.
-
-            Batching still works, because NIP-55 asks for it on the intent
-            rather than here: a client that sets FLAG_ACTIVITY_SINGLE_TOP gets
-            onNewIntent and one answer carrying `results`, which is a thing it
-            has opted into and knows how to read.
+            One window, one result: the extras answer the request that opened
+            it and the rest ride along in `results`, which is what a client
+            that batches knows to read. See SignerActivity.record.
 
             The scheme filter is browsable because a web page reaches a signer
             by navigating to one, which is the whole of NIP-55's web transport.
@@ -161,6 +154,7 @@
             android:name=".SignerActivity"
             android:label="@string/app_name"
             android:theme="@style/AppTheme.Signer"
+            android:launchMode="singleTop"
             android:excludeFromRecents="true"
             android:exported="true">
 

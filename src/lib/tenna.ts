@@ -68,6 +68,15 @@ export const DEFAULT_NSITES: DefaultNsite[] = [
   { pubkey: MK_FAIN_PUBKEY, identifier: 'polaroids' },
   { pubkey: CHADWICK_PUBKEY, identifier: 'espy' },
   { pubkey: JARED_LOGAN_PUBKEY, identifier: 'tombstone' },
+  { pubkey: CHADWICK_PUBKEY, identifier: 'follow-party' },
+  { pubkey: CHADWICK_PUBKEY, identifier: 'lufu' },
+  { pubkey: CHADWICK_PUBKEY, identifier: 'mi' },
+  { pubkey: CHADWICK_PUBKEY, identifier: 'nostrdamus' },
+  { pubkey: CHADWICK_PUBKEY, identifier: 'realms' },
+  { pubkey: CHADWICK_PUBKEY, identifier: 'sol' },
+  { pubkey: CHADWICK_PUBKEY, identifier: 'surveil' },
+  { pubkey: CHADWICK_PUBKEY, identifier: 'treasures' },
+  { pubkey: CHADWICK_PUBKEY, identifier: 'wordsoul' },
 ];
 
 /** Relay where the catalog's nsite manifests live. */

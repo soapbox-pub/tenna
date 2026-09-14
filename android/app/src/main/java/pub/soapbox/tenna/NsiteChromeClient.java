@@ -11,6 +11,7 @@ import android.util.Log;
 import android.util.TypedValue;
 import android.view.View;
 import android.view.ViewGroup;
+import android.webkit.GeolocationPermissions;
 import android.webkit.JsPromptResult;
 import android.webkit.JsResult;
 import android.webkit.MimeTypeMap;
@@ -81,6 +82,22 @@ final class NsiteChromeClient extends WebChromeClient {
      */
     private static final String KIND_CAMERA = "camera";
     private static final String KIND_MICROPHONE = "microphone";
+    private static final String KIND_LOCATION = "location";
+
+    /**
+     * The two ways Android will say yes to being asked where the device is.
+     *
+     * Both are named because the system offers the choice between them as one
+     * dialog with a precise/approximate toggle, and it only offers that toggle
+     * to an app that asked for both. Either answer is a yes — see
+     * {@link Grant#ANY} — since a site's {@code navigator.geolocation} works
+     * off the coarse grant, just less exactly, which is the user's call to
+     * make and not ours to overrule by refusing.
+     */
+    private static final String[] LOCATION_PERMISSIONS = {
+        Manifest.permission.ACCESS_COARSE_LOCATION,
+        Manifest.permission.ACCESS_FINE_LOCATION,
+    };
 
     /**
      * Starts an activity and reports back what it returned.
@@ -122,7 +139,24 @@ final class NsiteChromeClient extends WebChromeClient {
         void forSite(@NonNull String[] kinds, @NonNull Decision decision);
 
         /** Whether Tenna holds the Android permissions to provide them. */
-        void forApp(@NonNull String[] permissions, @NonNull Decision decision);
+        void forApp(@NonNull String[] permissions, @NonNull Grant grant, @NonNull Decision decision);
+    }
+
+    /**
+     * How many of the permissions named have to come back granted.
+     *
+     * {@code ALL} for a set that stands or falls together: {@code getUserMedia}
+     * asked for the camera and the microphone fails whole if either is
+     * refused, so half a grant would only produce a failure the user appeared
+     * to have agreed to.
+     *
+     * {@code ANY} for a set that is one capability written several ways, which
+     * on Android is location: coarse and fine are two answers to the same
+     * question, and the user picking the vaguer of them is still a yes.
+     */
+    enum Grant {
+        ALL,
+        ANY,
     }
 
     /** The answer to something that had to be asked. */
@@ -168,6 +202,12 @@ final class NsiteChromeClient extends WebChromeClient {
     /** The `getUserMedia` being decided, or null when none is. */
     @Nullable private PermissionRequest media;
 
+    /** The geolocation request being decided, or null when none is. */
+    @Nullable private GeolocationPermissions.Callback locating;
+
+    /** The origin that asked for it, which its reply has to name. */
+    @Nullable private String locatingOrigin;
+
     NsiteChromeClient(
         @NonNull Activity activity,
         @Nullable String siteName,
@@ -199,6 +239,7 @@ final class NsiteChromeClient extends WebChromeClient {
         dismiss();
         onHideCustomView();
         refuseMedia();
+        refuseLocation();
     }
 
     // -----------------------------------------------------------------------
@@ -262,7 +303,7 @@ final class NsiteChromeClient extends WebChromeClient {
      * this gives it back.
      */
     private void withCamera(@NonNull Decision decision) {
-        consent.forApp(new String[] { Manifest.permission.CAMERA }, decision);
+        consent.forApp(new String[] { Manifest.permission.CAMERA }, Grant.ALL, decision);
     }
 
     /** Show the device's file picker for what the site said it accepts. */
@@ -487,7 +528,7 @@ final class NsiteChromeClient extends WebChromeClient {
                 return;
             }
 
-            consent.forApp(permissionsFor(kinds), forApp -> {
+            consent.forApp(permissionsFor(kinds), Grant.ALL, forApp -> {
                 if (media != request) return;
                 media = null;
 
@@ -524,6 +565,87 @@ final class NsiteChromeClient extends WebChromeClient {
         // runtime permission, so it is never asked for.
         if (kinds.contains(KIND_MICROPHONE)) permissions.add(Manifest.permission.RECORD_AUDIO);
         return permissions.toArray(new String[0]);
+    }
+
+    // -----------------------------------------------------------------------
+    // Location
+    // -----------------------------------------------------------------------
+
+    /**
+     * A site calling {@code navigator.geolocation}.
+     *
+     * The same two questions as {@code getUserMedia}, in the same order and
+     * answered by the same sheet — but Chromium asks them down an entirely
+     * separate callback, with its own kind of reply, which is why none of the
+     * code above is reused. A {@link WebChromeClient} that does not override
+     * this never calls back at all, so the site's {@code getCurrentPosition}
+     * neither succeeds nor fails: it simply never answers, and neither
+     * handler the page passed is ever run. That is why a site asking where
+     * the user is appeared to do nothing whatsoever.
+     *
+     * <p>{@code retain} is false, always. Passing true would file the decision
+     * in the WebView's own per-origin store, which is consulted before this
+     * method is — so the next ask would be answered without Tenna hearing
+     * about it, out of a record the user cannot see in the site's permissions
+     * and cannot take back from there. What is remembered is remembered on
+     * Tenna's side, per site, or not at all.
+     */
+    @Override
+    public void onGeolocationPermissionsShowPrompt(
+        String origin,
+        GeolocationPermissions.Callback callback
+    ) {
+        // Only one at a time, and the newest wins — as with `getUserMedia`.
+        refuseLocation();
+        locating = callback;
+        locatingOrigin = origin;
+
+        consent.forSite(new String[] { KIND_LOCATION }, forSite -> {
+            if (locating != callback) return;
+
+            if (!forSite) {
+                answerLocation(false);
+                return;
+            }
+
+            consent.forApp(LOCATION_PERMISSIONS, Grant.ANY, forApp -> {
+                if (locating != callback) return;
+                answerLocation(forApp);
+            });
+        });
+    }
+
+    /**
+     * The request went away on its own — the page dropped it, or navigated.
+     *
+     * Cleared rather than answered, for the reason
+     * {@link #onPermissionRequestCanceled} clears rather than denies: there is
+     * nobody left waiting on the reply. Clearing it is also what tells the
+     * consent callbacks still in flight that the request they belong to is
+     * spent, so an answer arriving late is dropped instead of being invoked on
+     * a stale callback.
+     */
+    @Override
+    public void onGeolocationPermissionsHidePrompt() {
+        locating = null;
+        locatingOrigin = null;
+    }
+
+    /** Turn down whatever geolocation request is outstanding, if any. */
+    private void refuseLocation() {
+        answerLocation(false);
+    }
+
+    /** Hand Chromium the outcome, once, and forget the request. */
+    private void answerLocation(boolean granted) {
+        GeolocationPermissions.Callback callback = locating;
+        String origin = locatingOrigin;
+        locating = null;
+        locatingOrigin = null;
+
+        // The origin is the callback's first argument rather than something it
+        // remembers, so it has to be handed back exactly as it arrived.
+        if (callback != null) callback.invoke(origin == null ? "" : origin, granted, false);
     }
 
     // -----------------------------------------------------------------------

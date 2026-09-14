@@ -19,7 +19,7 @@
 // ---------------------------------------------------------------------------
 
 /** A capability of the device a site can ask for. */
-export type NsiteBrowserPermissionType = 'camera' | 'microphone';
+export type NsiteBrowserPermissionType = 'camera' | 'microphone' | 'location';
 
 /** A single remembered decision. */
 export interface NsiteBrowserPermission {
@@ -142,5 +142,7 @@ export function getBrowserPermissionLabel(
       return 'Use the camera';
     case 'microphone':
       return 'Use the microphone';
+    case 'location':
+      return 'Use your location';
   }
 }

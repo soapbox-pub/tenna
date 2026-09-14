@@ -56,6 +56,7 @@ import org.json.JSONObject;
 import java.io.ByteArrayOutputStream;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -139,16 +140,20 @@ public class NsiteWebViewPlugin extends Plugin {
     /** Who is waiting on the permissions that launcher asked for. */
     @Nullable private NsiteChromeClient.Decision permissionResult;
 
+    /** How many of them that waiter needs. See {@link NsiteChromeClient.Grant}. */
+    @NonNull private NsiteChromeClient.Grant permissionGrant = NsiteChromeClient.Grant.ALL;
+
     /**
-     * The `getUserMedia` requests the web layer is deciding, by id.
+     * The requests for something of the device's the web layer is deciding, by
+     * id.
      *
      * A map rather than a single slot because the answer comes back over the
      * bridge, and a request abandoned mid-prompt would otherwise strand the
      * next one behind it.
      */
-    private final Map<Integer, NsiteChromeClient.Decision> mediaRequests = new HashMap<>();
+    private final Map<Integer, NsiteChromeClient.Decision> capabilityRequests = new HashMap<>();
 
-    private int nextMediaId = 1;
+    private int nextCapabilityId = 1;
 
     /** The site's fullscreen video, while one is up. See {@link #presentFullscreen}. */
     @Nullable private View fullscreenView;
@@ -223,22 +228,40 @@ public class NsiteWebViewPlugin extends Plugin {
             }
         );
 
-        // Registered here for the same reason, and answered all-or-nothing:
-        // what asks for these is `getUserMedia`, which fails whole anyway.
+        // Registered here for the same reason. How the results add up is the
+        // caller's to say — see `NsiteChromeClient.Grant`.
         permissionLauncher = getBridge().registerForActivityResult(
             new ActivityResultContracts.RequestMultiplePermissions(),
             results -> {
                 NsiteChromeClient.Decision decision = permissionResult;
+                NsiteChromeClient.Grant grant = permissionGrant;
                 permissionResult = null;
                 if (decision == null) return;
 
-                boolean granted = true;
-                for (Boolean result : results.values()) {
-                    if (!Boolean.TRUE.equals(result)) granted = false;
-                }
-                decision.decided(granted);
+                decision.decided(satisfied(results.values(), grant));
             }
         );
+    }
+
+    /** Whether a set of permission answers adds up to a yes. */
+    private static boolean satisfied(
+        @NonNull Collection<Boolean> results,
+        @NonNull NsiteChromeClient.Grant grant
+    ) {
+        // An empty result is the system declining to ask at all, which is no
+        // under either rule.
+        if (results.isEmpty()) return false;
+
+        for (Boolean result : results) {
+            boolean held = Boolean.TRUE.equals(result);
+            if (grant == NsiteChromeClient.Grant.ANY) {
+                if (held) return true;
+            } else if (!held) {
+                return false;
+            }
+        }
+
+        return grant == NsiteChromeClient.Grant.ALL;
     }
 
     /**
@@ -251,27 +274,27 @@ public class NsiteWebViewPlugin extends Plugin {
      * The site is concealed for the duration by the same machinery every other
      * prompt uses, so nothing it draws can sit behind the decision.
      */
-    private void requestSiteMedia(
+    private void requestSiteCapability(
         @NonNull String[] kinds,
         @NonNull NsiteChromeClient.Decision decision
     ) {
-        int id = nextMediaId++;
-        mediaRequests.put(id, decision);
+        int id = nextCapabilityId++;
+        capabilityRequests.put(id, decision);
 
         JSObject event = new JSObject();
         event.put("id", id);
         event.put("kinds", new JSArray(Arrays.asList(kinds)));
-        notifyListeners("nsiteMedia", event);
+        notifyListeners("nsiteCapability", event);
     }
 
-    /** The web layer's answer to a request raised as `nsiteMedia`. */
+    /** The web layer's answer to a request raised as `nsiteCapability`. */
     @PluginMethod
-    public void respondMedia(PluginCall call) {
+    public void respondCapability(PluginCall call) {
         Integer id = call.getInt("id");
         boolean granted = Boolean.TRUE.equals(call.getBoolean("granted", false));
 
         getActivity().runOnUiThread(() -> {
-            NsiteChromeClient.Decision decision = id == null ? null : mediaRequests.remove(id);
+            NsiteChromeClient.Decision decision = id == null ? null : capabilityRequests.remove(id);
             if (decision != null) decision.decided(granted);
             call.resolve();
         });
@@ -285,6 +308,7 @@ public class NsiteWebViewPlugin extends Plugin {
      */
     private void requestAppPermissions(
         @NonNull String[] permissions,
+        @NonNull NsiteChromeClient.Grant grant,
         @NonNull NsiteChromeClient.Decision decision
     ) {
         if (permissions.length == 0) {
@@ -292,14 +316,15 @@ public class NsiteWebViewPlugin extends Plugin {
             return;
         }
 
-        boolean held = true;
+        List<Boolean> held = new ArrayList<>(permissions.length);
         for (String permission : permissions) {
-            if (ContextCompat.checkSelfPermission(getContext(), permission)
-                != PackageManager.PERMISSION_GRANTED) {
-                held = false;
-            }
+            held.add(ContextCompat.checkSelfPermission(getContext(), permission)
+                == PackageManager.PERMISSION_GRANTED);
         }
-        if (held) {
+        // Read by the same rule the system's answer will be, so that a user
+        // who has already granted the approximate half of location is not
+        // asked again for the precise one.
+        if (satisfied(held, grant)) {
             decision.decided(true);
             return;
         }
@@ -315,6 +340,7 @@ public class NsiteWebViewPlugin extends Plugin {
         // hang the site's `getUserMedia` for good.
         NsiteChromeClient.Decision waiting = permissionResult;
         permissionResult = decision;
+        permissionGrant = grant;
         if (waiting != null) waiting.decided(false);
 
         launcher.launch(permissions);
@@ -853,8 +879,10 @@ public class NsiteWebViewPlugin extends Plugin {
         // Anything still being decided is decided against. The site is going,
         // and a `getUserMedia` left waiting on a prompt nobody can answer
         // would never settle.
-        for (NsiteChromeClient.Decision decision : mediaRequests.values()) decision.decided(false);
-        mediaRequests.clear();
+        for (NsiteChromeClient.Decision decision : capabilityRequests.values()) {
+            decision.decided(false);
+        }
+        capabilityRequests.clear();
         permissionResult = null;
         if (chrome != null) chrome.release();
         // A file half written is closed and taken away, rather than left
@@ -909,6 +937,13 @@ public class NsiteWebViewPlugin extends Plugin {
         settings.setMediaPlaybackRequiresUserGesture(false);
         settings.setSupportMultipleWindows(false);
 
+        // Stated rather than left to the default, which is this but has been
+        // both. Nothing is given away by it: `navigator.geolocation` still
+        // has to get past the site's own prompt and Android's — see
+        // NsiteChromeClient — and turning it off here would refuse the site
+        // before anyone was asked.
+        settings.setGeolocationEnabled(true);
+
         // Without this the viewport meta is ignored, which would take
         // `viewport-fit=cover` — the whole point — with it.
         settings.setUseWideViewPort(true);
@@ -940,12 +975,16 @@ public class NsiteWebViewPlugin extends Plugin {
             new NsiteChromeClient.Consent() {
                 @Override
                 public void forSite(@NonNull String[] kinds, @NonNull NsiteChromeClient.Decision decision) {
-                    requestSiteMedia(kinds, decision);
+                    requestSiteCapability(kinds, decision);
                 }
 
                 @Override
-                public void forApp(@NonNull String[] permissions, @NonNull NsiteChromeClient.Decision decision) {
-                    requestAppPermissions(permissions, decision);
+                public void forApp(
+                    @NonNull String[] permissions,
+                    @NonNull NsiteChromeClient.Grant grant,
+                    @NonNull NsiteChromeClient.Decision decision
+                ) {
+                    requestAppPermissions(permissions, grant, decision);
                 }
             },
             this::presentFullscreen);

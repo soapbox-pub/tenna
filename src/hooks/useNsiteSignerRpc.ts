@@ -68,15 +68,15 @@ interface UseNsiteSignerRpcResult {
   /** The `onRpc` callback to pass to `<Nsite>`. Transport-agnostic. */
   onRpc: (method: string, params: unknown) => Promise<unknown>;
   /**
-   * The `onMedia` callback to pass to `<Nsite>`.
+   * The `onCapability` callback to pass to `<Nsite>`.
    *
-   * Not an RPC call — `getUserMedia` is asked of the browser rather than of
-   * the host, and reaches this from the native chrome client rather than over
-   * the provider's channel. It lives here anyway, because what it needs is
-   * this hook's prompt: one question on screen at a time, whichever of the
-   * two kinds of question it is.
+   * Not an RPC call — `getUserMedia` and `navigator.geolocation` are asked of
+   * the browser rather than of the host, and reach this from the native chrome
+   * client rather than over the provider's channel. It lives here anyway,
+   * because what it needs is this hook's prompt: one question on screen at a
+   * time, whichever of the two kinds of question it is.
    */
-  onMedia: (kinds: NsiteBrowserPermissionType[]) => Promise<boolean>;
+  onCapability: (kinds: NsiteBrowserPermissionType[]) => Promise<boolean>;
   /** Current pending prompt, or null if no prompt is active. */
   pendingPrompt: NsitePromptState | null;
   /** Call this to resolve the current prompt. */
@@ -160,7 +160,8 @@ export function useNsiteSignerRpc({
   );
 
   /**
-   * Whether the site may reach the camera or the microphone.
+   * Whether the site may reach something of the device's — the camera, the
+   * microphone, where the user is.
    *
    * Deliberately not `checkPermission`. That one refuses outright when nobody
    * is signed in, which is right for every question it answers — they are all
@@ -170,9 +171,10 @@ export function useNsiteSignerRpc({
    *
    * All of what was asked for, or none of it. `getUserMedia({video, audio})`
    * fails whole if either is refused, so granting half of it would only
-   * produce a failure the user had apparently agreed to.
+   * produce a failure the user had apparently agreed to. Nothing else asks for
+   * more than one capability at a time.
    */
-  const onMedia = useCallback(
+  const onCapability = useCallback(
     async (kinds: NsiteBrowserPermissionType[]): Promise<boolean> => {
       if (kinds.length === 0) return false;
 
@@ -372,5 +374,5 @@ export function useNsiteSignerRpc({
     [user, checkPermission, siteId, siteName],
   );
 
-  return { onRpc, onMedia, pendingPrompt, resolvePrompt };
+  return { onRpc, onCapability, pendingPrompt, resolvePrompt };
 }

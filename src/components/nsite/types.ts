@@ -35,14 +35,15 @@ export interface NsiteFrameProps {
   /** Handle a NIP-07 signer call from the site. */
   onRpc?: (method: string, params: unknown) => Promise<unknown>;
   /**
-   * Decide whether the site may reach the camera or the microphone.
+   * Decide whether the site may reach something of the device's — the camera,
+   * the microphone, where the user is.
    *
    * Unlike {@link onRpc} this is not withheld from a logged-out reader: what
    * it answers for is the device, not an identity. An implementation that has
    * no say in the matter ignores it — in an iframe the browser asks on its own
    * behalf, and only a frame that owns its WebView is ever consulted.
    */
-  onMedia?: (kinds: NsiteBrowserPermissionType[]) => Promise<boolean>;
+  onCapability?: (kinds: NsiteBrowserPermissionType[]) => Promise<boolean>;
   /** Called once the site's document has been served and is on its way. */
   onLoad?: () => void;
   /**

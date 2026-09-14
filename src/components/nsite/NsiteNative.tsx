@@ -5,7 +5,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { NsiteFrameProps } from '@/components/nsite/types';
 import { supportsNappPush } from '@/lib/nappPushPlugin';
 import { buildManifest, resolveServers } from '@/lib/nsiteFiles';
-import { NsiteWebView, type NsiteMediaEvent, type NsiteRpcEvent } from '@/lib/nsiteNativePlugin';
+import { NsiteWebView, type NsiteCapabilityEvent, type NsiteRpcEvent } from '@/lib/nsiteNativePlugin';
 import { getNsiteNostrProviderScript } from '@/lib/nsiteNostrProvider';
 import type { NsiteShareDelivery } from '@/lib/nsiteShareTarget';
 import { getNsiteSubdomain } from '@/lib/nsiteSubdomain';
@@ -30,7 +30,7 @@ export function NsiteNative({
   name,
   pubkey,
   onRpc,
-  onMedia,
+  onCapability,
   onLoad,
   concealed,
   closing,
@@ -41,7 +41,7 @@ export function NsiteNative({
   // Kept in refs so the open/close effect depends on the site alone. A
   // re-render must never tear down a loaded site and start it over.
   const onRpcRef = useRef(onRpc);
-  const onMediaRef = useRef(onMedia);
+  const onCapabilityRef = useRef(onCapability);
   const onLoadRef = useRef(onLoad);
   const onCloseRef = useRef(onRequestClose);
   // A picture of the site, held for as long as the site itself is hidden.
@@ -66,7 +66,7 @@ export function NsiteNative({
   // from the one already delivered.
   const openedShare = useRef(entry);
   useEffect(() => { onRpcRef.current = onRpc; }, [onRpc]);
-  useEffect(() => { onMediaRef.current = onMedia; }, [onMedia]);
+  useEffect(() => { onCapabilityRef.current = onCapability; }, [onCapability]);
   useEffect(() => { onLoadRef.current = onLoad; }, [onLoad]);
   useEffect(() => { onCloseRef.current = onRequestClose; }, [onRequestClose]);
   useEffect(() => { shareRef.current = entry; }, [entry]);
@@ -89,16 +89,17 @@ export function NsiteNative({
       }
     };
 
-    // `getUserMedia`, which the WebView asks about rather than the site. A
-    // frame with nobody to ask refuses: silence would leave the site's
-    // `getUserMedia` hanging forever, which is worse than a no.
-    const handleMedia = async ({ id, kinds }: NsiteMediaEvent) => {
-      const handler = onMediaRef.current;
+    // The camera, the microphone, where the user is: things the WebView asks
+    // about rather than the site. A frame with nobody to ask refuses, because
+    // silence would leave whatever the site called hanging forever, which is
+    // worse than a no.
+    const handleCapability = async ({ id, kinds }: NsiteCapabilityEvent) => {
+      const handler = onCapabilityRef.current;
       try {
         const granted = handler ? await handler(kinds) : false;
-        await NsiteWebView.respondMedia({ id, granted });
+        await NsiteWebView.respondCapability({ id, granted });
       } catch {
-        await NsiteWebView.respondMedia({ id, granted: false });
+        await NsiteWebView.respondCapability({ id, granted: false });
       }
     };
 
@@ -106,7 +107,7 @@ export function NsiteNative({
       listeners.push(
         await NsiteWebView.addListener('nsiteLoad', () => onLoadRef.current?.()),
         await NsiteWebView.addListener('nsiteRpc', (e) => { void handleRpc(e); }),
-        await NsiteWebView.addListener('nsiteMedia', (e) => { void handleMedia(e); }),
+        await NsiteWebView.addListener('nsiteCapability', (e) => { void handleCapability(e); }),
       );
 
       // A late unmount would otherwise leave a WebView with no owner.

@@ -11,10 +11,18 @@ export interface NsiteRpcEvent {
   params: string;
 }
 
-/** The site called `getUserMedia` and the WebView wants an answer. */
-export interface NsiteMediaEvent {
+/**
+ * The site reached for something of the device's and the WebView wants an
+ * answer.
+ *
+ * One event for every such question, however the site asked it — Chromium
+ * routes `getUserMedia` and `navigator.geolocation` through quite different
+ * callbacks, but what is being decided is the same thing, and it is decided
+ * in the same sheet and written down in the same place.
+ */
+export interface NsiteCapabilityEvent {
   id: number;
-  /** What it asked for: `camera`, `microphone`, or both. */
+  /** What it asked for: `camera`, `microphone`, `location`, or several. */
   kinds: NsiteBrowserPermissionType[];
 }
 
@@ -80,14 +88,14 @@ export interface NsiteWebViewPlugin {
   setConcealed(options: { concealed: boolean; still?: boolean }): Promise<{ still?: string }>;
 
   /**
-   * Answer a request previously raised as `nsiteMedia`.
+   * Answer a request previously raised as `nsiteCapability`.
    *
    * `granted` says only what the *site* was allowed. Whether Tenna itself may
    * reach the camera is Android's question, asked afterwards and natively —
    * there is no point putting the OS prompt in front of someone who has not
    * yet said the site can have it.
    */
-  respondMedia(options: { id: number; granted: boolean }): Promise<void>;
+  respondCapability(options: { id: number; granted: boolean }): Promise<void>;
 
   /** Answer a call previously raised as `nsiteRpc`. */
   respond(options: {
@@ -109,8 +117,8 @@ export interface NsiteWebViewPlugin {
   ): Promise<PluginListenerHandle>;
 
   addListener(
-    event: 'nsiteMedia',
-    handler: (event: NsiteMediaEvent) => void,
+    event: 'nsiteCapability',
+    handler: (event: NsiteCapabilityEvent) => void,
   ): Promise<PluginListenerHandle>;
 
   /**

@@ -176,7 +176,7 @@ export function NsiteViewer({
             onRpc={user ? signerRpc.onRpc : undefined}
             // Not gated on being signed in, unlike the signer: what this
             // answers for is the device, and a logged-out reader has one.
-            onMedia={signerRpc.onMedia}
+            onCapability={signerRpc.onCapability}
             onLoad={handleLoad}
             // A frame that owns its own pixels has to get out of the way of
             // the prompt, which the viewer draws over it.

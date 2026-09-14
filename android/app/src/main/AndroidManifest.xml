@@ -275,6 +275,22 @@
     <uses-feature android:name="android.hardware.camera.autofocus" android:required="false" />
     <uses-feature android:name="android.hardware.microphone" android:required="false" />
 
+    <!--
+        What a site's `navigator.geolocation` reaches, on the same terms: the
+        site has to have been allowed it first, and Android asked after that.
+
+        Both are declared because the system only offers the choice between
+        precise and approximate to an app that asked for both, and either
+        answer is a yes — a coarse fix is a less exact one, not a refusal. See
+        NsiteChromeClient.
+
+        Not required hardware, for the reason the camera isn't.
+    -->
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-feature android:name="android.hardware.location" android:required="false" />
+    <uses-feature android:name="android.hardware.location.gps" android:required="false" />
+
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />

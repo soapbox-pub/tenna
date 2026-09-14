@@ -1,4 +1,4 @@
-import { Bell, Camera, KeyRound, Link2, Lock, Mic, Pen, UserRound } from 'lucide-react';
+import { Bell, Camera, KeyRound, Link2, Lock, MapPin, Mic, Pen, UserRound } from 'lucide-react';
 import type { ReactNode } from 'react';
 
 import { getKindLabel } from '@/lib/kindLabels';
@@ -9,7 +9,7 @@ import { getKindLabel } from '@/lib/kindLabels';
  * A site in a window, an app on the phone, and a client on the other end of a
  * relay ask the same questions about the same key, so they get the same
  * vocabulary and the same sheet. The last three are the ones only an
- * application can ask; the two device permissions are ones only a site can.
+ * application can ask; the three device permissions are ones only a site can.
  */
 export type PermissionKind =
   | 'signEvent'
@@ -20,6 +20,7 @@ export type PermissionKind =
   | 'push'
   | 'camera'
   | 'microphone'
+  | 'location'
   | 'getPublicKey'
   | 'decryptZapEvent'
   | 'connect';
@@ -41,6 +42,8 @@ export function permissionIcon(type: PermissionKind): ReactNode {
       return <Camera className="size-5 text-rose-500" />;
     case 'microphone':
       return <Mic className="size-5 text-rose-500" />;
+    case 'location':
+      return <MapPin className="size-5 text-rose-500" />;
     case 'getPublicKey':
       return <UserRound className="size-5 text-sky-500" />;
     case 'connect':
@@ -66,6 +69,8 @@ export function permissionTitle(type: PermissionKind, kind: number | null): stri
       return 'Use the camera';
     case 'microphone':
       return 'Use the microphone';
+    case 'location':
+      return 'Use your location';
     case 'getPublicKey':
       return 'See who you are';
     case 'decryptZapEvent':
@@ -91,6 +96,8 @@ export function permissionDescription(type: PermissionKind): string {
       return 'This app wants to see through your camera while you are using it.';
     case 'microphone':
       return 'This app wants to hear through your microphone while you are using it.';
+    case 'location':
+      return 'This app wants to know where you are while you are using it.';
     case 'getPublicKey':
       return 'This app wants to know which account you are signed in as. It cannot sign anything with the answer.';
     case 'decryptZapEvent':

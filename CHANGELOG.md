@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.7.0] - 2026-09-14
+
+A site can ask where you are. A map, a geocache, anything that wants your
+location asks for it the way it asks for the camera — a sheet over the site,
+remembered for that site alone, and taken back whenever you like. Until now a
+site that asked was never answered at all, so it looked like nothing happened.
+
+### Added
+
+- Sites can use your location, on Android. The question comes up as the same
+  sheet the camera and the microphone get, the phone asks its own afterwards,
+  and the answer is kept for that one site and revoked from the shield menu
+  over it. Saying yes to an approximate position is a yes; the site is told
+  where you are, less exactly.
+
 ## [0.6.1] - 2026-09-14
 
 Nine more of Chadwick's sites come on a fresh wall — a love calculator, an

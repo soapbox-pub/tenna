@@ -79,6 +79,14 @@ interface UseNsiteSignerRpcResult {
   onCapability: (kinds: NsiteBrowserPermissionType[]) => Promise<boolean>;
   /** Current pending prompt, or null if no prompt is active. */
   pendingPrompt: NsitePromptState | null;
+  /**
+   * Which question that is — distinct for every one asked.
+   *
+   * The sheet is keyed on it so that a prompt answered and immediately
+   * followed by the next one in the queue starts over rather than inheriting
+   * the last answer's "Remember for this site".
+   */
+  pendingPromptId: number;
   /** Call this to resolve the current prompt. */
   resolvePrompt: (decision: NsitePromptDecision) => void;
 }
@@ -94,36 +102,67 @@ export function useNsiteSignerRpc({
   const { user } = useCurrentUser();
   const [pendingPrompt, setPendingPrompt] = useState<NsitePromptState | null>(null);
 
-  // Ref to the resolve/reject pair for the current prompt, so the prompt UI
-  // can resolve it without a stale closure.
-  const promptResolverRef = useRef<{
+  /**
+   * The questions waiting to be asked, oldest first, the one on screen at the
+   * head. Each carries the resolver for the caller parked on it, so the prompt
+   * UI can answer it without a stale closure.
+   *
+   * A queue rather than a single slot, because two of these can genuinely be
+   * outstanding at once. RPC calls arrive one at a time — the injected
+   * provider script serialises them — but a capability request does not come
+   * that way: `getUserMedia` and `navigator.geolocation` are asked of the
+   * WebView, reach {@link onCapability} over the native event channel, and
+   * nothing upstream orders them. A site that wants the microphone and where
+   * the user is on the same page load raises both within a few milliseconds.
+   *
+   * Overwriting a single slot in that case dropped the first question on the
+   * floor: its resolver was replaced before anyone answered it, so its promise
+   * never settled, `respondCapability` was never called, and the native
+   * `Decision` behind it — a `GeolocationPermissions.Callback` — was left
+   * holding a `getCurrentPosition` that neither succeeded nor failed. Which is
+   * the same silence the geolocation handler was added to end, arriving by a
+   * different route.
+   */
+  const promptQueueRef = useRef<Array<{
+    id: number;
+    state: NsitePromptState;
     resolve: (decision: NsitePromptDecision) => void;
-    reject: (err: Error) => void;
-  } | null>(null);
+  }>>([]);
+
+  const nextPromptId = useRef(1);
+  const [pendingPromptId, setPendingPromptId] = useState(0);
 
   /**
    * Show a permission prompt and wait for the user's decision.
-   * Only one prompt is active at a time (enforced by the injected script's
-   * serial queue — it only sends one RPC at a time).
+   *
+   * One is on screen at a time; the rest wait their turn rather than being
+   * discarded.
    */
   const showPrompt = useCallback(
     (state: NsitePromptState): Promise<NsitePromptDecision> => {
-      return new Promise<NsitePromptDecision>((resolve, reject) => {
-        promptResolverRef.current = { resolve, reject };
-        setPendingPrompt(state);
+      return new Promise<NsitePromptDecision>((resolve) => {
+        const id = nextPromptId.current++;
+        promptQueueRef.current.push({ id, state, resolve });
+        // Only the head is displayed. Anything behind it is shown when the one
+        // in front has been answered.
+        if (promptQueueRef.current.length === 1) {
+          setPendingPrompt(state);
+          setPendingPromptId(id);
+        }
       });
     },
     [],
   );
 
-  /** Resolve the current prompt with the user's decision. */
+  /** Resolve the prompt on screen and bring up whatever was behind it. */
   const resolvePrompt = useCallback(
     (decision: NsitePromptDecision) => {
-      if (promptResolverRef.current) {
-        promptResolverRef.current.resolve(decision);
-        promptResolverRef.current = null;
-      }
-      setPendingPrompt(null);
+      const answered = promptQueueRef.current.shift();
+      answered?.resolve(decision);
+
+      const next = promptQueueRef.current[0];
+      setPendingPrompt(next?.state ?? null);
+      setPendingPromptId(next?.id ?? 0);
     },
     [],
   );
@@ -374,5 +413,5 @@ export function useNsiteSignerRpc({
     [user, checkPermission, siteId, siteName],
   );
 
-  return { onRpc, onCapability, pendingPrompt, resolvePrompt };
+  return { onRpc, onCapability, pendingPrompt, pendingPromptId, resolvePrompt };
 }

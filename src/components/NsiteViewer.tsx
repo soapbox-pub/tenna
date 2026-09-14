@@ -227,6 +227,10 @@ export function NsiteViewer({
             asking about something else as far as anyone reading could tell. */}
         {signerRpc.pendingPrompt && (
           <NsitePermissionPrompt
+            // One question per sheet: keyed so that the next one in the queue
+            // is asked fresh rather than wearing the previous answer's
+            // "Remember for this site".
+            key={signerRpc.pendingPromptId}
             identity={identity}
             prompt={signerRpc.pendingPrompt}
             onResolve={signerRpc.resolvePrompt}

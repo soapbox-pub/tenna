@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.6.1] - 2026-09-14
+
+Nine more of Chadwick's sites come on a fresh wall — a love calculator, an
+archive of your own posts, a 3D world, geocaching, and more. As ever, every one
+of them can be moved or taken off.
+
+### Added
+
+- Follow Party, Nostr Love Calculator, Mi, Nostrdamus, Realms, Sol, Surveil,
+  Treasures and Wordsoul, all by Chadwick, on a fresh wall.
+
 ## [0.6.0] - 2026-09-13
 
 Opening Tenna for the first time now explains itself before it asks for

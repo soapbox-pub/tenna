@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.7.1] - 2026-09-14
+
+A site that wanted two things at once only ever got asked about one of them.
+Birdstar asks for the microphone and for where you are the moment it opens, and
+the second question quietly replaced the first — so the site sat waiting on an
+answer that was never coming, and reported your location as unavailable. Both
+questions are now asked, one after the other.
+
+### Fixed
+
+- A site asking for two things at the same moment is asked about both. Before,
+  the second sheet replaced the first and the site was left waiting forever on
+  the one that vanished — most visibly on sites that want the microphone and
+  your location as soon as they open, where location simply never came up.
+
 ## [0.7.0] - 2026-09-14
 
 A site can ask where you are. A map, a geocache, anything that wants your

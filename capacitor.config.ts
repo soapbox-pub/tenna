@@ -10,7 +10,18 @@ const config: CapacitorConfig = {
   webDir: 'dist',
   server: {
     androidScheme: 'https',
-    iosScheme: 'https',
+    // No `iosScheme`. Capacitor serves the app off a scheme it registers a
+    // WKURLSchemeHandler for, and WKWebView already owns http and https, so
+    // they are the two values this may not take — setting it to 'https' here
+    // was silently ignored and the app loaded from `capacitor://localhost`
+    // regardless. Android has no such restriction, which is why
+    // `androidScheme` above is real and this is not.
+    //
+    // It is not cosmetic. WebKit exposes `navigator.serviceWorker` only to
+    // http(s) documents, and a custom-scheme top level withholds it from the
+    // whole frame tree — including cross-origin https children. That is why
+    // the iframe.diy sandbox never completes its handshake on iOS: the frame
+    // sends `ready` only `if ("serviceWorker" in navigator)`. See `Nsite`.
   },
   android: {
     // Disallow loading mixed-content (http:// inside https://).
@@ -31,9 +42,11 @@ const config: CapacitorConfig = {
     // `never` prevents WKWebView from inset-adjusting scroll content — the
     // app handles safe-area insets itself in CSS via env(safe-area-inset-*).
     contentInset: 'never',
-    // Custom URL scheme for deep-links (e.g. `myapp://…`) — match this
-    // in your Info.plist CFBundleURLSchemes.
-    scheme: 'Tenna',
+    // No `scheme` key here. Despite the name it is not a URL scheme at all —
+    // it names the *Xcode build scheme* `npx cap run ios` should build, and
+    // the generated project's only scheme is `App`, so naming anything else
+    // breaks that command. The deep-link schemes are declared where they
+    // actually belong, in `CFBundleURLTypes` in `ios/App/App/Info.plist`.
   },
   plugins: {
     SystemBars: {

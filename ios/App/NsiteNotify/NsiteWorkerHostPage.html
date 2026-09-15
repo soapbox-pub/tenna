@@ -1,0 +1,57 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>tenna</title>
+<!--
+  The document that starts an nsite's worker, and nothing else.
+
+  Tenna's page, at the site's origin, because only a document at the worker's
+  origin can make one. The site never sees it: it is served from a path under
+  `/.tenna/`, it is thrown away with the WebView it was made for, and no part
+  of the site is loaded into it.
+-->
+<script>
+(function() {
+  'use strict';
+
+  var host = window.webkit.messageHandlers.tenna;
+
+  function tell(message) {
+    try {
+      host.postMessage(JSON.stringify(message));
+    } catch (err) {
+      // Nothing to report it to; the native side has its own timeout.
+    }
+  }
+
+  tell({ __tenna: 'trace', message: 'page running' });
+
+  var worker;
+  try {
+    worker = new Worker(%%WORKER%%);
+  } catch (err) {
+    tell({ __tenna: 'error', message: 'new Worker: ' + String(err) });
+    return;
+  }
+
+  tell({ __tenna: 'trace', message: 'worker constructed' });
+
+  worker.onmessage = function(event) {
+    var message = event.data;
+    if (!message || typeof message !== 'object' || !message.__tenna) return;
+    tell(message);
+  };
+
+  worker.onerror = function(event) {
+    tell({ __tenna: 'error', message: String((event && event.message) || 'the worker script failed') });
+  };
+
+  // Called natively once the *worker* says it is ready, which the shim only
+  // says once the site's script has run and been walked through `install` and
+  // `activate`. This page has no idea when that is, so it does not guess: the
+  // shim's own `ready` goes out through the relay above like any other
+  // message, and the native side waits for it.
+  window.__tennaDeliver = function(json) {
+    worker.postMessage(JSON.parse(json));
+  };
+})();
+</script>

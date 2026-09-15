@@ -1,0 +1,299 @@
+import Foundation
+import WebKit
+
+/**
+ Runs an nsite's service worker, with no window and no app around it.
+
+ The iOS answer to `NappWakeWebView.java`, and it exists for the same reason:
+ nothing native can start a service worker, only a document at the worker's
+ origin can. So there is a document — one of Tenna's, at the site's origin,
+ whose whole job is to make the worker and carry messages to and from it.
+
+ Where Android's lives in a foreground service that is already running, this
+ one is built from nothing inside a `UNNotificationServiceExtension`, which is
+ the only code iOS will run before a notification is shown. Everything about
+ the shape below follows from that: there are about thirty seconds, a hard
+ memory ceiling, and exactly one chance.
+
+ What runs is not a real service worker — WebKit will not register one for a
+ document whose scheme is not http or https, and `WKWebView` will not let us
+ answer for either. It is a dedicated worker with `registration`, `clients` and
+ the push events shimmed around it, which is what `NsiteWorkerShim.js` is. The
+ site's own script is what decides what the notification says, which is the
+ whole point.
+ */
+@MainActor
+final class NsiteWorkerHost: NSObject, WKScriptMessageHandler, WKNavigationDelegate {
+
+    /// What a worker asked to be shown.
+    struct Notification {
+        let title: String
+        let body: String
+        let tag: String
+    }
+
+    /// The path the host page is served on. Tenna's, not the site's, so it is
+    /// under a prefix a site has no business publishing to.
+    static let hostPath = "/.tenna/worker-host"
+
+    /// The marker that asks for a worker script wrapped in the shim.
+    static let shimQuery = "__tenna_sw"
+
+    /// Answers a path with bytes and a content type, or nil for 404.
+    typealias Serve = (_ path: String, _ shimmed: Bool) -> (Data, String)?
+
+    private let siteId: String
+    private let serve: Serve
+
+    private var webView: WKWebView?
+    private var continuation: CheckedContinuation<[Notification], Never>?
+    private var notifications: [Notification] = []
+    private var failure: String?
+    /// The push to hand over once the page says it has a worker.
+    private var pending: String?
+
+    init(siteId: String, serve: @escaping Serve) {
+        self.siteId = siteId
+        self.serve = serve
+        super.init()
+    }
+
+    // MARK: - Delivery
+
+    /**
+     Hand the worker one push and collect what it asks to show.
+
+     Returns whatever `showNotification` was called with before every
+     `waitUntil` settled, or nothing at all if the worker had no opinion, threw,
+     or ran out of time. The caller treats all three the same way: the
+     notification the server sent is what the user sees.
+     */
+    func deliver(push json: String, timeout: TimeInterval) async -> [Notification] {
+        guard let url = URL(string: "\(NsiteOrigins.scheme)://\(NsiteOrigins.hostFor(siteId) ?? "")\(Self.hostPath)") else {
+            return []
+        }
+
+        pending = json
+
+        let config = WKWebViewConfiguration()
+        config.setURLSchemeHandler(SchemeHandler(host: self), forURLScheme: NsiteOrigins.scheme)
+        config.userContentController.add(self, name: "tenna")
+        // Nothing here will ever be looked at, and a store on disk is a store
+        // to clean up. The worker gets one push and the process goes away.
+        config.websiteDataStore = .nonPersistent()
+
+        let webView = WKWebView(frame: CGRect(x: 0, y: 0, width: 320, height: 480), configuration: config)
+        webView.navigationDelegate = self
+        self.webView = webView
+
+        let deadline = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
+            guard !Task.isCancelled else { return }
+            self?.finish(reason: "timed out")
+        }
+
+        let result = await withCheckedContinuation { (continuation: CheckedContinuation<[Notification], Never>) in
+            self.continuation = continuation
+            webView.load(URLRequest(url: url))
+        }
+
+        deadline.cancel()
+        tearDown()
+        return result
+    }
+
+    private func finish(reason: String?) {
+        guard let continuation else { return }
+        self.continuation = nil
+        if let reason { NSLog("[NsiteWorkerHost] %@", reason) }
+        continuation.resume(returning: notifications)
+    }
+
+    private func tearDown() {
+        webView?.configuration.userContentController.removeScriptMessageHandler(forName: "tenna")
+        webView?.navigationDelegate = nil
+        webView?.stopLoading()
+        webView = nil
+    }
+
+    // MARK: - Messages from the host page
+
+    nonisolated func userContentController(
+        _ controller: WKUserContentController,
+        didReceive message: WKScriptMessage
+    ) {
+        MainActor.assumeIsolated {
+            guard let text = message.body as? String,
+                  let data = text.data(using: .utf8),
+                  let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let kind = object["__tenna"] as? String else { return }
+
+            NSLog("[NsiteWorkerHost] message %@", kind)
+
+            switch kind {
+            case "ready":
+                guard let push = pending else { return }
+                pending = nil
+
+                // The envelope the shim reads, not the event on its own: the
+                // worker's channel carries Tenna's traffic and the site's, and
+                // the kind is what tells them apart.
+                guard let envelope = try? JSONSerialization.data(
+                        withJSONObject: ["__tenna": "push", "id": 1, "data": push]),
+                      let text = String(data: envelope, encoding: .utf8) else {
+                    finish(reason: "could not encode the push")
+                    return
+                }
+
+                webView?.evaluateJavaScript("window.__tennaDeliver(\(Self.jsString(text)))") { _, error in
+                    if let error {
+                        NSLog("[NsiteWorkerHost] could not hand over the push: %@",
+                              error.localizedDescription)
+                    }
+                }
+
+            case "notification":
+                let options = object["options"] as? [String: Any] ?? [:]
+                notifications.append(Notification(
+                    title: String(describing: object["title"] ?? ""),
+                    body: options["body"].map { String(describing: $0) } ?? "",
+                    tag: options["tag"].map { String(describing: $0) } ?? ""
+                ))
+
+            case "done":
+                finish(reason: nil)
+
+            case "trace":
+                NSLog("[NsiteWorkerHost] trace: %@", object["message"] as? String ?? "")
+
+            case "error":
+                failure = object["message"] as? String
+                finish(reason: "worker failed: \(failure ?? "unknown")")
+
+            default:
+                break
+            }
+        }
+    }
+
+    // MARK: - Serving
+
+    /**
+     Answers every request the host page and the worker make.
+
+     Split out of the host rather than conformed by it because `WKWebView`
+     holds its scheme handler strongly and the host holds the web view: the
+     same retain cycle `NsiteSchemeHandler` avoids by being owned by the
+     session instead.
+     */
+    private final class SchemeHandler: NSObject, WKURLSchemeHandler {
+        private weak var host: NsiteWorkerHost?
+
+        init(host: NsiteWorkerHost) {
+            self.host = host
+            super.init()
+        }
+
+        nonisolated func webView(_ webView: WKWebView, start task: WKURLSchemeTask) {
+            MainActor.assumeIsolated {
+                guard let host, let url = task.request.url,
+                      url.host == NsiteOrigins.hostFor(host.siteId) else {
+                    task.didFailWithError(URLError(.badURL))
+                    return
+                }
+
+                let path = url.path.isEmpty ? "/" : url.path
+                let shimmed = URLComponents(url: url, resolvingAgainstBaseURL: false)?
+                    .queryItems?.contains { $0.name == NsiteWorkerHost.shimQuery } ?? false
+
+                guard let (body, contentType) = host.answer(path: path, shimmed: shimmed) else {
+                    NSLog("[NsiteWorkerHost] 404 %@ (shimmed=%@)", path, shimmed ? "yes" : "no")
+                    task.didFailWithError(URLError(.fileDoesNotExist))
+                    return
+                }
+                NSLog("[NsiteWorkerHost] served %@ (%d bytes, shimmed=%@)", path, body.count, shimmed ? "yes" : "no")
+
+                guard let response = HTTPURLResponse(
+                    url: url, statusCode: 200, httpVersion: "HTTP/1.1",
+                    headerFields: [
+                        "Content-Type": contentType,
+                        "Content-Length": String(body.count),
+                        "Cache-Control": "no-store",
+                        "X-Content-Type-Options": "nosniff",
+                    ]
+                ) else {
+                    task.didFailWithError(URLError(.badServerResponse))
+                    return
+                }
+
+                task.didReceive(response)
+                task.didReceive(body)
+                task.didFinish()
+            }
+        }
+
+        nonisolated func webView(_ webView: WKWebView, stop task: WKURLSchemeTask) {}
+    }
+
+    /// The host page and the shim are Tenna's; everything else is the site's.
+    private func answer(path: String, shimmed: Bool) -> (Data, String)? {
+        if path == Self.hostPath {
+            guard let page = Self.resource("NsiteWorkerHostPage", "html") else { return nil }
+            // The worker's URL, carrying the marker that asks for the shim.
+            let worker = "/sw.js?\(Self.shimQuery)=1"
+            return (
+                Data(page.replacingOccurrences(of: "%%WORKER%%", with: Self.jsString(worker)).utf8),
+                "text/html; charset=utf-8"
+            )
+        }
+
+        guard let (body, contentType) = serve(path, shimmed) else { return nil }
+        guard shimmed, let shim = Self.resource("NsiteWorkerShim", "js") else {
+            return (body, contentType)
+        }
+
+        // `importScripts` rather than concatenation, so a `'use strict'`
+        // prologue at the top of the site's script is still at the top of a
+        // script and still means what it says.
+        let source = """
+        \(shim)
+        importScripts(\(Self.jsString(path)));
+        self.__tennaWorker.boot();
+        """
+        return (Data(source.utf8), "text/javascript; charset=utf-8")
+    }
+
+    private static func resource(_ name: String, _ extension: String) -> String? {
+        guard let url = Bundle.main.url(forResource: name, withExtension: `extension`),
+              let text = try? String(contentsOf: url, encoding: .utf8) else {
+            NSLog("[NsiteWorkerHost] missing resource %@.%@", name, `extension`)
+            return nil
+        }
+        return text
+    }
+
+    /// A string, as a JavaScript literal. See `NsiteFileServer.jsString`.
+    private static func jsString(_ value: String) -> String {
+        guard let data = try? JSONSerialization.data(
+                withJSONObject: value, options: [.fragmentsAllowed]),
+              let json = String(data: data, encoding: .utf8) else {
+            return "\"\""
+        }
+        return json
+            .replacingOccurrences(of: "\u{2028}", with: "\\u2028")
+            .replacingOccurrences(of: "\u{2029}", with: "\\u2029")
+            .replacingOccurrences(of: "<", with: "\\u003c")
+    }
+
+    // MARK: - WKNavigationDelegate
+
+    nonisolated func webView(
+        _ webView: WKWebView,
+        didFailProvisionalNavigation navigation: WKNavigation!,
+        withError error: Error
+    ) {
+        MainActor.assumeIsolated {
+            finish(reason: "host page failed: \(error.localizedDescription)")
+        }
+    }
+}

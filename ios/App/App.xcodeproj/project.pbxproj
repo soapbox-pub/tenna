@@ -16,6 +16,11 @@
 		504EC3121FED79650016851F /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 504EC3101FED79650016851F /* LaunchScreen.storyboard */; };
 		50B271D11FEDC1A000F3C39B /* public in Resources */ = {isa = PBXBuildFile; fileRef = 50B271D01FEDC1A000F3C39B /* public */; };
 		9582B6832FE993A70072D4E8 /* SceneDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9582B6822FE993A50072D4E8 /* SceneDelegate.swift */; };
+		26081D0B72868ABF4539D67A /* NsiteBlobs.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6D415199B4BB638B05E52046 /* NsiteBlobs.swift */; };
+		54C695E8CDA045CA058EBCF5 /* NsiteOrigins.swift in Sources */ = {isa = PBXBuildFile; fileRef = D90D7749E224E01D0EBDC1FB /* NsiteOrigins.swift */; };
+		9C5B873E24BB084EDF4507AA /* NsiteMimeTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 84218BC38CAD61FB7C8159AB /* NsiteMimeTypes.swift */; };
+		449416282265DAF7D5ABCD02 /* NsiteSiteChrome.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6711A877D923FE3FD94BFDA /* NsiteSiteChrome.swift */; };
+		02B186B5DF02F26C38AB7FEF /* NsiteFileServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5056FC16164516614F89A2D4 /* NsiteFileServer.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -30,6 +35,11 @@
 		50B271D01FEDC1A000F3C39B /* public */ = {isa = PBXFileReference; lastKnownFileType = folder; path = public; sourceTree = "<group>"; };
 		9582B6822FE993A50072D4E8 /* SceneDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SceneDelegate.swift; sourceTree = "<group>"; };
 		958DCC722DB07C7200EA8C5F /* debug.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; name = debug.xcconfig; path = ../debug.xcconfig; sourceTree = SOURCE_ROOT; };
+		6D415199B4BB638B05E52046 /* NsiteBlobs.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NsiteBlobs.swift; sourceTree = "<group>"; };
+		D90D7749E224E01D0EBDC1FB /* NsiteOrigins.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NsiteOrigins.swift; sourceTree = "<group>"; };
+		84218BC38CAD61FB7C8159AB /* NsiteMimeTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NsiteMimeTypes.swift; sourceTree = "<group>"; };
+		F6711A877D923FE3FD94BFDA /* NsiteSiteChrome.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NsiteSiteChrome.swift; sourceTree = "<group>"; };
+		5056FC16164516614F89A2D4 /* NsiteFileServer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NsiteFileServer.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -67,6 +77,11 @@
 				9582B6822FE993A50072D4E8 /* SceneDelegate.swift */,
 				50379B222058CBB4000EE86E /* capacitor.config.json */,
 				504EC3071FED79650016851F /* AppDelegate.swift */,
+				5056FC16164516614F89A2D4 /* NsiteFileServer.swift */,
+				F6711A877D923FE3FD94BFDA /* NsiteSiteChrome.swift */,
+				84218BC38CAD61FB7C8159AB /* NsiteMimeTypes.swift */,
+				D90D7749E224E01D0EBDC1FB /* NsiteOrigins.swift */,
+				6D415199B4BB638B05E52046 /* NsiteBlobs.swift */,
 				504EC30B1FED79650016851F /* Main.storyboard */,
 				504EC30E1FED79650016851F /* Assets.xcassets */,
 				504EC3101FED79650016851F /* LaunchScreen.storyboard */,
@@ -159,6 +174,11 @@
 			buildActionMask = 2147483647;
 			files = (
 				504EC3081FED79650016851F /* AppDelegate.swift in Sources */,
+				02B186B5DF02F26C38AB7FEF /* NsiteFileServer.swift in Sources */,
+				449416282265DAF7D5ABCD02 /* NsiteSiteChrome.swift in Sources */,
+				9C5B873E24BB084EDF4507AA /* NsiteMimeTypes.swift in Sources */,
+				54C695E8CDA045CA058EBCF5 /* NsiteOrigins.swift in Sources */,
+				26081D0B72868ABF4539D67A /* NsiteBlobs.swift in Sources */,
 				9582B6832FE993A70072D4E8 /* SceneDelegate.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

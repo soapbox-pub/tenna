@@ -22,6 +22,32 @@ import UserNotifications
  That is also what keeps the push server ignorant: it never has to understand a
  nostr event, because it never has to write the text that a reader actually
  wants.
+
+ ## What has been measured, and what has not
+
+ The renderer works: the worker runs, `install` and `activate` are dispatched
+ and awaited, a `push` reaches the site's listener, and `showNotification`
+ comes back — in about 0.3 seconds from a cold `WKWebView`, against a budget of
+ thirty. `importScripts` from a dedicated worker does route through
+ `WKURLSchemeHandler`, which is the assumption the whole shape rests on.
+
+ The cost to the *hosting process* is about **0.2 MB** of `phys_footprint` at
+ peak, which is what an extension's memory limit is enforced against. WebKit
+ runs the page itself in separate ExtensionKit processes — `WebContent`,
+ `Networking`, `GPU` — so the ~24 MB an extension is given is not obviously the
+ binding constraint. Two things that measurement cannot answer: whether iOS
+ gives those processes a tighter limit when the client is an app extension, and
+ whether an extension is allowed to spawn them at all.
+
+ **None of it has been seen running inside this extension**, because the
+ simulator cannot exercise one. `simctl push` never enters `didReceive` — an
+ extension gutted to a single log line does not print it either, so the fault
+ is not in the code here — and the app cannot be made push-capable to rule out
+ the other explanation, because the simulator refuses to launch an app carrying
+ `aps-environment` without a provisioning profile to back it. Re-signing by
+ hand gets a valid signature and a launch denied by SpringBoard; the identical
+ re-signing without that one entitlement launches. So the last step needs a
+ real device and a real APNs push.
  */
 class NotificationService: UNNotificationServiceExtension {
 

@@ -8,7 +8,12 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         guard let windowScene = scene as? UIWindowScene else { return }
 
         window = UIWindow(windowScene: windowScene)
-        window?.rootViewController = CAPBridgeViewController()
+        // Tenna's own subclass, not the stock one: the root view controller is
+        // built here rather than taken from Main.storyboard, so this is the
+        // only place that decides which bridge the app runs on — and the
+        // bridge is where Tenna's plugins are registered. See
+        // `TennaBridgeViewController`.
+        window?.rootViewController = TennaBridgeViewController()
         window?.makeKeyAndVisible()
 
         SceneDelegateProxy.shared.scene(scene, willConnectTo: session, options: connectionOptions)

@@ -21,6 +21,10 @@
 		9C5B873E24BB084EDF4507AA /* NsiteMimeTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 84218BC38CAD61FB7C8159AB /* NsiteMimeTypes.swift */; };
 		449416282265DAF7D5ABCD02 /* NsiteSiteChrome.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6711A877D923FE3FD94BFDA /* NsiteSiteChrome.swift */; };
 		02B186B5DF02F26C38AB7FEF /* NsiteFileServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5056FC16164516614F89A2D4 /* NsiteFileServer.swift */; };
+		F807767E6C9C12ED86606C3A /* NsiteSchemeHandler.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9DFF9F0B933BFB683C98977A /* NsiteSchemeHandler.swift */; };
+		00FB53B074CB8EA02A6C995D /* NsiteSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD2B2CC2D5F98E0EEFB58BD3 /* NsiteSession.swift */; };
+		C4E64CFCB3DD051776028A28 /* NsiteWebViewPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = 321F28F125BEFA8F1B8466C9 /* NsiteWebViewPlugin.swift */; };
+		4D0AAC9DA39D65F84B5AD870 /* TennaBridgeViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 91457C98973717B6C5995D86 /* TennaBridgeViewController.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -40,6 +44,10 @@
 		84218BC38CAD61FB7C8159AB /* NsiteMimeTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NsiteMimeTypes.swift; sourceTree = "<group>"; };
 		F6711A877D923FE3FD94BFDA /* NsiteSiteChrome.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NsiteSiteChrome.swift; sourceTree = "<group>"; };
 		5056FC16164516614F89A2D4 /* NsiteFileServer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NsiteFileServer.swift; sourceTree = "<group>"; };
+		9DFF9F0B933BFB683C98977A /* NsiteSchemeHandler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NsiteSchemeHandler.swift; sourceTree = "<group>"; };
+		CD2B2CC2D5F98E0EEFB58BD3 /* NsiteSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NsiteSession.swift; sourceTree = "<group>"; };
+		321F28F125BEFA8F1B8466C9 /* NsiteWebViewPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NsiteWebViewPlugin.swift; sourceTree = "<group>"; };
+		91457C98973717B6C5995D86 /* TennaBridgeViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TennaBridgeViewController.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -77,6 +85,10 @@
 				9582B6822FE993A50072D4E8 /* SceneDelegate.swift */,
 				50379B222058CBB4000EE86E /* capacitor.config.json */,
 				504EC3071FED79650016851F /* AppDelegate.swift */,
+				91457C98973717B6C5995D86 /* TennaBridgeViewController.swift */,
+				321F28F125BEFA8F1B8466C9 /* NsiteWebViewPlugin.swift */,
+				CD2B2CC2D5F98E0EEFB58BD3 /* NsiteSession.swift */,
+				9DFF9F0B933BFB683C98977A /* NsiteSchemeHandler.swift */,
 				5056FC16164516614F89A2D4 /* NsiteFileServer.swift */,
 				F6711A877D923FE3FD94BFDA /* NsiteSiteChrome.swift */,
 				84218BC38CAD61FB7C8159AB /* NsiteMimeTypes.swift */,
@@ -174,6 +186,10 @@
 			buildActionMask = 2147483647;
 			files = (
 				504EC3081FED79650016851F /* AppDelegate.swift in Sources */,
+				4D0AAC9DA39D65F84B5AD870 /* TennaBridgeViewController.swift in Sources */,
+				C4E64CFCB3DD051776028A28 /* NsiteWebViewPlugin.swift in Sources */,
+				00FB53B074CB8EA02A6C995D /* NsiteSession.swift in Sources */,
+				F807767E6C9C12ED86606C3A /* NsiteSchemeHandler.swift in Sources */,
 				02B186B5DF02F26C38AB7FEF /* NsiteFileServer.swift in Sources */,
 				449416282265DAF7D5ABCD02 /* NsiteSiteChrome.swift in Sources */,
 				9C5B873E24BB084EDF4507AA /* NsiteMimeTypes.swift in Sources */,
@@ -254,7 +270,7 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				MTL_ENABLE_DEBUG_INFO = YES;
 				ONLY_ACTIVE_ARCH = YES;
 				SDKROOT = iphoneos;
@@ -305,7 +321,7 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				SDKROOT = iphoneos;
 				SWIFT_COMPILATION_MODE = wholemodule;
@@ -323,7 +339,7 @@
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = GZLTTH5DLM;
 				INFOPLIST_FILE = App/Info.plist;
-				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -346,7 +362,7 @@
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = GZLTTH5DLM;
 				INFOPLIST_FILE = App/Info.plist;
-				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",

@@ -26,6 +26,23 @@ export interface NsiteCapabilityEvent {
   kinds: NsiteBrowserPermissionType[];
 }
 
+/**
+ * Where the site's view goes, in CSS pixels from the top left of the window.
+ *
+ * iOS only, and only because the site is not a window there. On Android a site
+ * opened from the wall is launched into a task of its own and the WebView is
+ * the whole screen, so there is nothing to say; on iOS it is layered over the
+ * app with `NsiteTopBar` above it, and a view filling the window would bury
+ * the bar. CSS pixels and iOS points are the same unit in a WebView at
+ * standard zoom, so the rect crosses unconverted.
+ */
+export interface NsiteFrameRect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
 export interface NsiteWebViewPlugin {
   /**
    * Create the site's WebView and start loading it.
@@ -36,6 +53,8 @@ export interface NsiteWebViewPlugin {
    */
   open(options: {
     siteId: string;
+    /** Where to put the view. Ignored on Android, where it is the window. */
+    frame?: NsiteFrameRect;
     /**
      * What to call the site in anything shown in its name.
      *
@@ -67,6 +86,15 @@ export interface NsiteWebViewPlugin {
    * throw away everything it had loaded to end up in the same place.
    */
   navigate(options: { siteId: string; share: NsiteShareDelivery }): Promise<void>;
+
+  /**
+   * Move the site's view, when the box it stands in changes.
+   *
+   * iOS only, for the same reason as `frame` on `open` — rotation, the
+   * keyboard, anything that reflows the page under it. A no-op where the view
+   * is the window.
+   */
+  updateFrame(options: { frame: NsiteFrameRect }): Promise<void>;
 
   /** Play the shutoff animation and tear the WebView down. */
   close(): Promise<void>;
@@ -139,10 +167,17 @@ export const NsiteWebView = registerPlugin<NsiteWebViewPlugin>('NsiteWebView');
 /**
  * Whether this platform can hand an nsite its own top-level browsing context.
  *
- * Only Android so far. On the web there is no such thing to hand out, and iOS
- * would need the `WKURLSchemeHandler` equivalent of the Android plugin before
- * it could make the same offer.
+ * Android and iOS, by different means to the same end: a WebView of the site's
+ * own, serving its files natively out of the manifest. On the web there is no
+ * such thing to hand out, and the iframe implementation stands in.
+ *
+ * The two are not quite the same offer. A site on Android may register a
+ * service worker; one on iOS may not, because WebKit withholds them from any
+ * document whose scheme is not literally http or https and a WebView cannot
+ * serve either. See `NsiteOrigins.swift`.
  */
 export function supportsNativeNsite(): boolean {
-  return Capacitor.getPlatform() === 'android' && Capacitor.isPluginAvailable('NsiteWebView');
+  const platform = Capacitor.getPlatform();
+  return (platform === 'android' || platform === 'ios')
+    && Capacitor.isPluginAvailable('NsiteWebView');
 }

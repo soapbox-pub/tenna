@@ -1,14 +1,20 @@
 import { App } from '@capacitor/app';
-import type { PluginListenerHandle } from '@capacitor/core';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { Capacitor, type PluginListenerHandle } from '@capacitor/core';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import type { NsiteFrameProps } from '@/components/nsite/types';
 import { supportsNappPush } from '@/lib/nappPushPlugin';
 import { buildManifest, resolveServers } from '@/lib/nsiteFiles';
-import { NsiteWebView, type NsiteCapabilityEvent, type NsiteRpcEvent } from '@/lib/nsiteNativePlugin';
+import {
+  NsiteWebView,
+  type NsiteCapabilityEvent,
+  type NsiteFrameRect,
+  type NsiteRpcEvent,
+} from '@/lib/nsiteNativePlugin';
 import { getNsiteNostrProviderScript } from '@/lib/nsiteNostrProvider';
 import type { NsiteShareDelivery } from '@/lib/nsiteShareTarget';
 import { getNsiteSubdomain } from '@/lib/nsiteSubdomain';
+import { cn } from '@/lib/utils';
 
 /**
  * Renders an nsite in a native WebView of its own.
@@ -37,7 +43,32 @@ export function NsiteNative({
   onRequestClose,
   share,
   openPath,
+  className,
 }: NsiteFrameProps) {
+  // The box the native view stands in, where the native view is not the
+  // window. Nothing is ever drawn into it — it is measured, and the numbers
+  // are what cross the bridge. See `NsiteFrameRect`.
+  const boxRef = useRef<HTMLDivElement>(null);
+
+  const measure = useCallback((): NsiteFrameRect | undefined => {
+    const box = boxRef.current;
+    if (!box || Capacitor.getPlatform() !== 'ios') return undefined;
+
+    // Layout offsets rather than `getBoundingClientRect()`, because the viewer
+    // opens a channel by playing a CRT turn-on: the whole subtree is scaled
+    // from a horizontal line, and a visual rect measured while that is running
+    // is a few pixels tall. The native view is not part of the animation and
+    // wants the box the site will settle into. Offsets ignore transforms,
+    // which is exactly the property needed here.
+    let x = 0;
+    let y = 0;
+    for (let node: HTMLElement | null = box; node; node = node.offsetParent as HTMLElement | null) {
+      x += node.offsetLeft;
+      y += node.offsetTop;
+    }
+
+    return { x, y, width: box.offsetWidth, height: box.offsetHeight };
+  }, []);
   // Kept in refs so the open/close effect depends on the site alone. A
   // re-render must never tear down a loaded site and start it over.
   const onRpcRef = useRef(onRpc);
@@ -117,6 +148,9 @@ export function NsiteNative({
 
       await NsiteWebView.open({
         siteId: getNsiteSubdomain(event),
+        // Measured now rather than on layout, because the view is created in
+        // this call and a frame of zero size would paint nothing.
+        frame: measure(),
         // What a dialog the site opens is titled with. Derived from the same
         // event as everything else here, so it never arrives late and never
         // reopens the window on its own.
@@ -143,7 +177,36 @@ export function NsiteNative({
       void NsiteWebView.close();
       for (const listener of listeners) void listener.remove();
     };
-  }, [event, name, pubkey]);
+  }, [event, name, pubkey, measure]);
+
+  // Keep the native view on top of the box it stands in. Rotation, the
+  // keyboard, the bar appearing or going away — anything that reflows the page
+  // moves a box the native view knows nothing about.
+  useEffect(() => {
+    const box = boxRef.current;
+    if (!box || Capacitor.getPlatform() !== 'ios') return;
+
+    let last = '';
+    const sync = () => {
+      const frame = measure();
+      if (!frame) return;
+      const key = `${frame.x},${frame.y},${frame.width},${frame.height}`;
+      if (key === last) return;
+      last = key;
+      void NsiteWebView.updateFrame({ frame }).catch(() => {
+        // A view that has gone away has no frame to set.
+      });
+    };
+
+    const observer = new ResizeObserver(sync);
+    observer.observe(box);
+    window.addEventListener('resize', sync);
+
+    return () => {
+      observer.disconnect();
+      window.removeEventListener('resize', sync);
+    };
+  }, [measure]);
 
   // A share, or a notification's path, turning up after the site is loaded.
   // The window never closed, so there is nothing to reopen — the site is
@@ -222,18 +285,31 @@ export function NsiteNative({
     };
   }, [onRequestClose]);
 
-  // Positioned against the window rather than against whatever box this
-  // component was given, because the native view it stands in for is the
-  // window: it is added to the activity's content view and fills it.
-  if (!still) return null;
+  // The still stands exactly where the native view did, which is not the same
+  // place on both platforms: on Android the view is added to the activity's
+  // content view and fills the window, while on iOS it is given this box.
+  const fillsWindow = Capacitor.getPlatform() !== 'ios';
 
   return (
-    <img
-      src={still}
-      alt=""
-      aria-hidden="true"
-      draggable={false}
-      className="pointer-events-none fixed inset-0 h-full w-full select-none object-cover"
-    />
+    <>
+      {/* Measured, never drawn. `pointer-events-none` because a transparent
+          box over the site would otherwise swallow every touch meant for it —
+          on Android, where the site is a native view above this one, and on
+          iOS for the same reason. */}
+      <div ref={boxRef} aria-hidden="true" className={cn('pointer-events-none', className)} />
+
+      {still && (
+        <img
+          src={still}
+          alt=""
+          aria-hidden="true"
+          draggable={false}
+          className={cn(
+            'pointer-events-none h-full w-full select-none object-cover',
+            fillsWindow ? 'fixed inset-0' : 'absolute inset-0',
+          )}
+        />
+      )}
+    </>
   );
 }

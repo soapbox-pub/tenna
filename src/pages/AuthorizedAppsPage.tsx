@@ -1,9 +1,10 @@
 import { useSeoMeta } from '@unhead/react';
-import { ArrowLeft, Copy, Link2, Plus, Trash2 } from 'lucide-react';
+import { ArrowLeft, Camera, Copy, Link2, Loader2, Plus, Trash2 } from 'lucide-react';
 import { useCallback, useMemo, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 
 import { AppMark } from '@/components/AppMark';
+import { QrScannerDialog } from '@/components/QrScannerDialog';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -23,7 +24,9 @@ import {
   type AuthorizedPermission,
 } from '@/hooks/useAuthorizedApps';
 import { useAppContext } from '@/hooks/useAppContext';
+import { useQrScanning } from '@/hooks/useQrScanning';
 import { useToast } from '@/hooks/useToast';
+import { cn } from '@/lib/utils';
 import { NappPush } from '@/lib/nappPushPlugin';
 import { permissionTitle } from '@/lib/permissionLabels';
 import { SignerApps, supportsSignerApps } from '@/lib/signerAppsPlugin';
@@ -199,10 +202,19 @@ function ConnectDialog({
   // remounts it rather than writing over whatever was being typed.
   const [uri, setUri] = useState(pasted);
   const [busy, setBusy] = useState(false);
+  const [scanning, setScanning] = useState(false);
+  const canScan = useQrScanning();
 
-  const submit = async () => {
+  const ready = uri.trim().length > 0;
+
+  // Takes what to connect rather than reading it off state, because the
+  // scanner submits a link in the same tick it sets it.
+  const submit = async (value: string) => {
+    const link = value.trim();
+    if (!link || busy) return;
+
     setBusy(true);
-    const ok = await onConnect(uri.trim());
+    const ok = await onConnect(link);
     setBusy(false);
     if (ok) {
       setUri('');
@@ -211,50 +223,101 @@ function ConnectDialog({
   };
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-sm rounded-3xl">
-        <DialogHeader>
-          <DialogTitle className="text-left text-xl">Connect an app</DialogTitle>
-          <DialogDescription className="text-left text-base">
-            An app running somewhere else can ask Tenna to sign for it. It will still ask you
-            the first time it wants anything.
-          </DialogDescription>
-        </DialogHeader>
+    <>
+      <Dialog open={open} onOpenChange={onOpenChange}>
+        <DialogContent className="max-w-sm rounded-3xl">
+          <DialogHeader>
+            <DialogTitle className="text-left text-xl">Connect an app</DialogTitle>
+            <DialogDescription className="text-left text-base">
+              An app running somewhere else can ask Tenna to sign for it. It will still ask you
+              the first time it wants anything.
+            </DialogDescription>
+          </DialogHeader>
 
-        <div className="flex gap-2">
-          <Input
-            value={uri}
-            onChange={(event) => setUri(event.target.value)}
-            placeholder="nostrconnect://…"
-            autoCapitalize="none"
-            autoCorrect="off"
-            spellCheck={false}
-            className="h-12 rounded-xl text-base"
-            onKeyDown={(event) => {
-              if (event.key === 'Enter' && uri.trim()) void submit();
-            }}
-          />
-          <Button
-            onClick={() => void submit()}
-            disabled={!uri.trim() || busy}
-            className="h-12 rounded-xl px-5 text-base"
-          >
-            Connect
-          </Button>
-        </div>
+          {/* One box, with whatever is worth doing to it at the right-hand
+              end: the camera while it is empty, and the way out of it once it
+              holds something. Two controls never show at once — a Connect
+              button beside an empty box is a button that cannot be pressed,
+              and a camera beside a link that is already there is an offer to
+              throw it away. */}
+          <div className="relative">
+            <Input
+              value={uri}
+              onChange={(event) => setUri(event.target.value)}
+              placeholder="nostrconnect://…"
+              autoCapitalize="none"
+              autoCorrect="off"
+              spellCheck={false}
+              className={cn('h-12 rounded-xl text-base', ready ? 'pr-28' : 'pr-14')}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') void submit(uri);
+              }}
+            />
 
-        <DialogFooter className="sm:justify-start">
-          <Button
-            variant="ghost"
-            onClick={onCreate}
-            className="h-11 justify-start gap-3 rounded-xl px-3 text-base"
-          >
-            <Link2 aria-hidden="true" className="size-5" />
-            Or make a link to paste there
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+            <div className="absolute inset-y-1 right-1 flex items-center">
+              {ready ? (
+                <Button
+                  onClick={() => void submit(uri)}
+                  disabled={busy}
+                  className="h-10 min-w-24 rounded-lg px-4 text-base"
+                >
+                  {busy ? (
+                    <Loader2 aria-hidden="true" className="size-5 animate-spin" />
+                  ) : (
+                    'Connect'
+                  )}
+                  {busy && <span className="sr-only">Connecting</span>}
+                </Button>
+              ) : (
+                canScan && (
+                  <button
+                    type="button"
+                    onClick={() => setScanning(true)}
+                    aria-label="Scan a QR code"
+                    className="flex size-10 items-center justify-center rounded-lg text-foreground/70 outline-none transition-colors hover:bg-foreground/10 hover:text-foreground focus-visible:ring-2 focus-visible:ring-primary"
+                  >
+                    <Camera aria-hidden="true" className="size-5" />
+                  </button>
+                )
+              )}
+            </div>
+          </div>
+
+          <DialogFooter className="sm:justify-start">
+            <Button
+              variant="ghost"
+              onClick={onCreate}
+              className="h-11 justify-start gap-3 rounded-xl px-3 text-base"
+            >
+              <Link2 aria-hidden="true" className="size-5" />
+              Or make a link to paste there
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* A scanned link is connected on the spot. Pointing a camera at a code
+          is as deliberate as pressing Connect, and the code has to be one —
+          anything else is refused with the camera left running, so a wallet's
+          QR code on the same screen doesn't close this and leave the user
+          wondering what it did. */}
+      <QrScannerDialog
+        open={scanning}
+        onOpenChange={setScanning}
+        title="Scan a connection link"
+        description="Point the camera at the code the other app is showing."
+        mismatch="That code isn’t a connection link."
+        onScan={(value) => {
+          const link = value.trim();
+          if (!link.toLowerCase().startsWith('nostrconnect://')) return false;
+
+          setScanning(false);
+          setUri(link);
+          void submit(link);
+          return true;
+        }}
+      />
+    </>
   );
 }
 

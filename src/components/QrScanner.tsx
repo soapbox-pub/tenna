@@ -1,11 +1,12 @@
-import { Flashlight, FlashlightOff, Loader2 } from 'lucide-react';
+import { App } from '@capacitor/app';
+import type { PluginListenerHandle } from '@capacitor/core';
+import { ArrowLeft, Flashlight, FlashlightOff, Loader2 } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import {
   Dialog,
   DialogContent,
   DialogDescription,
-  DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
 import { cn } from '@/lib/utils';
@@ -16,7 +17,7 @@ const SCAN_INTERVAL_MS = 200;
 /** How long the camera has to produce a picture before we call it dead. */
 const READY_TIMEOUT_MS = 6000;
 
-interface QrScannerDialogProps {
+interface QrScannerProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   /**
@@ -36,20 +37,26 @@ interface QrScannerDialogProps {
 }
 
 /**
- * A camera, looking for a QR code.
+ * A camera, looking for a QR code, over the whole screen.
+ *
+ * Whole-screen because that is what a viewfinder is for: the picture is the
+ * thing being aimed, and a small one in the middle of a page asks someone to
+ * aim a phone by watching a stamp. It is also what the platform does — the
+ * scanner behind Android's own "Add network" fills the display — and it is
+ * what lets the camera be held at arm's length and still be read.
  *
  * The whole of the decoding is the platform's own `BarcodeDetector`, which
- * costs nothing to ship and is the reason this exists as a dialog rather than
- * as a dependency. Whether the device has one is {@link useQrScanning}'s
- * question, and callers are expected to have asked it before opening this —
- * but it is asked again here, because a device that answers no still has to
- * say so rather than show a black square.
+ * costs nothing to ship and is the reason this is a component rather than a
+ * dependency. Whether the device has one is {@link useQrScanning}'s question,
+ * and callers are expected to have asked it before opening this — but it is
+ * asked again here, because a device that answers no still has to say so
+ * rather than show a black screen.
  *
- * The camera belongs to the dialog: it is opened when this opens and closed
- * when it closes, including when the closing is the user pressing back. What a
- * caller manages is `open` and what to do with a code.
+ * The camera belongs to this: it is opened when this opens and closed when it
+ * closes, including when the closing is the user pressing back. What a caller
+ * manages is `open` and what to do with a code.
  *
- * The failures worth naming, each of which is otherwise a black square:
+ * The failures worth naming, each of which is otherwise a black screen:
  *
  *   - no `BarcodeDetector`, so nothing could read a code even if one were seen;
  *   - an insecure context, where `getUserMedia` does not exist;
@@ -58,14 +65,14 @@ interface QrScannerDialogProps {
  *   - a stream that arrives and never paints, which is the shape a wedged
  *     capture pipeline takes — hence {@link READY_TIMEOUT_MS}.
  */
-export function QrScannerDialog({
+export function QrScanner({
   open,
   onOpenChange,
   onScan,
   title = 'Scan a code',
   description = 'Point the camera at the QR code.',
   mismatch = 'That code isn’t the one.',
-}: QrScannerDialogProps) {
+}: QrScannerProps) {
   // A callback ref rather than a plain one: the dialog's content is portalled
   // and mounted lazily, so on the tick `open` turns true the element does not
   // exist yet. The flag beside it is what re-runs the effect at the moment it
@@ -214,6 +221,31 @@ export function QrScannerDialog({
     };
   }, [open, attached]);
 
+  // Back closes the camera, the way it closes anything laid over a screen.
+  // Left to the system it would go back in the router instead, which from here
+  // means leaving the page that opened the camera — the user asked to stop
+  // scanning, not to abandon what they were scanning for.
+  useEffect(() => {
+    if (!open) return;
+
+    let handle: PluginListenerHandle | undefined;
+    let disposed = false;
+
+    App.addListener('backButton', () => onOpenChange(false))
+      .then((listener) => {
+        if (disposed) void listener.remove();
+        else handle = listener;
+      })
+      .catch(() => {
+        // No native shell to ask.
+      });
+
+    return () => {
+      disposed = true;
+      void handle?.remove();
+    };
+  }, [open, onOpenChange]);
+
   const toggleTorch = async () => {
     if (!torch) return;
     const on = !torchOn;
@@ -229,75 +261,107 @@ export function QrScannerDialog({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
-        className="max-w-sm select-none gap-0 overflow-hidden rounded-3xl p-0"
-        // Focus the dialog itself rather than the first thing in it, which is
-        // the close button and would sit here wearing a focus ring for as long
-        // as the camera was open. The dialog still traps focus and still
-        // closes on back or escape; there is simply nothing in here to type
-        // into, which is also why the keyboard should not come up.
+        showCloseButton={false}
+        // A screen, not a card: the centring and the width the dialog gives
+        // everything else are undone here, and what is left of it is the part
+        // worth keeping — a focus trap, and a thing the screen reader is told
+        // is modal.
+        className="inset-0 top-0 left-0 h-full max-h-none w-full max-w-none translate-x-0 translate-y-0 select-none gap-0 rounded-none border-0 bg-black p-0 sm:max-w-none"
+        // Focus the screen itself rather than the first thing in it, which is
+        // the back button and would sit here wearing a focus ring for as long
+        // as the camera was open. There is nothing in here to type into, which
+        // is also why the keyboard should not come up.
         onOpenAutoFocus={(event) => {
           event.preventDefault();
           if (event.currentTarget instanceof HTMLElement) event.currentTarget.focus();
         }}
       >
-        <DialogHeader className="px-5 pb-4 pt-5 pr-12">
-          <DialogTitle className="text-left text-xl">{title}</DialogTitle>
-          <DialogDescription className="text-left text-base">
-            {description}
-          </DialogDescription>
-        </DialogHeader>
+        <video
+          ref={attach}
+          className={cn(
+            'absolute inset-0 size-full object-cover transition-opacity',
+            status !== 'running' && 'opacity-0',
+          )}
+          playsInline
+          muted
+        />
 
-        <div className="relative aspect-square w-full overflow-hidden bg-black">
-          <video
-            ref={attach}
-            className={cn(
-              'size-full object-cover transition-opacity',
-              status !== 'running' && 'opacity-0',
-            )}
-            playsInline
-            muted
+        {/* The window to aim through, and the dark everywhere else. A square
+            rather than the whole screen because a QR code is square, and
+            because something to aim at is the only instruction a viewfinder
+            needs to give. */}
+        {status === 'running' && (
+          <div
+            aria-hidden="true"
+            className="pointer-events-none absolute left-1/2 top-1/2 aspect-square w-[70%] max-w-xs -translate-x-1/2 -translate-y-1/2 rounded-3xl border-2 border-white/80 shadow-[0_0_0_9999px_rgba(0,0,0,0.55)]"
           />
+        )}
 
-          {status === 'running' && (
-            <div
-              aria-hidden="true"
-              className="pointer-events-none absolute inset-10 rounded-2xl border-2 border-white/70 shadow-[0_0_0_9999px_rgba(0,0,0,0.35)]"
-            />
-          )}
-
-          {status === 'starting' && (
-            <div className="absolute inset-0 flex items-center justify-center text-white/80">
-              <Loader2 aria-hidden="true" className="size-8 animate-spin" />
-              <span className="sr-only">Starting the camera</span>
-            </div>
-          )}
-
-          {status === 'error' && (
-            <p className="absolute inset-0 flex items-center justify-center px-8 text-center text-base text-white/80">
-              {error}
-            </p>
-          )}
-
-          {status === 'running' && torch && (
+        <div className="relative flex h-full flex-col">
+          <header className="flex items-start gap-3 bg-gradient-to-b from-black/70 to-transparent px-4 pb-8 pt-safe-offset-3">
             <button
               type="button"
-              onClick={() => void toggleTorch()}
-              aria-label={torchOn ? 'Turn the light off' : 'Turn the light on'}
-              aria-pressed={torchOn}
-              className="absolute bottom-4 right-4 flex size-12 items-center justify-center rounded-full bg-black/50 text-white outline-none backdrop-blur transition-colors hover:bg-black/70 focus-visible:ring-2 focus-visible:ring-white"
+              onClick={() => onOpenChange(false)}
+              aria-label="Back"
+              className="flex size-11 shrink-0 items-center justify-center rounded-full text-white outline-none transition-colors hover:bg-white/15 focus-visible:ring-2 focus-visible:ring-white"
             >
-              {torchOn ? (
-                <FlashlightOff aria-hidden="true" className="size-6" />
-              ) : (
-                <Flashlight aria-hidden="true" className="size-6" />
-              )}
+              <ArrowLeft aria-hidden="true" className="size-6" />
             </button>
-          )}
-        </div>
 
-        {refused && status === 'running' && (
-          <p className="px-5 py-4 text-base text-foreground/55">{mismatch}</p>
-        )}
+            <div className="min-w-0 flex-1 pt-2">
+              <DialogTitle className="text-xl font-semibold text-white">{title}</DialogTitle>
+              <DialogDescription className="mt-1 text-base text-white/70">
+                {description}
+              </DialogDescription>
+            </div>
+          </header>
+
+          <div className="flex min-h-0 flex-1 items-center justify-center px-8 text-center">
+            {status === 'starting' && (
+              <>
+                <Loader2 aria-hidden="true" className="size-8 animate-spin text-white/80" />
+                <span className="sr-only">Starting the camera</span>
+              </>
+            )}
+
+            {status === 'error' && <p className="text-base text-white/80">{error}</p>}
+          </div>
+
+          <div className="flex flex-col items-center gap-6 px-8 pb-safe-offset-8">
+            {/* Under the viewfinder, where the eye already is, and only after
+                a code has been read and turned down — a standing warning about
+                codes that aren't the right one is noise until one is. */}
+            {refused && status === 'running' && (
+              <p
+                role="status"
+                className="rounded-full bg-black/60 px-4 py-2 text-center text-base text-white/90 backdrop-blur"
+              >
+                {mismatch}
+              </p>
+            )}
+
+            {status === 'running' && torch && (
+              <button
+                type="button"
+                onClick={() => void toggleTorch()}
+                aria-label={torchOn ? 'Turn the light off' : 'Turn the light on'}
+                aria-pressed={torchOn}
+                className={cn(
+                  'flex size-14 items-center justify-center rounded-full outline-none backdrop-blur transition-colors focus-visible:ring-2 focus-visible:ring-white',
+                  torchOn
+                    ? 'bg-white text-black hover:bg-white/90'
+                    : 'bg-white/15 text-white hover:bg-white/25',
+                )}
+              >
+                {torchOn ? (
+                  <FlashlightOff aria-hidden="true" className="size-6" />
+                ) : (
+                  <Flashlight aria-hidden="true" className="size-6" />
+                )}
+              </button>
+            )}
+          </div>
+        </div>
       </DialogContent>
     </Dialog>
   );

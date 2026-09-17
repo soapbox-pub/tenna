@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.8.1] - 2026-09-17
+
+A site with a notification waiting is marked on the wall. A small dot sits in
+the corner of its tile, so the thing that has something to say can be found
+without pulling the shade down to look for it.
+
+### Added
+
+- A dot on the tile of any site with a notification waiting, on Android. It
+  says the same thing the dot on Tenna's own icon in the launcher does, and it
+  goes away at the same moment: when the notification is dismissed, tapped, or
+  cleared with the rest. Opening the site from its tile leaves it, the way
+  opening an app from the launcher does.
+
 ## [0.8.0] - 2026-09-17
 
 Connecting an app to Tenna is a screen of its own now, with a camera on it:

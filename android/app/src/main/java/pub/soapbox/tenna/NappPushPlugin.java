@@ -3,6 +3,7 @@ package pub.soapbox.tenna;
 import android.Manifest;
 import android.os.Build;
 
+import com.getcapacitor.JSArray;
 import com.getcapacitor.JSObject;
 import com.getcapacitor.PermissionState;
 import com.getcapacitor.Plugin;
@@ -39,6 +40,31 @@ import java.io.IOException;
 public class NappPushPlugin extends Plugin {
 
     static final String NOTIFICATIONS = "notifications";
+
+    /** What the wall is told when a site's row in the shade moves. */
+    private static final String CHANGED_EVENT = "nappNotificationsChanged";
+
+    /** Held so it can be handed back; see {@link #handleOnDestroy}. */
+    private NappNotifications.OnChanged watcher;
+
+    @Override
+    public void load() {
+        watcher = siteId -> {
+            JSObject event = new JSObject();
+            event.put("siteId", siteId);
+            notifyListeners(CHANGED_EVENT, event);
+        };
+        NappNotifications.watch(watcher);
+    }
+
+    @Override
+    protected void handleOnDestroy() {
+        if (watcher != null) {
+            NappNotifications.unwatch(watcher);
+            watcher = null;
+        }
+        super.handleOnDestroy();
+    }
 
     /** Replace a site's subscriptions. */
     @PluginMethod
@@ -154,6 +180,36 @@ public class NappPushPlugin extends Plugin {
 
         JSObject result = new JSObject();
         result.put("muted", NappMuted.isMuted(getContext(), siteId));
+        call.resolve(result);
+    }
+
+    /**
+     * Which of the named sites have something in the shade.
+     *
+     * The list comes from the caller rather than from {@link NsiteWall},
+     * because the wall down here is a mirror that the web layer rewrites after
+     * the fact — a site added a moment ago is on the wall the user is looking
+     * at before it is on this one.
+     */
+    @PluginMethod
+    public void unread(PluginCall call) {
+        JSArray siteIds = call.getArray("siteIds");
+        if (siteIds == null) {
+            call.reject("siteIds is required");
+            return;
+        }
+
+        // Read out one at a time rather than through `toList`, whose cast is
+        // erased: a number in the list would arrive as a String that isn't one
+        // and fail somewhere further down.
+        java.util.List<String> wanted = new java.util.ArrayList<>();
+        for (int i = 0; i < siteIds.length(); i++) {
+            Object siteId = siteIds.opt(i);
+            if (siteId instanceof String) wanted.add((String) siteId);
+        }
+
+        JSObject result = new JSObject();
+        result.put("siteIds", new JSArray(NappNotifications.unread(getContext(), wanted)));
         call.resolve(result);
     }
 

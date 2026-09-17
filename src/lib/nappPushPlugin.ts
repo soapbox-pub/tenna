@@ -1,4 +1,5 @@
 import { Capacitor, registerPlugin } from '@capacitor/core';
+import type { PluginListenerHandle } from '@capacitor/core';
 
 /**
  * The native half of `window.napp.push`.
@@ -54,6 +55,27 @@ export interface NappPushPlugin {
     /** Whether sites can be served their workers here at all. */
     supported: boolean;
   }>;
+
+  /**
+   * Which of the given sites have a notification in the shade right now.
+   *
+   * Read from the system every time and never cached down there: the shade is
+   * the only record of this that stays true, since tapping a notification
+   * takes it away without anything of Tenna's running to hear about it.
+   */
+  unread(options: { siteIds: string[] }): Promise<{ siteIds: string[] }>;
+
+  /**
+   * A site's notifications appearing, changing, or going away.
+   *
+   * Carries the site it happened to, but the answer is always read back
+   * whole — a swipe clears a row, a push may replace one, and the event is a
+   * nudge rather than a diff.
+   */
+  addListener(
+    eventName: 'nappNotificationsChanged',
+    listener: (event: { siteId: string }) => void,
+  ): Promise<PluginListenerHandle>;
 }
 
 export const NappPush = registerPlugin<NappPushPlugin>('NappPush');

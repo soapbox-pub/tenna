@@ -276,6 +276,8 @@ export function useWall() {
   return {
     /** The addresses on the wall, in wall order. Every one of them is drawn. */
     uris,
+    /** The sites on the wall, in wall order. The device's own apps are not here. */
+    siteIds: wallSiteIds,
     /** The sites' manifests, by subdomain, as far as they have arrived. */
     events,
     add,

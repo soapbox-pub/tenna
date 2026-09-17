@@ -134,6 +134,34 @@ export function TileImage({ src, name }: { src: string; name: string }) {
 }
 
 /**
+ * The dot on a tile with a notification waiting.
+ *
+ * Outside the face rather than on it, for the reason the shadow and the focus
+ * halo are: the face is masked to the squircle, and anything drawn inside it
+ * that sits proud of the corner is cut off by that mask. So the frame holds
+ * it, and it overhangs.
+ *
+ * It sits in the squircle's corner, which is a corner the squircle has cut
+ * away, so it is mostly on the wall rather than on the artwork — and ringed in
+ * the theme's own background for where it isn't, since a dot the same colour
+ * as the icon under it is no dot at all. The frame's drop shadow is a filter
+ * and so traces this too, which is what keeps it off a wallpaper of any
+ * brightness.
+ *
+ * Nothing is written in it. What the tile has to say is that there is
+ * something to look at; the count belongs to the shade, where the
+ * notifications themselves are.
+ */
+export function TileDot() {
+  return (
+    <span
+      aria-hidden="true"
+      className="absolute -right-1 -top-1 block size-3 rounded-full bg-primary ring-2 ring-background"
+    />
+  );
+}
+
+/**
  * What a tile's menu hangs off, which is not the tile.
  *
  * A menu needs something to be positioned against, and Radix positions
@@ -173,6 +201,7 @@ export function TileMenuAnchor() {
 export function TileButton({
   name,
   title,
+  unread,
   onSelect,
   children,
   className,
@@ -182,6 +211,8 @@ export function TileButton({
   name: string;
   /** The accessible name, when it should say more than the label does. */
   title?: string;
+  /** Whether to mark the tile as having something waiting. */
+  unread?: boolean;
   onSelect: () => void;
   /** The face of the tile. */
   children: ReactNode;
@@ -207,6 +238,7 @@ export function TileButton({
           className="app-squircle absolute -inset-[3px] bg-primary opacity-0 transition-opacity group-focus-visible:opacity-100"
         />
         {children}
+        {unread && <TileDot />}
       </TileFrame>
 
       {/* The halo follows the theme rather than being black — see `tile-label`
@@ -214,6 +246,11 @@ export function TileButton({
       <span className="tile-label w-full truncate px-0.5 text-center text-xs text-foreground/90 sm:text-sm">
         {name}
       </span>
+
+      {/* The dot is drawn and not spoken, so what it means is said here
+          instead — appended to the label rather than replacing it, which is
+          what a second piece of text inside the button does. */}
+      {unread && <span className="sr-only">Notifications waiting</span>}
     </button>
   );
 }

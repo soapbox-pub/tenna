@@ -180,6 +180,26 @@ final class NappNotifications {
     private static final java.util.Map<String, Long> INTERACTED =
         new java.util.concurrent.ConcurrentHashMap<>();
 
+    /**
+     * Told whenever a site's row in the shade appears, changes or goes away.
+     *
+     * For the wall, which draws a dot on a site that has something out. There
+     * is nothing to subscribe to in the platform for this — an app cannot
+     * watch its own notifications without the listener service the user grants
+     * for watching everybody's — so the places that move the tray say so, and
+     * {@link #unread} is read again.
+     *
+     * In memory, and a list because a plugin is registered in more than one
+     * activity. A watcher that outlives its bridge is the reason for
+     * {@link #unwatch}.
+     */
+    interface OnChanged {
+        void changed(@NonNull String siteId);
+    }
+
+    private static final java.util.List<OnChanged> WATCHERS =
+        new java.util.concurrent.CopyOnWriteArrayList<>();
+
     private NappNotifications() {}
 
     /** Whether the OS will show anything we post at all. */
@@ -317,6 +337,7 @@ final class NappNotifications {
 
         if (entries.isEmpty()) {
             NotificationManagerCompat.from(context).cancel(key, 0);
+            changed(siteId);
             return false;
         }
 
@@ -413,6 +434,8 @@ final class NappNotifications {
 
         // A header posted by a version that had more than one row per site.
         manager.cancel(NsiteSites.key(siteId) + LEGACY_SUMMARY_SUFFIX, 0);
+
+        changed(siteId);
 
         if (alert) Log.i(TAG, "Posted a notification for " + record.label);
         return true;
@@ -725,6 +748,7 @@ final class NappNotifications {
      */
     static void forgetConversation(@NonNull Context context, @NonNull String siteId) {
         NappNotificationStore.clear(context, siteId);
+        changed(siteId);
     }
 
     /**
@@ -746,6 +770,74 @@ final class NappNotifications {
         }
 
         NappNotificationStore.clear(context, siteId);
+        changed(siteId);
+    }
+
+    // -----------------------------------------------------------------------
+    // What the wall sees
+    // -----------------------------------------------------------------------
+
+    /**
+     * Which of the given sites have something in the shade right now.
+     *
+     * Read from the tray and never written down, because the tray is the only
+     * copy that stays true. A tap takes the row away without emptying the
+     * store — {@code setAutoCancel} is the system's doing, and nothing of ours
+     * runs to hear about it — so a dot drawn from the records would sit there
+     * after the user had already answered it. The system's own launcher dot is
+     * this same fact, which is why the wall and the launcher agree.
+     *
+     * An empty answer where the tray cannot be read: no dots is wrong in one
+     * direction only, and a dot on a site with nothing behind it is the worse
+     * of the two.
+     */
+    @NonNull
+    static java.util.Set<String> unread(
+        @NonNull Context context,
+        @NonNull java.util.Collection<String> siteIds
+    ) {
+        java.util.Set<String> unread = new java.util.HashSet<>();
+        java.util.Set<String> active = activeKeys(context);
+        if (active == null || active.isEmpty()) return unread;
+
+        for (String siteId : siteIds) {
+            if (siteId == null) continue;
+            String prefix = NsiteSites.key(siteId);
+
+            for (String tag : active) {
+                // The row, or one of the rows a version before this one posted
+                // per notification. A site's keys all begin with its own hash,
+                // and the service and signer notifications begin with neither.
+                if (tag.equals(prefix + CONVERSATION_SUFFIX) || tag.startsWith(prefix + "/")) {
+                    unread.add(siteId);
+                    break;
+                }
+            }
+        }
+
+        return unread;
+    }
+
+    /** Watch for the shade changing. Every watcher must be handed back. */
+    static void watch(@NonNull OnChanged watcher) {
+        WATCHERS.add(watcher);
+    }
+
+    static void unwatch(@NonNull OnChanged watcher) {
+        WATCHERS.remove(watcher);
+    }
+
+    /** Say that a site's row has appeared, changed or gone. */
+    private static void changed(@NonNull String siteId) {
+        for (OnChanged watcher : WATCHERS) {
+            try {
+                watcher.changed(siteId);
+            } catch (RuntimeException e) {
+                // A bridge torn down between the post and the call. The next
+                // read of the wall is the answer either way.
+                Log.i(TAG, "A notification watcher threw", e);
+            }
+        }
     }
 
     /** Note that the user has just acted on one of a site's notifications. */

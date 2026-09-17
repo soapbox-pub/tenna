@@ -10,6 +10,7 @@ import { NsiteSharePicker } from '@/components/NsiteSharePicker';
 import { NsiteViewer } from '@/components/NsiteViewer';
 import { WallSearch } from '@/components/WallSearch';
 import { useActiveTheme } from '@/hooks/useActiveTheme';
+import { useNappUnread } from '@/hooks/useNappUnread';
 import { usePendingShare } from '@/hooks/useNsiteShare';
 import { useWall } from '@/hooks/useWall';
 import { useWallDrag } from '@/hooks/useWallDrag';
@@ -46,6 +47,12 @@ const Index = () => {
   // and move and come off the same way. It is read off the device and drawn
   // as it is; nothing here waits for a relay.
   const wall = useWall();
+
+  // Which of them have something waiting in the shade, so the tile can say so
+  // the way the launcher's own icon does. Read from the system rather than
+  // remembered, and cleared by dismissing the notification and nothing else —
+  // see `useNappUnread`.
+  const unread = useNappUnread(wall.siteIds);
 
   // The site tuned in over the wall, where a site can't be given a window of
   // its own. On Android pressing a tile launches one instead and nothing here
@@ -182,11 +189,16 @@ const Index = () => {
                 <AppIcon
                   event={event}
                   channel={tuned}
+                  unread={unread.has(address.id)}
                   onSelect={() => setActive({ event, channel: tuned })}
                   {...menu}
                 />
               ) : (
-                <AppIconPending siteId={address.id} {...menu} />
+                <AppIconPending
+                  siteId={address.id}
+                  unread={unread.has(address.id)}
+                  {...menu}
+                />
               );
             }
 

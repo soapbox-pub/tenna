@@ -35,6 +35,8 @@ interface AppIconProps {
   onSelect: () => void;
   /** Take the site off the wall. */
   onRemove?: () => void;
+  /** Whether the site has a notification waiting in the shade. */
+  unread?: boolean;
   /**
    * Whether the tile's menu is up.
    *
@@ -57,9 +59,13 @@ interface AppIconProps {
 export function AppIconPending({
   siteId,
   onRemove,
+  unread,
   menuOpen,
   onMenuOpenChange,
-}: { siteId: string } & Pick<AppIconProps, 'onRemove' | 'menuOpen' | 'onMenuOpenChange'>) {
+}: { siteId: string } & Pick<
+  AppIconProps,
+  'onRemove' | 'unread' | 'menuOpen' | 'onMenuOpenChange'
+>) {
   const [snapshot] = useState(() => readTileSnapshot(siteId));
   const name = snapshot?.name ?? nameFromSubdomain(siteId);
 
@@ -67,6 +73,7 @@ export function AppIconPending({
     <>
       <TileButton
         name={name}
+        unread={unread}
         onSelect={() => {}}
         onContextMenu={(clicked) => {
           clicked.preventDefault();
@@ -146,6 +153,7 @@ export function AppIcon({
   channel,
   onSelect,
   onRemove,
+  unread,
   menuOpen,
   onMenuOpenChange,
 }: AppIconProps) {
@@ -213,6 +221,7 @@ export function AppIcon({
     <>
       <TileButton
         name={name}
+        unread={unread}
         onSelect={launch}
         // A right-click, or the key that stands in for one. The finger's way
         // in is the hold, which the wall detects and answers with `menuOpen`.

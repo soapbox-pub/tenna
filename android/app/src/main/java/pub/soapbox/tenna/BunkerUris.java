@@ -3,6 +3,10 @@ package pub.soapbox.tenna;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 
+import org.json.JSONArray;
+import org.json.JSONException;
+import org.json.JSONObject;
+
 import java.io.UnsupportedEncodingException;
 import java.net.URLDecoder;
 import java.net.URLEncoder;
@@ -79,7 +83,7 @@ final class BunkerUris {
         String clientPubkey = (split < 0 ? rest : rest.substring(0, split)).trim();
         if (!isPubkey(clientPubkey)) return null;
 
-        String secret = "", name = "", url = "", image = "", perms = "";
+        String secret = "", name = "", url = "", image = "", perms = "", metadata = "";
         Set<String> relays = new LinkedHashSet<>();
 
         if (split >= 0) {
@@ -102,6 +106,7 @@ final class BunkerUris {
                     case "url": url = value; break;
                     case "image": image = value; break;
                     case "perms": perms = value; break;
+                    case "metadata": metadata = value; break;
                     default: break;
                 }
             }
@@ -109,8 +114,63 @@ final class BunkerUris {
 
         if (secret.isEmpty() || relays.isEmpty()) return null;
 
+        // Whatever the string did not say plainly, asked for again in the
+        // older spelling. See `fromMetadata`.
+        if (!metadata.isEmpty() && (name.isEmpty() || url.isEmpty() || image.isEmpty())) {
+            JSONObject json = fromMetadata(metadata);
+            if (json != null) {
+                if (name.isEmpty()) name = json.optString("name", "").trim();
+                if (url.isEmpty()) url = json.optString("url", "").trim();
+                if (image.isEmpty()) image = icon(json);
+            }
+        }
+
         return new NostrConnect(clientPubkey, secret, new ArrayList<>(relays),
             name, url, image, perms);
+    }
+
+    /**
+     * The one JSON parameter an older client puts its name in.
+     *
+     * <p>NIP-46 used to carry a client's name, URL and icon as {@code
+     * metadata={"name":…}} and now names them one at a time. The change is
+     * recent enough that the old form is still what a great many clients
+     * write — everything built on rust-nostr does, ngit among them — and a
+     * signer that reads only the new one calls them all by seven characters
+     * of their public key.
+     *
+     * <p>So both are read, and the plainly-named parameters win wherever the
+     * two disagree: they are the current spelling, and a string that carries
+     * both was written by something that knows it.
+     *
+     * <p>This is a display hint and nothing more. It is whatever the client
+     * said about itself, unverified — which is why nothing here is allowed
+     * near a permission. See {@link SignerApps}.
+     */
+    @Nullable
+    private static JSONObject fromMetadata(@NonNull String metadata) {
+        try {
+            return new JSONObject(metadata);
+        } catch (JSONException e) {
+            // Not JSON, and so not a thing to take a name from.
+            return null;
+        }
+    }
+
+    /**
+     * The client's picture, under either of the names it goes by.
+     *
+     * <p>{@code image} is what the current parameters call it; {@code icons}
+     * is the array the old metadata object used, of which the first is as good
+     * as any.
+     */
+    @NonNull
+    private static String icon(@NonNull JSONObject metadata) {
+        String image = metadata.optString("image", "").trim();
+        if (!image.isEmpty()) return image;
+
+        JSONArray icons = metadata.optJSONArray("icons");
+        return icons == null || icons.length() == 0 ? "" : icons.optString(0, "").trim();
     }
 
     /**

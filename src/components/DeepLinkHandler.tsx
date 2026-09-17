@@ -77,15 +77,16 @@ export function DeepLinkHandler() {
           if (url.protocol === 'tenna-nsite:') return;
 
           // An app somewhere else asking to be connected. It goes to the
-          // screen that lists connections, carrying the link — and stops
-          // there, because accepting one hands out a standing permission to
-          // sign as the user and any web page can open a link like this. The
-          // screen asks; nothing happens on arrival.
+          // screen for connecting one, carrying the link — and stops there,
+          // because accepting one hands out a standing permission to sign as
+          // the user and any web page can open a link like this. The screen
+          // puts the link in the box and waits to be pressed; nothing happens
+          // on arrival.
           //
           // In router state rather than in the path: the link contains the
           // secret that proves the connection, and a URL is remembered.
           if (url.protocol === 'nostrconnect:') {
-            navigate('/settings/apps', { state: { connect: event.url } });
+            navigate('/settings/apps/connect', { state: { connect: event.url } });
             return;
           }
 

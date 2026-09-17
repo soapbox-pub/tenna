@@ -7,6 +7,7 @@ import { useOnboarding } from "@/hooks/useOnboarding";
 import { isSignerSheet, useSignerPrompt } from "@/hooks/useSignerPrompt";
 
 import { AuthorizedAppsPage } from "./pages/AuthorizedAppsPage";
+import { ConnectAppPage } from "./pages/ConnectAppPage";
 import Index from "./pages/Index";
 import { NIP19Page } from "./pages/NIP19Page";
 import NotFound from "./pages/NotFound";
@@ -79,6 +80,7 @@ export function AppRouter() {
               order and React Router does not. */}
           <Route path="/settings" element={<SettingsPage />} />
           <Route path="/settings/apps" element={<AuthorizedAppsPage />} />
+          <Route path="/settings/apps/connect" element={<ConnectAppPage />} />
           {/* NIP-19 route for npub1, note1, naddr1, nevent1, nprofile1 */}
           <Route path="/:nip19" element={<NIP19Page />} />
           {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}

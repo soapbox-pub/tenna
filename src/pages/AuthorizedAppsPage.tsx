@@ -1,7 +1,7 @@
 import { useSeoMeta } from '@unhead/react';
-import { ArrowLeft, Copy, Link2, Plus, Trash2 } from 'lucide-react';
-import { useCallback, useMemo, useState } from 'react';
-import { useLocation, useNavigate } from 'react-router-dom';
+import { ArrowLeft, Copy, Plus, Trash2 } from 'lucide-react';
+import { useCallback, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 
 import { AppMark } from '@/components/AppMark';
 import { Button } from '@/components/ui/button';
@@ -13,7 +13,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Switch } from '@/components/ui/switch';
@@ -22,11 +21,9 @@ import {
   type AuthorizedApp,
   type AuthorizedPermission,
 } from '@/hooks/useAuthorizedApps';
-import { useAppContext } from '@/hooks/useAppContext';
 import { useToast } from '@/hooks/useToast';
-import { NappPush } from '@/lib/nappPushPlugin';
 import { permissionTitle } from '@/lib/permissionLabels';
-import { SignerApps, supportsSignerApps } from '@/lib/signerAppsPlugin';
+import { supportsSignerApps } from '@/lib/signerAppsPlugin';
 
 /** The section-card class the rest of Settings uses. */
 const GROUP = 'rounded-2xl bg-foreground/[0.06] px-5 py-4';
@@ -170,141 +167,6 @@ function AppDialog({
 }
 
 // ---------------------------------------------------------------------------
-// Making a connection
-// ---------------------------------------------------------------------------
-
-/**
- * Accepting a link an app sent, or making one for it to accept.
- *
- * Both are in one dialog because they are the same act from two ends, and
- * which end a person is at depends only on which of the two apps has a box to
- * paste into.
- */
-function ConnectDialog({
-  open,
-  pasted,
-  onOpenChange,
-  onConnect,
-  onCreate,
-}: {
-  open: boolean;
-  /** A link that arrived as a deep link, waiting to be accepted. */
-  pasted: string;
-  onOpenChange: (open: boolean) => void;
-  onConnect: (uri: string) => Promise<boolean>;
-  onCreate: () => void;
-}) {
-  // Seeded from the link that arrived, and never reset by an effect: the
-  // parent gives this component a `key` off that link, so a new one arriving
-  // remounts it rather than writing over whatever was being typed.
-  const [uri, setUri] = useState(pasted);
-  const [busy, setBusy] = useState(false);
-
-  const submit = async () => {
-    setBusy(true);
-    const ok = await onConnect(uri.trim());
-    setBusy(false);
-    if (ok) {
-      setUri('');
-      onOpenChange(false);
-    }
-  };
-
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-sm rounded-3xl">
-        <DialogHeader>
-          <DialogTitle className="text-left text-xl">Connect an app</DialogTitle>
-          <DialogDescription className="text-left text-base">
-            An app running somewhere else can ask Tenna to sign for it. It will still ask you
-            the first time it wants anything.
-          </DialogDescription>
-        </DialogHeader>
-
-        <div className="flex gap-2">
-          <Input
-            value={uri}
-            onChange={(event) => setUri(event.target.value)}
-            placeholder="nostrconnect://…"
-            autoCapitalize="none"
-            autoCorrect="off"
-            spellCheck={false}
-            className="h-12 rounded-xl text-base"
-            onKeyDown={(event) => {
-              if (event.key === 'Enter' && uri.trim()) void submit();
-            }}
-          />
-          <Button
-            onClick={() => void submit()}
-            disabled={!uri.trim() || busy}
-            className="h-12 rounded-xl px-5 text-base"
-          >
-            Connect
-          </Button>
-        </div>
-
-        <DialogFooter className="sm:justify-start">
-          <Button
-            variant="ghost"
-            onClick={onCreate}
-            className="h-11 justify-start gap-3 rounded-xl px-3 text-base"
-          >
-            <Link2 aria-hidden="true" className="size-5" />
-            Or make a link to paste there
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-/** The link Tenna just made, for copying into the app that needs it. */
-function InvitationDialog({
-  uri,
-  onClose,
-}: {
-  uri: string | null;
-  onClose: () => void;
-}) {
-  const { toast } = useToast();
-
-  return (
-    <Dialog open={!!uri} onOpenChange={(open) => !open && onClose()}>
-      {uri && (
-        <DialogContent className="max-w-sm rounded-3xl">
-          <DialogHeader>
-            <DialogTitle className="text-left text-xl">Your connection link</DialogTitle>
-            <DialogDescription className="text-left text-base">
-              Paste this into the app you want to connect. It works once — whoever uses it
-              first becomes the app on the other end.
-            </DialogDescription>
-          </DialogHeader>
-
-          <p className="max-h-32 overflow-auto break-all rounded-xl bg-foreground/[0.06] p-3 font-mono text-xs">
-            {uri}
-          </p>
-
-          <DialogFooter className="sm:justify-start">
-            <Button
-              onClick={() => {
-                void navigator.clipboard
-                  .writeText(uri)
-                  .then(() => toast({ title: 'Link copied' }))
-                  .catch(() => toast({ title: 'Could not copy the link', variant: 'destructive' }));
-              }}
-              className="h-12 w-full gap-3 rounded-xl text-base"
-            >
-              <Copy aria-hidden="true" className="size-5" />
-              Copy
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      )}
-    </Dialog>
-  );
-}
-
-// ---------------------------------------------------------------------------
 // The screen
 // ---------------------------------------------------------------------------
 
@@ -324,114 +186,16 @@ export function AuthorizedAppsPage() {
   });
 
   const navigate = useNavigate();
-  const location = useLocation();
-  const { toast } = useToast();
-  const { config } = useAppContext();
-  const { apps, reload, revoke, forget, pubkey } = useAuthorizedApps();
-
-  // A link that arrived from outside the app, carried in router state rather
-  // than in the URL because it holds the secret that proves the connection.
-  // Nothing is accepted by arriving here — see `DeepLinkHandler`.
-  const pasted = (location.state as { connect?: string } | null)?.connect ?? '';
+  const { apps, revoke, forget, pubkey } = useAuthorizedApps();
 
   const [openId, setOpenId] = useState<string | null>(null);
-  // Open already when a link brought us here: this screen is the answer to
-  // that link, and the dialog is where the answer is given.
-  const [connecting, setConnecting] = useState(!!pasted);
-  const [invitation, setInvitation] = useState<string | null>(null);
 
   const open = apps?.find((app) => app.id === openId);
-
-  /** The relays a new connection listens on: the ones this account publishes to. */
-  const relays = useMemo(
-    () =>
-      config.relayMetadata.relays
-        .filter((relay) => relay.write)
-        .map((relay) => relay.url),
-    [config.relayMetadata.relays],
-  );
 
   const goBack = useCallback(() => {
     if (window.history.length > 1) navigate(-1);
     else navigate('/settings');
   }, [navigate]);
-
-  /**
-   * Ask for the notification permission, if it has not been given.
-   *
-   * A connection that cannot raise a notification can only ever answer what
-   * has already been granted — anything else arrives on a socket with the app
-   * closed, and a notification is the only way it reaches a person. So this is
-   * asked at the moment a connection is made, which is the moment it means
-   * something, rather than the first time a request is lost.
-   *
-   * Refusing is allowed. The connection still works for everything it was
-   * granted up front; the rest is refused out loud rather than left hanging.
-   */
-  const askAboutNotifications = useCallback(async () => {
-    try {
-      const { granted } = await NappPush.status();
-      if (granted) return;
-
-      const asked = await NappPush.requestPermission();
-      if (!asked.granted) {
-        toast({
-          title: 'Notifications are off',
-          description:
-            'This app can still do what you allow now, but Tenna cannot ask you about anything else while it is closed.',
-        });
-      }
-    } catch {
-      // No push plugin in this build. Nothing to ask for.
-    }
-  }, [toast]);
-
-  const connect = useCallback(
-    async (uri: string) => {
-      if (!pubkey) return false;
-      try {
-        const { name } = await SignerApps.connect({ account: pubkey, uri });
-        toast({ title: `${name} is connected` });
-        await askAboutNotifications();
-        await reload();
-        return true;
-      } catch (error) {
-        toast({
-          title: 'Could not connect that app',
-          description: error instanceof Error ? error.message : undefined,
-          variant: 'destructive',
-        });
-        return false;
-      }
-    },
-    [pubkey, reload, toast, askAboutNotifications],
-  );
-
-  const create = useCallback(async () => {
-    if (!pubkey) return;
-    if (!relays.length) {
-      toast({
-        title: 'No relays to listen on',
-        description: 'Add a relay Tenna can write to, then try again.',
-        variant: 'destructive',
-      });
-      return;
-    }
-
-    try {
-      const { uri } = await SignerApps.createConnection({ account: pubkey, relays });
-      setConnecting(false);
-      setInvitation(uri);
-      await askAboutNotifications();
-      await reload();
-    } catch (error) {
-      toast({
-        title: 'Could not make a link',
-        description: error instanceof Error ? error.message : undefined,
-        variant: 'destructive',
-      });
-    }
-  }, [pubkey, relays, reload, toast, askAboutNotifications]);
 
   return (
     <main className="relative min-h-screen select-none bg-card text-card-foreground">
@@ -456,7 +220,7 @@ export function AuthorizedAppsPage() {
               {supportsSignerApps() && !!pubkey && (
                 <button
                   type="button"
-                  onClick={() => setConnecting(true)}
+                  onClick={() => navigate('/settings/apps/connect')}
                   aria-label="Connect an app"
                   className="flex size-9 shrink-0 items-center justify-center rounded-full text-foreground/90 outline-none transition-colors hover:bg-foreground/10 focus-visible:ring-2 focus-visible:ring-primary"
                 >
@@ -541,17 +305,6 @@ export function AuthorizedAppsPage() {
           void forget(app);
         }}
       />
-
-      <ConnectDialog
-        key={pasted}
-        open={connecting}
-        pasted={pasted}
-        onOpenChange={setConnecting}
-        onConnect={connect}
-        onCreate={() => void create()}
-      />
-
-      <InvitationDialog uri={invitation} onClose={() => setInvitation(null)} />
     </main>
   );
 }

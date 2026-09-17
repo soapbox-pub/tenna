@@ -1,5 +1,6 @@
 import UIKit
 import Capacitor
+import UserNotifications
 
 @UIApplicationMain
 class AppDelegate: UIResponder, UIApplicationDelegate {
@@ -7,8 +8,48 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     var window: UIWindow?
 
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
-        // Override point for customization after application launch.
+        #if DEBUG
+        registerForPush(application)
+        #endif
         return true
+    }
+
+    // MARK: - Push
+
+    /**
+     Asks for the alert permission and for an APNs token, on launch.
+
+     Scaffolding, and debug-only so that it cannot be shipped by accident: it
+     asks everyone, at launch, for a permission nothing has earned yet, and the
+     token it gets is written to the log because there is nowhere to send it.
+     What it is for is the other end — without a token there is no way to make
+     iOS run `NsiteNotify` at all, and an extension nothing can reach is an
+     extension that can only be reasoned about. See `NotificationService` for
+     what it was used to find out.
+
+     When a site can actually be subscribed to, the asking moves next to the
+     asking, and the token goes to the push server with the subscription.
+     */
+    private func registerForPush(_ application: UIApplication) {
+        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { granted, error in
+            NSLog("[Tenna] notification permission granted=%@ error=%@",
+                  granted ? "yes" : "no", String(describing: error))
+            guard granted else { return }
+            DispatchQueue.main.async {
+                application.registerForRemoteNotifications()
+            }
+        }
+    }
+
+    func application(_ application: UIApplication,
+                     didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
+        // Logged, for now, because there is nowhere to send it yet.
+        NSLog("[Tenna] APNs token %@", deviceToken.map { String(format: "%02x", $0) }.joined())
+    }
+
+    func application(_ application: UIApplication,
+                     didFailToRegisterForRemoteNotificationsWithError error: Error) {
+        NSLog("[Tenna] APNs registration failed: %@", error.localizedDescription)
     }
 
     func applicationWillResignActive(_ application: UIApplication) {

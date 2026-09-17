@@ -23,31 +23,62 @@ import UserNotifications
  nostr event, because it never has to write the text that a reader actually
  wants.
 
- ## What has been measured, and what has not
+ ## What has been measured
 
- The renderer works: the worker runs, `install` and `activate` are dispatched
- and awaited, a `push` reaches the site's listener, and `showNotification`
- comes back — in about 0.3 seconds from a cold `WKWebView`, against a budget of
- thirty. `importScripts` from a dedicated worker does route through
- `WKURLSchemeHandler`, which is the assumption the whole shape rests on.
+ This has now run on a real iPhone, twice, out of real APNs pushes — which the
+ simulator could never show. (`simctl push` never enters `didReceive`, and an
+ app carrying `aps-environment` will not launch there at all, so the whole
+ thing was unexercised until a device could be signed for push.)
 
- The cost to the *hosting process* is about **0.2 MB** of `phys_footprint` at
- peak, which is what an extension's memory limit is enforced against. WebKit
- runs the page itself in separate ExtensionKit processes — `WebContent`,
- `Networking`, `GPU` — so the ~24 MB an extension is given is not obviously the
- binding constraint. Two things that measurement cannot answer: whether iOS
- gives those processes a tighter limit when the client is an app extension, and
- whether an extension is allowed to spawn them at all.
+ What SpringBoard says about it, both times:
 
- **None of it has been seen running inside this extension**, because the
- simulator cannot exercise one. `simctl push` never enters `didReceive` — an
- extension gutted to a single log line does not print it either, so the fault
- is not in the code here — and the app cannot be made push-capable to rule out
- the other explanation, because the simulator refuses to launch an app carrying
- `aps-environment` without a provisioning profile to back it. Re-signing by
- hand gets a valid signature and a launch denied by SpringBoard; the identical
- re-signing without that one entitlement launches. So the last step needs a
- real device and a real APNs push.
+ ```
+ Received remote notification request … hasMutableContent: 1 pushType: Alert
+ Will deliver mutated notification content; … runtime: 0.187876
+ Delivered user visible push notification …
+ ```
+
+ — 0.188 seconds of it the first time and 0.197 the second, wake to shade.
+
+ **Mutated** is the word that matters: what reached the shade was the worker's
+ sentence and not the server's. Inside the extension, `Request replacement
+ content` to `Received replacement content [ hasContent: 1 ]` took **110 ms**
+ in one run and **117 ms** in the other, starting from a process spawned forty
+ milliseconds earlier — everything cold, against a budget of twenty seconds
+ here and about thirty from the system. `importScripts` from a dedicated worker
+ does route through `WKURLSchemeHandler`, which is the assumption the whole
+ shape rests on.
+
+ The second run served **Ditto's own `sw.js`**, the file the nsite publishes,
+ byte for byte, in place of `TestWorker.js` — and the banner read what Ditto's
+ worker composes for a `push`, down to the `Someone` it falls back to when it
+ cannot resolve a profile. A service worker written against the standard, for
+ Android, renders here unchanged. It wants the same payload it gets there —
+ `{ event, relay, subscription }`, see NAPP.md — which is what the push must
+ carry in `event` for a site's own code to understand it.
+
+ ## What it costs
+
+ RunningBoard gives this extension a **hard 65 MB**, not the ~24 MB an app
+ extension is usually said to get:
+
+ ```
+ pub.soapbox.tenna.notify Memory Limits: active 65 inactive 65
+ pub.soapbox.tenna.notify set Memory Limits to Hard Inactive (65)
+ ```
+
+ And the WebKit processes the extension spawns are not squeezed for being an
+ extension's: `WebContent` is given 1536 MB soft, `Networking` 840, `GPU` 300,
+ the ordinary numbers. So both of the questions this could not answer before
+ are answered — an extension may spawn them, and being their client costs them
+ nothing. The renderer's own footprint was never the binding constraint.
+
+ ## What is still missing
+
+ Nobody can subscribe. The app asks for an APNs token in a `#if DEBUG` block
+ and writes it to the log, because there is no push server to send it to and no
+ per-site consent to attach it to. And the worker above is still the fixture in
+ this bundle rather than the site's own file out of a shared container.
  */
 class NotificationService: UNNotificationServiceExtension {
 

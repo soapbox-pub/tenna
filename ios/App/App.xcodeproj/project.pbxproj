@@ -52,6 +52,7 @@
 		958DCC722DB07C7200EA8C5F /* debug.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; name = debug.xcconfig; path = ../debug.xcconfig; sourceTree = SOURCE_ROOT; };
 		6D415199B4BB638B05E52046 /* NsiteBlobs.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NsiteBlobs.swift; sourceTree = "<group>"; };
 		D90D7749E224E01D0EBDC1FB /* NsiteOrigins.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NsiteOrigins.swift; sourceTree = "<group>"; };
+		AA00000000000000000000E1 /* App.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = App.entitlements; sourceTree = "<group>"; };
 		84218BC38CAD61FB7C8159AB /* NsiteMimeTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NsiteMimeTypes.swift; sourceTree = "<group>"; };
 		F6711A877D923FE3FD94BFDA /* NsiteSiteChrome.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NsiteSiteChrome.swift; sourceTree = "<group>"; };
 		5056FC16164516614F89A2D4 /* NsiteFileServer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NsiteFileServer.swift; sourceTree = "<group>"; };
@@ -147,6 +148,7 @@
 				F6711A877D923FE3FD94BFDA /* NsiteSiteChrome.swift */,
 				84218BC38CAD61FB7C8159AB /* NsiteMimeTypes.swift */,
 				D90D7749E224E01D0EBDC1FB /* NsiteOrigins.swift */,
+				AA00000000000000000000E1 /* App.entitlements */,
 				6D415199B4BB638B05E52046 /* NsiteBlobs.swift */,
 				504EC30B1FED79650016851F /* Main.storyboard */,
 				504EC30E1FED79650016851F /* Assets.xcassets */,
@@ -455,6 +457,7 @@
 			baseConfigurationReference = 958DCC722DB07C7200EA8C5F /* debug.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = App/App.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = GZLTTH5DLM;
@@ -478,6 +481,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = App/App.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = GZLTTH5DLM;

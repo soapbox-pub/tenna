@@ -1,5 +1,37 @@
 # Changelog
 
+## [0.8.0] - 2026-09-17
+
+Connecting an app to Tenna is a screen of its own now, with a camera on it:
+point the phone at the code the other app is showing and it is connected, with
+no link to copy between them. And an app that gives its name the older way —
+ngit, and most things built the same way — turns up under its own name rather
+than a few characters of its key.
+
+### Added
+
+- An app can be connected by scanning the code it shows. The box that takes a
+  connection link holds a camera while it is empty, and a scanned link is
+  connected on the spot; a code that isn't a connection link is passed over
+  with the camera left running, so a wallet's code on the same table doesn't
+  close it. Where the camera cannot read a code at all, it isn't offered.
+
+### Changed
+
+- Connecting an app is a screen of its own rather than a dialog over the list
+  of apps that already have your key. The camera fills the display with a
+  window cut in the dark to aim through, and a link Tenna makes for you to
+  paste elsewhere is shown on the screen that made it. Back puts the camera
+  away without leaving the screen, and from there goes to the list. A link
+  arriving from outside the app still lands in the box waiting to be pressed —
+  nothing is accepted by arriving.
+
+### Fixed
+
+- An app that gives its name the older way is listed under it. ngit, and most
+  apps built on the same toolkit, appeared in the list as seven characters of
+  their key.
+
 ## [0.7.1] - 2026-09-14
 
 A site that wanted two things at once only ever got asked about one of them.

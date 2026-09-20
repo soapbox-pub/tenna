@@ -76,6 +76,25 @@ export interface NsiteBridgeOptions {
    * without CORS. Only on the native path, where there is a host to make it.
    */
   fetch?: boolean;
+  /**
+   * Stand in for the Notifications API, which this WebView has not got.
+   *
+   * Not a member of `window.napp` and deliberately not one: what a site gets
+   * is `Notification` and `ServiceWorkerRegistration.showNotification` under
+   * their own names, so a site written for the web is written for this. See
+   * {@link NOTIFICATION_SOURCE}.
+   */
+  notify?: boolean;
+  /**
+   * What `Notification.permission` reads before anything has been asked.
+   *
+   * The site's own grant, which the host knows synchronously and the page has
+   * no way to go and fetch in time: `Notification.permission` is a getter, and
+   * a site that reads it at module scope — most of them — must not be told
+   * `default` and corrected a moment later. The device's half of the answer is
+   * substituted natively; see {@link NSITE_NOTIFY_DEVICE_PLACEHOLDER}.
+   */
+  notifyGrant?: 'granted' | 'denied' | 'default';
 }
 
 /**
@@ -87,6 +106,18 @@ export interface NsiteBridgeOptions {
  * shim's token and wake page are. See `NsiteWebViewPlugin.open`.
  */
 export const NSITE_BINARY_MESSAGES_PLACEHOLDER = '%%NAPP_BINARY%%';
+
+/**
+ * Filled in by the host with `true` or `false`: whether the device will show
+ * anything for this site at all — Tenna's notifications on in system
+ * settings, and this site not muted.
+ *
+ * Substituted natively for the same reason the one above is. It is a fact
+ * about the phone rather than about the site, the host knows it without
+ * asking anyone, and `Notification.permission` has to be right on the first
+ * synchronous read.
+ */
+export const NSITE_NOTIFY_DEVICE_PLACEHOLDER = '%%NAPP_NOTIFY_DEVICE%%';
 
 /** The `napp.push` member, for hosts that can deliver notifications. */
 const NAPP_PUSH_SOURCE = `
@@ -233,6 +264,192 @@ function nappFetchImplementation(): string {
 `;
 }
 
+/**
+ * The Notifications API, for a WebView that hasn't got one.
+ *
+ * Android's WebView has no Web Notifications at all, in a worker or in a page.
+ * The worker's half has been stood in for since notifications arrived — see
+ * `napp_sw_shim.js` — and this is the page's, built to the same rule: what a
+ * site gets is the API under its own name, behaving the way it behaves in a
+ * browser, with nothing to opt into and nothing of Tenna's to know about.
+ *
+ * ## Why the constructor throws
+ *
+ * Because that is what a browser on Android does. The spec has two kinds of
+ * notification: a *non-persistent* one from `new Notification()`, whose click
+ * fires on the object in the page, and a *persistent* one from
+ * `registration.showNotification()`, whose click fires as `notificationclick`
+ * in the service worker no matter which of the two created it. Chrome for
+ * Android implements only the second and throws on the first — "Illegal
+ * constructor. Use ServiceWorkerRegistration.showNotification() instead" —
+ * and Firefox for Android does the same.
+ *
+ * So a site's click handler living in its worker is not a quirk of Tenna's;
+ * it is the only arrangement Android has ever offered, and the one every site
+ * written for a phone already expects. Standing up a working constructor here
+ * would be the deviation, and a silent one: its `onclick` could never fire,
+ * because the window it belongs to is routinely gone by the time anybody taps.
+ *
+ * The interface itself is real, because `permission`, `requestPermission()`
+ * and the instances `getNotifications()` hands back are all reached through
+ * it.
+ */
+function notificationSource(grant: 'granted' | 'denied' | 'default'): string {
+  return `
+  /**
+   * What \`Notification.permission\` reads, as the host knew it when this page
+   * started, and whatever the host has said since.
+   *
+   * Two things decide it and either can refuse: what this site was granted,
+   * interpolated here because the host knows it synchronously, and whether the
+   * device will show anything at all — Tenna's notifications on, this site not
+   * muted — which is substituted natively. A refusal from either is
+   * \`denied\`, the web's word for "do not ask, it will not work", which is
+   * true of both: a site told \`default\` would go on raising a prompt that
+   * cannot help it.
+   */
+  var notifyState = ${NSITE_NOTIFY_DEVICE_PLACEHOLDER} ? ${JSON.stringify(grant)} : 'denied';
+
+  function permission() {
+    return notifyState;
+  }
+
+  /** Keep the cached answer honest when the host has just told us otherwise. */
+  function remember(value) {
+    if (value === 'granted' || value === 'denied' || value === 'default') {
+      notifyState = value;
+    }
+  }
+
+  /**
+   * A notification the host is showing.
+   *
+   * Read-only, as the real one is, apart from \`close()\` — the only thing a
+   * site can do to a notification once it is up, and the reason the host hands
+   * back the key it filed it under. The same shape the worker's shim builds;
+   * see \`NappNotification\` in napp_sw_shim.js.
+   */
+  function NappNotification(record) {
+    var options = record.options || {};
+    this.title = String(record.title == null ? '' : record.title);
+    this.tag = String(record.tag == null ? '' : record.tag);
+    this.body = options.body == null ? '' : String(options.body);
+    this.data = options.data;
+    this.icon = options.icon == null ? '' : String(options.icon);
+    this.badge = options.badge == null ? '' : String(options.badge);
+    this.image = options.image == null ? '' : String(options.image);
+    this.actions = Array.isArray(options.actions) ? options.actions : [];
+    this.silent = !!options.silent;
+    this.renotify = !!options.renotify;
+    this.requireInteraction = !!options.requireInteraction;
+    this.timestamp = typeof options.timestamp === 'number' ? options.timestamp : 0;
+    this.dir = options.dir || 'auto';
+    this.lang = options.lang || '';
+    this.vibrate = options.vibrate || [];
+    // The host's own name for it. Not part of the API, so not enumerable — a
+    // site round-tripping a notification through JSON shouldn't carry it.
+    Object.defineProperty(this, '__key', { value: String(record.key || '') });
+  }
+
+  NappNotification.prototype.close = function() {
+    if (!this.__key) return;
+    // Outside the queue: it asks nobody anything, and a notification the user
+    // wants gone should not wait behind a prompt for a signature.
+    call('notification.close', { key: this.__key });
+  };
+
+  Object.defineProperty(NappNotification, 'permission', {
+    configurable: true,
+    get: permission
+  });
+
+  /**
+   * Ask, as a browser asks: this raises the prompt rather than reporting on
+   * one. The legacy callback form is honoured alongside the promise, because
+   * it is still what a good deal of code in the wild calls.
+   */
+  NappNotification.requestPermission = function(callback) {
+    return rpc('notification.request', {}).then(function(value) {
+      remember(value);
+      if (typeof callback === 'function') {
+        try { callback(permission()); } catch (e) {}
+      }
+      return permission();
+    }, function() {
+      // A question that could not be put is not a refusal the site should
+      // cache; it reports what it already knew.
+      if (typeof callback === 'function') {
+        try { callback(permission()); } catch (e) {}
+      }
+      return permission();
+    });
+  };
+
+  /**
+   * The constructor a browser on Android refuses, refused the same way.
+   *
+   * Assigned over the function above rather than written as one, so that the
+   * statics and the prototype survive: \`getNotifications()\` returns
+   * instances of this, and \`instanceof Notification\` has to hold for them.
+   */
+  function Notification() {
+    throw new TypeError(
+      "Failed to construct 'Notification': Illegal constructor. Use " +
+      'ServiceWorkerRegistration.showNotification() instead.'
+    );
+  }
+  Notification.prototype = NappNotification.prototype;
+  NappNotification.prototype.constructor = Notification;
+  Notification.requestPermission = NappNotification.requestPermission;
+  Object.defineProperty(Notification, 'permission', {
+    configurable: true,
+    get: permission
+  });
+  window.Notification = Notification;
+
+  var swRegistration = window.ServiceWorkerRegistration
+    && window.ServiceWorkerRegistration.prototype;
+
+  if (swRegistration) {
+    swRegistration.showNotification = function(title, options) {
+      var payload;
+      try {
+        payload = { title: String(title), options: options || {} };
+        // Thrown here rather than at the bridge, so a site gets the TypeError
+        // a browser gives it instead of a message about a message channel.
+        if (JSON.stringify(payload).length > ${64 * 1024}) {
+          return Promise.reject(new TypeError('Notification is too large'));
+        }
+      } catch (e) {
+        return Promise.reject(new TypeError('Notification options must be serializable'));
+      }
+
+      return rpc('notification.show', payload).then(function() {
+        remember('granted');
+      }, function(err) {
+        // A refusal is an answer about the permission, and the only one the
+        // site will get: showNotification does not report why it failed.
+        if (err && /rejected|turned off|refused/i.test(String(err.message))) {
+          remember('denied');
+        }
+        throw err;
+      });
+    };
+
+    swRegistration.getNotifications = function(filter) {
+      var tag = filter && filter.tag ? String(filter.tag) : undefined;
+      // Outside the queue, as \`close\` is, and for the same reason.
+      return call('notification.list', { tag: tag }).then(function(records) {
+        if (!Array.isArray(records)) return [];
+        return records.map(function(record) { return new NappNotification(record); });
+      }, function() {
+        return [];
+      });
+    };
+  }
+`;
+}
+
 export function getNsiteNostrProviderScript(
   pubkey: string | null,
   transport: NsiteRpcTransport = 'postMessage',
@@ -243,6 +460,10 @@ export function getNsiteNostrProviderScript(
   const napp: string[] = [];
   if (options.push) napp.push(NAPP_PUSH_SOURCE);
   if (options.fetch) napp.push(NAPP_FETCH_SOURCE);
+
+  const notifications = options.notify
+    ? notificationSource(options.notifyGrant ?? 'default')
+    : '';
 
   return `(function() {
   'use strict';
@@ -327,7 +548,7 @@ ${receive}
       return call(method, params);
     });
   }
-${options.fetch ? nappFetchImplementation() : ''}
+${options.fetch ? nappFetchImplementation() : ''}${notifications}
   // ------------------------------------------------------------------
   // NIP-07 provider
   // ------------------------------------------------------------------

@@ -15,6 +15,7 @@ import com.getcapacitor.annotation.PermissionCallback;
 
 import org.json.JSONArray;
 import org.json.JSONException;
+import org.json.JSONObject;
 
 import java.io.IOException;
 
@@ -27,9 +28,17 @@ import java.io.IOException;
  * the service is nudged after every change so it can start, stop, or
  * re-subscribe.
  *
+ * {@link #show}, {@link #list} and {@link #close} are the same three things a
+ * site's <i>worker</i> asks for over its reserved path, asked from the site's
+ * window instead — Android's WebView has no Web Notifications in a page any
+ * more than it has them in a worker, so both have to be stood in for. They
+ * meet in {@link NappNotifications}, which is what makes a notification from
+ * an open page indistinguishable from one a push woke the site to send.
+ *
  * Subscriptions cross the bridge as JSON text, for the reason a signed
  * event's tags do: a filter's tag lists are arbitrarily shaped, and
- * Capacitor's object coercion does not keep them intact.
+ * Capacitor's object coercion does not keep them intact. A notification's
+ * payload travels the same way and for the same reason.
  */
 @CapacitorPlugin(
     name = "NappPush",
@@ -131,6 +140,128 @@ public class NappPushPlugin extends Plugin {
         JSObject result = new JSObject();
         result.put("subscriptions", record == null ? "[]" : record.subscriptions.toString());
         call.resolve(result);
+    }
+
+    /**
+     * Post a notification a site asked for from its own window.
+     *
+     * The window's road to the same place the worker's {@code
+     * showNotification} reaches over its reserved path — see
+     * {@link NsiteRequests} — and deliberately the same place. A notification
+     * is a notification: it joins the site's one row, replaces the last one
+     * with its tag, and answers to the same mute switch, whether the site was
+     * open when it said so or asleep.
+     *
+     * The web layer has already asked the user. What is left to refuse here is
+     * what the worker's path refuses too: the OS turned off, or the site
+     * muted between the grant and the post.
+     *
+     * A site with no record yet is written down rather than turned away.
+     * Nothing writes one until a tile for the site has been drawn, so a site
+     * reached straight from a link would otherwise be told no for a reason
+     * that has nothing to do with it — and the record is only wanted for the
+     * name and mark on the row, both of which the caller is holding.
+     */
+    @PluginMethod
+    public void show(PluginCall call) {
+        String siteId = call.getString("siteId");
+        String payload = call.getString("payload");
+
+        if (siteId == null || payload == null) {
+            call.reject("siteId and payload are required");
+            return;
+        }
+
+        JSONObject json;
+        try {
+            json = new JSONObject(payload);
+        } catch (JSONException e) {
+            call.reject("payload must be a JSON object");
+            return;
+        }
+
+        if (NsiteSites.load(getContext(), siteId) == null) {
+            String label = call.getString("label");
+            String event = call.getString("event");
+            if (label == null || label.isEmpty() || event == null) {
+                call.reject("The site has no record to show a notification against");
+                return;
+            }
+            try {
+                NsiteSites.save(getContext(), siteId, label, event, null, null, null);
+            } catch (IOException e) {
+                call.reject("Could not record the site", e);
+                return;
+            }
+        }
+
+        JSObject result = new JSObject();
+        result.put("shown", NappNotifications.show(getContext(), siteId, json));
+        call.resolve(result);
+    }
+
+    /**
+     * A site's live notifications, for {@code registration.getNotifications()}.
+     *
+     * Its own only — the site id is the one its window was opened for, so a
+     * site can no more read another's tray from a page than its worker can
+     * from the reserved path.
+     */
+    @PluginMethod
+    public void list(PluginCall call) {
+        String siteId = call.getString("siteId");
+        if (siteId == null) {
+            call.reject("siteId is required");
+            return;
+        }
+
+        String tag = call.getString("tag");
+        JSONArray out = new JSONArray();
+
+        for (NappNotificationStore.Entry entry : NappNotificationStore.list(getContext(), siteId)) {
+            if (tag != null && !tag.equals(entry.tag)) continue;
+            try {
+                JSONObject json = new JSONObject();
+                json.put("key", entry.key);
+                json.put("tag", entry.tag);
+                json.put("title", entry.title);
+                json.put("options", new JSONObject(entry.options));
+                out.put(json);
+            } catch (JSONException e) {
+                // An unreadable record is one the site never hears about.
+            }
+        }
+
+        JSObject result = new JSObject();
+        result.put("notifications", out.toString());
+        call.resolve(result);
+    }
+
+    /**
+     * Take one of a site's notifications down.
+     *
+     * The key is checked against the site's own prefix before anything is
+     * cancelled, as {@link NsiteRequests} checks it: the key is the site's to
+     * hold but not to invent, and a site that made one up could otherwise
+     * reach into another's row.
+     */
+    @PluginMethod
+    public void close(PluginCall call) {
+        String siteId = call.getString("siteId");
+        String key = call.getString("key");
+
+        if (siteId == null || key == null) {
+            call.reject("siteId and key are required");
+            return;
+        }
+
+        if (!key.startsWith(NsiteSites.key(siteId) + "/")) {
+            call.reject("That notification is not this site's");
+            return;
+        }
+
+        NappNotifications.cancel(getContext(), siteId, key);
+        call.resolve();
     }
 
     /**

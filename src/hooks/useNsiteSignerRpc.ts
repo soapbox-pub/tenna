@@ -1,19 +1,31 @@
 /**
  * Hook that provides a JSON-RPC handler for the calls a sandboxed nsite makes
- * on its host: NIP-07 signer calls, proxied to the user's signer, and
- * `napp.push.*` calls, which hand the site's relay subscriptions to the native
- * push service.
+ * on its host: NIP-07 signer calls, proxied to the user's signer;
+ * `notification.*` calls, which put a notification in the shade from the
+ * site's own window; and `napp.push.*`, which hands the site's relay
+ * subscriptions to the native push service so it can be woken while closed.
  *
  * Each method is gated by the permission system. If no stored decision
  * exists, a prompt is shown to the user. Prompts are serialized (one at a
  * time) to prevent overwhelming the user.
  *
+ * **Two stores answer, and the split is the point.** A signer call is a
+ * question about the user's key, remembered per identity in
+ * `nsitePermissions`, and refused outright when nobody is signed in. A
+ * notification is a question about the device, remembered per site in
+ * `nsiteBrowserPermissions` — as every browser has keyed it — and answerable
+ * for a logged-out reader. The two notification roads, a page saying something
+ * now and a relay subscription saying something later, are one grant, because
+ * to the person being asked they are one thing.
+ *
  * This is the path for a site with a window. The same site's **service
  * worker** asks for the same things over a reserved path answered in native
- * code — see `NsiteWorkerSigner.java` — because a worker woken by a push has
- * no window and no bridge to reach this hook with. Both consult one store, so
- * a grant made here is honoured there; see `nsitePermissions.ts`.
+ * code — see `NsiteWorkerSigner.java` and `NsiteRequests.java` — because a
+ * worker woken by a push has no window and no bridge to reach this hook with.
+ * Both roads reach one store and one tray, so a grant made here is honoured
+ * there and a notification posted here is the worker's to replace.
  */
+import type { NostrEvent } from '@nostrify/nostrify';
 import { useCallback, useRef, useState } from 'react';
 
 import { useCurrentUser } from '@/hooks/useCurrentUser';
@@ -24,6 +36,7 @@ import {
   setNsiteBrowserPermission,
   type NsiteBrowserPermissionType,
 } from '@/lib/nsiteBrowserPermissions';
+
 import {
   getNsitePermission,
   setNsitePermission,
@@ -68,6 +81,13 @@ interface UseNsiteSignerRpcOptions {
   siteId: string;
   /** Human-readable site name for storage. */
   siteName: string;
+  /**
+   * The site's NIP-5A manifest event.
+   *
+   * Carried only so that a notification can write the site down if nothing
+   * else has yet; see `NappPushPlugin.show`.
+   */
+  event?: NostrEvent;
 }
 
 interface UseNsiteSignerRpcResult {
@@ -104,6 +124,7 @@ interface UseNsiteSignerRpcResult {
 export function useNsiteSignerRpc({
   siteId,
   siteName,
+  event: manifest,
 }: UseNsiteSignerRpcOptions): UseNsiteSignerRpcResult {
   const { user } = useCurrentUser();
   const [pendingPrompt, setPendingPrompt] = useState<NsitePromptState | null>(null);
@@ -242,6 +263,149 @@ export function useNsiteSignerRpc({
   );
 
   // ---------------------------------------------------------------------------
+  // Notifications
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Both halves of being allowed to notify: the site's, and the device's.
+   *
+   * Asked in that order, because the second opens a prompt drawn by the OS
+   * over the top of everything, and putting that in front of a site the user
+   * has not agreed to hear from yet asks the wrong question first.
+   *
+   * Throws rather than returning false, so a caller can simply await it. The
+   * message is what the site sees.
+   */
+  const askToNotify = useCallback(async (): Promise<void> => {
+    if (!(await onCapability(['notifications']))) {
+      throw new Error('User rejected');
+    }
+
+    const { granted } = await NappPush.requestPermission();
+    if (!granted) throw new Error('Notifications are turned off for Tenna');
+  }, [onCapability]);
+
+  /**
+   * Post a notification for the site's own window.
+   *
+   * Handed to the same native call the site's worker reaches over its
+   * reserved path, so what appears is the site's one row, tagged and replaced
+   * and muted by the same rules. See `NappPushPlugin.show`.
+   */
+  const showNotification = useCallback(
+    async (payload: unknown): Promise<null> => {
+      if (!supportsNappPush()) {
+        throw new Error('Notifications are not available on this platform');
+      }
+      if (!manifest) {
+        throw new Error('No site to show a notification for');
+      }
+
+      // The payload is the site's own object, already checked for size and
+      // serialisability on the way out of the shim. Re-encoded here rather
+      // than passed through, because what crosses the bridge is text.
+      let text: string;
+      try {
+        text = JSON.stringify(payload ?? {});
+      } catch {
+        throw new Error('Notification options must be serializable');
+      }
+
+      await askToNotify();
+
+      const { shown } = await NappPush.show({
+        siteId,
+        label: siteName,
+        event: JSON.stringify(manifest),
+        payload: text,
+      });
+
+      // The two refusals a worker gets too: notifications off for Tenna
+      // between the grant and the post, or the site muted.
+      if (!shown) throw new Error('Notification refused');
+      return null;
+    },
+    [siteId, siteName, manifest, askToNotify],
+  );
+
+  /** The site's live notifications, as `registration.getNotifications()` wants them. */
+  const listNotifications = useCallback(
+    async (tag: unknown): Promise<unknown> => {
+      if (!supportsNappPush()) return [];
+
+      const { notifications } = await NappPush.list({
+        siteId,
+        ...(typeof tag === 'string' && tag ? { tag } : {}),
+      });
+      return JSON.parse(notifications) as unknown;
+    },
+    [siteId],
+  );
+
+  /** Take one of the site's notifications down. Asks nobody anything. */
+  const closeNotification = useCallback(
+    async (key: unknown): Promise<null> => {
+      if (!supportsNappPush() || typeof key !== 'string' || !key) return null;
+      await NappPush.close({ siteId, key });
+      return null;
+    },
+    [siteId],
+  );
+
+  /**
+   * What `Notification.permission` should read, asked again.
+   *
+   * The value a site sees at load is stamped into the provider script, which
+   * is exact at the moment the page starts and cannot stay that way: a grant
+   * revoked from the shield menu, or the site muted, or Tenna's notifications
+   * turned off in system settings, all happen behind the site's back. So the
+   * shim asks again whenever it has reason to.
+   *
+   * Three things have to agree for this to read `granted`, and any one of them
+   * saying no is `denied` — which is the web's word for "do not ask, it will
+   * not work", and true of all three.
+   */
+  const notifyPermission = useCallback(async (): Promise<
+    'granted' | 'denied' | 'default'
+  > => {
+    if (!supportsNappPush()) return 'denied';
+
+    const stored = getNsiteBrowserPermission(siteId, 'notifications');
+    if (stored === 'deny') return 'denied';
+
+    try {
+      const [{ granted }, { muted }] = await Promise.all([
+        NappPush.status(),
+        NappPush.getMuted({ siteId }),
+      ]);
+      if (!granted || muted) return 'denied';
+    } catch {
+      // Nothing to ask, or nothing answered. The grant is all that is known,
+      // and reporting it is better than reporting a refusal nobody made.
+    }
+
+    return stored === 'allow' ? 'granted' : 'default';
+  }, [siteId]);
+
+  /**
+   * `Notification.requestPermission()` — which asks, rather than reporting.
+   *
+   * Never rejects. The web's version resolves with whatever the answer turned
+   * out to be, including "no", and a site that catches nothing should not be
+   * left with an unhandled rejection for having been told no.
+   */
+  const requestNotifyPermission = useCallback(async (): Promise<
+    'granted' | 'denied' | 'default'
+  > => {
+    try {
+      await askToNotify();
+      return 'granted';
+    } catch {
+      return await notifyPermission();
+    }
+  }, [askToNotify, notifyPermission]);
+
+  // ---------------------------------------------------------------------------
   // RPC handler
   // ---------------------------------------------------------------------------
 
@@ -250,12 +414,67 @@ export function useNsiteSignerRpc({
       method: string,
       params: unknown,
     ): Promise<unknown> => {
+      const p = (params ?? {}) as Record<string, unknown>;
+
+      // ------------------------------------------------------------------
+      // Notifications, and the subscriptions behind them
+      // ------------------------------------------------------------------
+      //
+      // Answered whether or not anybody is signed in, unlike everything
+      // below. A notification is a thing that appears on a device: the
+      // question it raises is about this phone and this site, it is stored
+      // that way, and a site shows one from its own window with no account in
+      // sight. Refusing for want of a login would be refusing to answer a
+      // question nobody asked about a key.
+      switch (method) {
+        case 'notification.show':
+          return await showNotification(p.payload);
+
+        case 'notification.list':
+          return await listNotifications(p.tag);
+
+        case 'notification.close':
+          return await closeNotification(p.key);
+
+        case 'notification.permission':
+          return await notifyPermission();
+
+        case 'notification.request':
+          return await requestNotifyPermission();
+
+        case 'napp.push.get': {
+          if (!supportsNappPush()) throw new Error('Push is not available on this platform');
+          const { subscriptions } = await NappPush.get({ siteId });
+          return JSON.parse(subscriptions) as unknown;
+        }
+
+        case 'napp.push.set': {
+          if (!supportsNappPush()) throw new Error('Push is not available on this platform');
+
+          // Refused before the user is asked: a prompt for a request that
+          // would then fail on its shape is a prompt for nothing.
+          const subscriptions = normalizeNappSubscriptions(p.subscriptions);
+
+          // Clearing needs no one's permission.
+          if (subscriptions.length > 0) {
+            await askToNotify();
+          }
+
+          await NappPush.set({
+            siteId,
+            label: siteName,
+            subscriptions: JSON.stringify(subscriptions),
+          });
+          return undefined;
+        }
+      }
+
+      // Everything past here is a question about the user's key.
       if (!user) {
         throw new Error('Not logged in');
       }
 
       const signer = user.signer;
-      const p = (params ?? {}) as Record<string, unknown>;
 
       switch (method) {
         // ------------------------------------------------------------------
@@ -380,43 +599,22 @@ export function useNsiteSignerRpc({
           return await signer.nip44.decrypt(pubkey, ciphertext);
         }
 
-        // ------------------------------------------------------------------
-        // napp.push — relay subscriptions Tenna holds open for the site
-        // ------------------------------------------------------------------
-        case 'napp.push.get': {
-          if (!supportsNappPush()) throw new Error('Push is not available on this platform');
-          const { subscriptions } = await NappPush.get({ siteId });
-          return JSON.parse(subscriptions) as unknown;
-        }
-
-        case 'napp.push.set': {
-          if (!supportsNappPush()) throw new Error('Push is not available on this platform');
-
-          // Refused before the user is asked: a prompt for a request that
-          // would then fail on its shape is a prompt for nothing.
-          const subscriptions = normalizeNappSubscriptions(p.subscriptions);
-
-          // Clearing needs no one's permission.
-          if (subscriptions.length > 0) {
-            await checkPermission('push', null, { type: 'push', kind: null });
-
-            const { granted } = await NappPush.requestPermission();
-            if (!granted) throw new Error('Notifications are turned off for Tenna');
-          }
-
-          await NappPush.set({
-            siteId,
-            label: siteName,
-            subscriptions: JSON.stringify(subscriptions),
-          });
-          return undefined;
-        }
-
         default:
           throw new Error(`Method not found: ${method}`);
       }
     },
-    [user, checkPermission, siteId, siteName],
+    [
+      user,
+      checkPermission,
+      siteId,
+      siteName,
+      askToNotify,
+      showNotification,
+      listNotifications,
+      closeNotification,
+      notifyPermission,
+      requestNotifyPermission,
+    ],
   );
 
   return { onRpc, onCapability, pendingPrompt, pendingPromptId, resolvePrompt };

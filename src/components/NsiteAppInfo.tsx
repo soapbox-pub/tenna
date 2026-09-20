@@ -410,20 +410,23 @@ export function NsiteAppInfo({
   const handleRemove = (perm: NsitePermission) => {
     if (!user) return;
     void removeNsitePermission(siteId, user.pubkey, perm.type, perm.kind);
-    if (perm.type === 'push') forgetSubscriptions();
   };
 
   const handleRemoveBrowser = (perm: NsiteBrowserPermission) => {
     removeNsiteBrowserPermission(siteId, perm.type);
+    if (perm.type === 'notifications') forgetSubscriptions();
   };
 
   const handleClearAll = () => {
+    // Before the signer grants, and outside the check for one: taking back
+    // what the site may do with the device is not a question about an account,
+    // and a logged-out reader clearing this list still means it.
+    const couldNotify = browserPermissions.some((perm) => perm.type === 'notifications');
     clearNsiteBrowserPermissions(siteId);
+    if (couldNotify) forgetSubscriptions();
 
     if (!user) return;
-    const hadPush = permissions.some((perm) => perm.type === 'push');
     void clearNsitePermissions(siteId, user.pubkey);
-    if (hadPush) forgetSubscriptions();
   };
 
   /**

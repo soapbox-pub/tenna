@@ -9,7 +9,7 @@ import { getKindLabel } from '@/lib/kindLabels';
  * A site in a window, an app on the phone, and a client on the other end of a
  * relay ask the same questions about the same key, so they get the same
  * vocabulary and the same sheet. The last three are the ones only an
- * application can ask; the three device permissions are ones only a site can.
+ * application can ask; the four device permissions are ones only a site can.
  */
 export type PermissionKind =
   | 'signEvent'
@@ -17,7 +17,7 @@ export type PermissionKind =
   | 'nip04.decrypt'
   | 'nip44.encrypt'
   | 'nip44.decrypt'
-  | 'push'
+  | 'notifications'
   | 'camera'
   | 'microphone'
   | 'location'
@@ -36,7 +36,7 @@ export function permissionIcon(type: PermissionKind): ReactNode {
     case 'nip44.decrypt':
     case 'decryptZapEvent':
       return <KeyRound className="size-5 text-violet-500" />;
-    case 'push':
+    case 'notifications':
       return <Bell className="size-5 text-emerald-500" />;
     case 'camera':
       return <Camera className="size-5 text-rose-500" />;
@@ -63,7 +63,7 @@ export function permissionTitle(type: PermissionKind, kind: number | null): stri
       return 'Encrypt message (NIP-44)';
     case 'nip44.decrypt':
       return 'Decrypt message (NIP-44)';
-    case 'push':
+    case 'notifications':
       return 'Send notifications';
     case 'camera':
       return 'Use the camera';
@@ -90,8 +90,8 @@ export function permissionDescription(type: PermissionKind): string {
     case 'nip04.decrypt':
     case 'nip44.decrypt':
       return 'This app wants to decrypt a message using your keys.';
-    case 'push':
-      return 'This app wants Tenna to watch relays for it and notify you of new events, even while it is closed.';
+    case 'notifications':
+      return 'This app wants to send you notifications, including while it is closed.';
     case 'camera':
       return 'This app wants to see through your camera while you are using it.';
     case 'microphone':

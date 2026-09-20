@@ -120,6 +120,10 @@ Tenna holds open on the site's behalf, delivered to the site's own service
 worker as ordinary `push` events; `share_target` in the web app manifest,
 honoured once the user pins the site to their home screen.
 
+Notifications themselves are the plain `registration.showNotification()`,
+which Android's WebView does not have and Tenna stands in for — in the worker
+and in the site's own window alike, onto one tray per site, under one grant.
+
 A site written for the web is written for both. See **[NAPP.md](NAPP.md)** for
 the whole of it.
 

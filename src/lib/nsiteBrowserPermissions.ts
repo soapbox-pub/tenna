@@ -12,14 +12,28 @@
  *
  * So these are stored per site, they survive a logout, and they are asked and
  * revoked whether or not anyone is signed in.
+ *
+ * `notifications` is here for the same reason, and used to be elsewhere. It
+ * was once a `push` permission in `nsitePermissions`, filed with the signer
+ * calls because the only way a site could notify anyone was to have Tenna
+ * watch relays for it — and that looked like a question about an account. It
+ * is not. A notification is a thing that appears on a device, the web has
+ * keyed its permission on the origin since the day it shipped, and a site
+ * shows one from its own window with nobody signed in at all. See
+ * `migrateNotificationGrants`.
  */
+import { takeLegacyPushGrants } from '@/lib/nsitePermissions';
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
 /** A capability of the device a site can ask for. */
-export type NsiteBrowserPermissionType = 'camera' | 'microphone' | 'location';
+export type NsiteBrowserPermissionType =
+  | 'camera'
+  | 'microphone'
+  | 'location'
+  | 'notifications';
 
 /** A single remembered decision. */
 export interface NsiteBrowserPermission {
@@ -131,6 +145,57 @@ export function getNsiteBrowserAllowance(
 }
 
 // ---------------------------------------------------------------------------
+// Migration
+// ---------------------------------------------------------------------------
+
+const MIGRATED_KEY = 'nostr:nsite-notification-grants-migrated';
+
+/**
+ * Move the grants users made when this was a `push` permission, once.
+ *
+ * A grant is a grant. Asking again because the store moved underneath them is
+ * the thing that teaches people to press Allow without reading, so the answer
+ * they already gave is carried over rather than forgotten.
+ *
+ * It does widen: one made while signed in as one account becomes a grant that
+ * holds for every account, and for none. That is the whole point of the move —
+ * a notification was never a question about a key — and the alternative is
+ * strictly worse, since nothing reads the old type any more.
+ *
+ * Only the accounts the app still knows about can be swept, because the old
+ * store is keyed by account and there is no way to enumerate one that has been
+ * signed out of. A grant stranded that way costs its site one prompt.
+ *
+ * The flag is set only after every account has been read, so an interrupted
+ * run repeats: a grant already carried over is no longer in the old store to
+ * be found a second time.
+ */
+export async function migrateNotificationGrants(pubkeys: string[]): Promise<void> {
+  try {
+    if (localStorage.getItem(MIGRATED_KEY)) return;
+  } catch {
+    // No memory of having run. Running again is harmless.
+  }
+
+  for (const pubkey of pubkeys) {
+    for (const grant of await takeLegacyPushGrants(pubkey)) {
+      // Never downgrade an answer already given here. Two accounts can
+      // disagree about the same site, and between "yes" and "no" for a
+      // permission the user is about to be able to see and change, the
+      // refusal is the one to keep.
+      if (getNsiteBrowserPermission(grant.siteId, 'notifications') === 'deny') continue;
+      setNsiteBrowserPermission(grant.siteId, grant.siteName, 'notifications', grant.allowed);
+    }
+  }
+
+  try {
+    localStorage.setItem(MIGRATED_KEY, '1');
+  } catch {
+    // Swept again next launch, which finds nothing and costs a read.
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Labels
 // ---------------------------------------------------------------------------
 
@@ -144,5 +209,7 @@ export function getBrowserPermissionLabel(
       return 'Use the microphone';
     case 'location':
       return 'Use your location';
+    case 'notifications':
+      return 'Send notifications';
   }
 }

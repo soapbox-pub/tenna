@@ -1,5 +1,34 @@
 # Changelog
 
+## [Unreleased]
+
+A site can put a notification in the shade while it is open, and not only
+while it is closed. Until now `registration.showNotification()` worked in a
+site's service worker and was simply missing from its page — so a site with
+something to say about what the reader was looking at had no way to say it.
+Both roads now lead to the same row.
+
+### Added
+
+- Notifications from a site's own window, on Android. `Notification` and
+  `registration.showNotification()` work in the page as they do in the worker
+  and as they do in a mobile browser, onto the same tray: a notification put
+  up by the page is replaced by a push with the same tag, closed by the
+  worker, and listed by either. `new Notification()` throws the `TypeError`
+  Chrome and Firefox for Android throw, pointing at `showNotification()`,
+  because a click belongs to the service worker on Android and always has.
+  `Notification.permission` and `requestPermission()` are real.
+
+### Changed
+
+- "Send notifications" is now a decision about a site rather than about an
+  account. It used to be filed with the permissions that concern the user's
+  key, which meant it was forgotten on signing out and could not be given at
+  all by a reader who had never signed in — neither of which is true of a
+  notification, and neither of which is how any browser has ever treated one.
+  Permissions already given are carried over; nobody is asked twice. A site
+  can now notify a reader who is not signed in.
+
 ## [0.9.0] - 2026-09-20
 
 A notification from a site can say what it is actually about. The part of a

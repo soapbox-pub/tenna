@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import type { NsiteFrameProps } from '@/components/nsite/types';
 import { supportsNappPush } from '@/lib/nappPushPlugin';
+import { getNsiteBrowserPermission } from '@/lib/nsiteBrowserPermissions';
 import { buildManifest, resolveServers } from '@/lib/nsiteFiles';
 import {
   NsiteWebView,
@@ -35,18 +36,35 @@ import { cn } from '@/lib/utils';
 /**
  * The script to inject into the site's window, or nothing to inject.
  *
- * Nothing when there is nothing to define: no key to sign with and no member
- * of `window.napp` this platform can honour. That is iOS with nobody signed
- * in, and installing an empty function there would cost a user script and a
- * message handler to define no API at all.
+ * Nothing when there is nothing to define: no key to sign with, no member of
+ * `window.napp` this platform can honour, and no Notifications API to stand
+ * in for. That is iOS with nobody signed in, and installing an empty function
+ * there would cost a user script and a message handler to define no API at
+ * all.
  */
-function nsiteProviderScript(pubkey: string | undefined): string | undefined {
+function nsiteProviderScript(
+  pubkey: string | undefined,
+  siteId: string,
+): string | undefined {
   const push = supportsNappPush();
   const fetch = supportsNappFetch();
+  // The same platforms: showing one needs the notification machinery the push
+  // service already owns. Named apart from `push` because they are two
+  // different things a site asks for, and only one of them involves a relay.
+  const notify = push;
 
-  if (!pubkey && !push && !fetch) return undefined;
+  if (!pubkey && !push && !fetch && !notify) return undefined;
 
-  return getNsiteNostrProviderScript(pubkey ?? null, 'webMessage', { push, fetch });
+  // Read here, synchronously, because `Notification.permission` is a getter
+  // and a site reads it before it does anything else. See `notifyGrant`.
+  const stored = notify ? getNsiteBrowserPermission(siteId, 'notifications') : 'ask';
+
+  return getNsiteNostrProviderScript(pubkey ?? null, 'webMessage', {
+    push,
+    fetch,
+    notify,
+    notifyGrant: stored === 'allow' ? 'granted' : stored === 'deny' ? 'denied' : 'default',
+  });
 }
 
 export function NsiteNative({
@@ -185,7 +203,7 @@ export function NsiteNative({
         // pictures to load. The script withholds `window.nostr` when there is
         // no pubkey to put in it — and is withheld entirely when it would
         // define nothing at all, which on iOS with nobody signed in it would.
-        providerScript: nsiteProviderScript(pubkey),
+        providerScript: nsiteProviderScript(pubkey, getNsiteSubdomain(event)),
         // The first URL, when the window was opened out of the share sheet.
         // Held in a ref like the callbacks: a share belongs to the open, and
         // re-reading it later would only reload the site over the user.

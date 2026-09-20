@@ -26,6 +26,44 @@ export interface NappPushPlugin {
   get(options: { siteId: string }): Promise<{ subscriptions: string }>;
 
   /**
+   * Post a notification for a site, from its window.
+   *
+   * The same call the site's worker makes over its own reserved path, landing
+   * in the same place — so a notification from an open page is grouped,
+   * tagged, replaced and muted exactly as one from a push is. There is no
+   * second kind.
+   *
+   * `payload` is `{title, options}` as the Notifications API defines it, as
+   * JSON text.
+   *
+   * `label` and `event` are what to write the site down as if it has no record
+   * yet, which decides the name and the mark on the row. A site reached
+   * straight from a link may not have one: nothing writes a record until a
+   * tile for the site has been drawn.
+   *
+   * `shown` is false when the OS will not show it or the user has muted the
+   * site — the same two refusals the worker gets.
+   */
+  show(options: {
+    siteId: string;
+    label: string;
+    /** The NIP-5A manifest event, as JSON text. */
+    event: string;
+    payload: string;
+  }): Promise<{ shown: boolean }>;
+
+  /**
+   * A site's live notifications, for `registration.getNotifications()`.
+   *
+   * Its own only, and the same list its worker sees. Filtered by `tag` when
+   * one is given, as the API defines.
+   */
+  list(options: { siteId: string; tag?: string }): Promise<{ notifications: string }>;
+
+  /** Take one of a site's notifications down, by the key it was filed under. */
+  close(options: { siteId: string; key: string }): Promise<void>;
+
+  /**
    * Turn a site's notifications off, or back on.
    *
    * The user's answer, not the site's: it is kept apart from the

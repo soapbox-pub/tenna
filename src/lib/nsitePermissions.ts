@@ -45,23 +45,23 @@ export { getKindLabel } from '@/lib/kindLabels';
 /**
  * Operations that require permission. `getPublicKey` is always allowed.
  *
- * `push` is the one that isn't a signer call: it is a site asking to set
- * relay subscriptions that Tenna will hold open on its behalf and wake it for,
- * which is to say asking to send notifications.
+ * Every one of them is a question about the user's key, which is what makes
+ * this store the right place for them and what decides how they are keyed.
  *
  * The strings are shared with `SignerTypes.java`, deliberately: an app asking
  * to decrypt and a site asking to decrypt are the same question about the same
  * key, and since Android now files both in one store they have to spell it the
- * same way. `push` has no native counterpart — nothing but a site can ask for
- * it — but it is stored alongside the rest.
+ * same way.
+ *
+ * `push` was once on this list and is not any more. See
+ * {@link LEGACY_PUSH_TYPE}.
  */
 export type NsitePermissionType =
   | 'signEvent'
   | 'nip04.encrypt'
   | 'nip04.decrypt'
   | 'nip44.encrypt'
-  | 'nip44.decrypt'
-  | 'push';
+  | 'nip44.decrypt';
 
 /** A single remembered permission decision. */
 export interface NsitePermission {
@@ -179,6 +179,97 @@ function migrate(): Promise<void> {
   })();
 
   return migration;
+}
+
+/**
+ * The type notifications used to be filed under, here, per account.
+ *
+ * They are now a per-site decision about the device, kept in
+ * `nsiteBrowserPermissions` — see the note at the top of that file. Nothing
+ * writes this type any more; what is left is whatever users granted before
+ * the move, and {@link takeLegacyPushGrants} is how it gets out.
+ */
+const LEGACY_PUSH_TYPE: string = 'push';
+
+/** One grant found under the old type, on its way to the new store. */
+export interface LegacyPushGrant {
+  siteId: string;
+  siteName: string;
+  allowed: boolean;
+}
+
+/**
+ * Read out every `push` grant this account made, and revoke them here.
+ *
+ * Revoked as they are read, and returned rather than moved, because the store
+ * they are going to is not this module's to write. The caller writes them; a
+ * caller that fails to leaves the user with one prompt they have seen before,
+ * which is the mild end of the two ways this can go wrong. The other — leaving
+ * them behind — is worse than a prompt: nothing reads the type any more, so
+ * the row would sit in the permissions list forever with no label and no way
+ * to act on it.
+ */
+export async function takeLegacyPushGrants(userPubkey: string): Promise<LegacyPushGrant[]> {
+  const found: LegacyPushGrant[] = [];
+
+  if (native()) {
+    await migrate();
+    for (const app of await listSignerApps(userPubkey)) {
+      if (app.kind !== 'nsite') continue;
+      for (const permission of app.permissions) {
+        if (permission.type !== LEGACY_PUSH_TYPE) continue;
+        found.push({
+          siteId: app.requesterId,
+          siteName: app.name || app.requesterId,
+          allowed: permission.allowed,
+        });
+      }
+    }
+
+    for (const grant of found) {
+      try {
+        await SignerApps.revoke({
+          account: userPubkey,
+          requesterId: grant.siteId,
+          type: LEGACY_PUSH_TYPE,
+        });
+      } catch {
+        // Still returned, so the new store gets it. A row that would not go
+        // away is a row the user can clear by hand.
+      }
+    }
+
+    if (found.length > 0) announce();
+    return found;
+  }
+
+  const allowances = readAllowances();
+  let changed = false;
+
+  for (const allowance of allowances) {
+    if (allowance.userPubkey !== userPubkey) continue;
+
+    const keep = allowance.permissions.filter((p) => p.type !== LEGACY_PUSH_TYPE);
+    if (keep.length === allowance.permissions.length) continue;
+
+    for (const permission of allowance.permissions) {
+      if (permission.type !== LEGACY_PUSH_TYPE) continue;
+      found.push({
+        siteId: allowance.siteId,
+        siteName: allowance.siteName || allowance.siteId,
+        allowed: permission.allowed,
+      });
+    }
+
+    allowance.permissions = keep;
+    changed = true;
+  }
+
+  if (changed) {
+    writeAllowances(allowances.filter((a) => a.permissions.length > 0));
+  }
+
+  return found;
 }
 
 /** Whether the grants for sites live natively on this platform. */
@@ -441,7 +532,5 @@ export function getPermissionLabel(
       return 'Encrypt (NIP-44)';
     case 'nip44.decrypt':
       return 'Decrypt (NIP-44)';
-    case 'push':
-      return 'Send notifications';
   }
 }

@@ -100,7 +100,7 @@ export function NsiteViewer({
   // The tile's name rather than the site's own, which may still be a round
   // trip away: a site that asks the moment it loads must not be written down
   // under a worse name for having asked early.
-  const signerRpc = useNsiteSignerRpc({ siteId, siteName: tile.name });
+  const signerRpc = useNsiteSignerRpc({ siteId, siteName: tile.name, event });
 
   // Whether the site's own manifest is worth going and reading.
   //

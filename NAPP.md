@@ -206,6 +206,9 @@ first returns the site's own live notifications, filtered by `tag` if asked,
 and the second takes one down. `Notification.permission` in the worker reads
 `granted`.
 
+The same three are available **from the site's window**, and reach the same
+tray; see [Notifications from the page](#notifications-from-the-page).
+
 The whole payload — title and options together — travels as a URL, so it is
 capped at **64 KiB** of JSON. That is a great deal of words and not very much
 inlined artwork; see [Pictures](#pictures).
@@ -431,13 +434,71 @@ moving on to the next event for the site, with a timeout of twenty seconds.
   notification, not a conversation, and giving each tag a row of its own would
   spend a rate-limited, evictable resource on a guess.
 - **Calls.** No `CallStyle`, no full-screen intent, no ringtone channel.
-- **`Notification` and `showNotification` in the page** are not shimmed;
-  only the worker's are.
 - **NIP-42.** The service holds no keys, so it cannot answer an `AUTH`
   challenge. A relay that requires authentication to serve a filter, as many
   do for gift wraps addressed to a user, will not deliver it.
 - **Web push on the web.** The iframe path used on the web and on iOS does
   not define `window.napp`.
+
+### Notifications from the page
+
+A site does not have to be asleep to notify. Everything above is available
+from the site's own window, under the names the web gives it:
+
+```js
+const registration = await navigator.serviceWorker.ready;
+
+if (Notification.permission !== 'granted') {
+  await Notification.requestPermission();
+}
+
+await registration.showNotification('Alice', { body: 'sent a message', tag: 'dm-1' });
+```
+
+`showNotification`, `getNotifications` and `close` behave exactly as they do in
+the worker, take the same options, and work on the **same tray** — a
+notification posted from the page is closed by the worker, replaced by a push
+with the same `tag`, and listed by either. There is one row for the site and
+one set of rules for what goes in it, whoever put it there.
+
+`Notification.permission` is real in the page, where the worker's always reads
+`granted`. It is `denied` when the site has been refused, when the user has
+muted it, or when Tenna's own notifications are off in system settings — all
+three being things a prompt cannot fix. `Notification.requestPermission()`
+asks, and resolves with the answer; the legacy callback form works too.
+
+#### `new Notification()` throws
+
+As it does in every browser on Android:
+
+```
+TypeError: Failed to construct 'Notification': Illegal constructor.
+Use ServiceWorkerRegistration.showNotification() instead.
+```
+
+This is not Tenna being different. The Notifications API has two kinds of
+notification — a *non-persistent* one from the constructor, whose click fires
+on the object in the page, and a *persistent* one from `showNotification()`,
+whose click fires as `notificationclick` in the service worker — and Chrome
+and Firefox for Android both implement only the second. Tenna throws the same
+`TypeError` with the same message.
+
+So **a site needs a service worker to notify from its window**, and its click
+handling lives in that worker, exactly as it would in a mobile browser:
+
+```js
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  event.waitUntil(clients.openWindow(event.notification.data.url));
+});
+```
+
+The permission is the same one `napp.push.set` asks for. A site granted one
+has been granted the other; there is no second question, because to the person
+answering it there is no second thing being asked. It is a decision about this
+site on this phone, so it survives signing out, and — unlike everything in
+[`self.nostr`](#selfnostr--the-signer-inside-the-worker) — a site can notify a
+reader who is not signed in at all.
 
 ## `napp.fetch` — a request without CORS
 

@@ -111,6 +111,9 @@ public class NsiteWebViewPlugin extends Plugin {
     /** Where the provider script asks whether it may send raw bytes. */
     private static final String BINARY_MESSAGES_PLACEHOLDER = "%%NAPP_BINARY%%";
 
+    /** Where it asks whether this device will show the site anything at all. */
+    private static final String NOTIFY_DEVICE_PLACEHOLDER = "%%NAPP_NOTIFY_DEVICE%%";
+
     @Nullable private ViewGroup container;
     @Nullable private WebView webView;
     @Nullable private NsiteFileServer fileServer;
@@ -1172,6 +1175,16 @@ public class NsiteWebViewPlugin extends Plugin {
             supportsBinaryMessages() ? "true" : "false"
         );
 
+        // Whether a notification from this site could appear at all, which is
+        // the device's half of `Notification.permission`. Left as a hole for
+        // the same reason: the web layer knows what the site was granted and
+        // this side knows what the phone will do with it, and the answer has
+        // to be right on a site's very first synchronous read.
+        providerScript = providerScript.replace(
+            NOTIFY_DEVICE_PLACEHOLDER,
+            notificationsPossible() ? "true" : "false"
+        );
+
         if (!WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER)
             || !WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {
             // Without both, the provider would either arrive too late to be
@@ -1187,6 +1200,21 @@ public class NsiteWebViewPlugin extends Plugin {
         });
 
         WebViewCompat.addDocumentStartJavaScript(view, providerScript, allowed);
+    }
+
+    /**
+     * Whether anything this site posts could be shown.
+     *
+     * The two refusals that have nothing to do with what the site was granted:
+     * the user turned Tenna's notifications off in system settings, or muted
+     * this site in particular. Either makes {@code Notification.permission}
+     * read {@code denied}, which is the truthful answer — a prompt would not
+     * fix either one.
+     */
+    private boolean notificationsPossible() {
+        String siteId = NsiteOrigins.siteIdFor(host);
+        if (siteId == null) return false;
+        return NappNotifications.isEnabled(getContext()) && !NappMuted.isMuted(getContext(), siteId);
     }
 
     /**

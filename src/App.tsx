@@ -9,6 +9,7 @@ import NostrProvider from '@/components/NostrProvider';
 import { NativeAccounts } from '@/components/NativeAccounts';
 import { NativeKeys } from '@/components/NativeKeys';
 import { NostrSync } from '@/components/NostrSync';
+import { NsiteGrants } from '@/components/NsiteGrants';
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { NostrLoginProvider } from '@nostrify/react/login';
@@ -109,6 +110,12 @@ export function App() {
                 with no WebView to ask. See `NativeAccounts`.
               */}
               <NativeAccounts />
+              {/*
+                Notifications used to be a permission about an account and are
+                now one about a site, and the grants users already made are
+                carried across on sight. See `NsiteGrants`.
+              */}
+              <NsiteGrants />
               <TooltipProvider>
                 <Toaster />
                 <Suspense>

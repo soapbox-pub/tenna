@@ -1,5 +1,36 @@
 # Changelog
 
+## [0.9.0] - 2026-09-20
+
+A notification from a site can say what it is actually about. The part of a
+site that runs while the site is closed can now ask Tenna to sign or to
+decrypt, with the permission it already has in the site's own window, so a
+message that arrives sealed turns up in the shade as words rather than as "New
+message". And an event arriving from a relay is checked to really be the
+person's it names before it becomes a notification.
+
+### Added
+
+- A site can sign and decrypt while it is closed, on Android. The part of a
+  site that runs in the background — the same one that puts its notifications
+  in the shade — asks the same questions the site's window asks, and gets the
+  same answers. A question nobody has decided yet raises a signing
+  notification and opens the same sheet every other app's question opens; one
+  already decided is answered with nothing on screen. What a site has been
+  allowed is one list however it asked, and one switch under Settings → Apps
+  turns it off in both places.
+
+### Fixed
+
+- An event arriving from a relay for a site is checked before the site is
+  handed it. A relay could write an event under anybody's key and have it read
+  as theirs — a name and a face in the shade that the named person never put
+  there. Both halves are now checked, the words against the event's own
+  fingerprint and the signature against that, and anything failing either is
+  dropped. On a device that cannot do the checking at all — emulators, and a
+  few Chromebooks — nothing a site is watching for is shown, rather than shown
+  unchecked.
+
 ## [0.8.2] - 2026-09-19
 
 Nothing changes on the wall. For sites, what arrives when something they are

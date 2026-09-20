@@ -51,6 +51,7 @@
   var NOTIFICATIONS_PATH = '/.napp/notifications';
   var CLOSE_PATH = '/.napp/close';
   var OPEN_PATH = '/.napp/open';
+  var NOSTR_PATH = '/.napp/nostr';
 
   /** A URL is not a request body; anything longer than this is the site's bug. */
   var MAX_NOTIFICATION_BYTES = 64 * 1024;
@@ -123,9 +124,9 @@
   };
 
   /** base64url, over UTF-8 rather than over whatever btoa makes of it. */
-  function encode(text) {
+  function encode(text, limit) {
     var bytes = new TextEncoder().encode(text);
-    if (bytes.length > MAX_NOTIFICATION_BYTES) return null;
+    if (bytes.length > limit) return null;
     var binary = '';
     for (var i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
     return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
@@ -136,7 +137,10 @@
     registration.showNotification = function (title, options) {
       var payload;
       try {
-        payload = encode(JSON.stringify({ title: String(title), options: options || {} }));
+        payload = encode(
+          JSON.stringify({ title: String(title), options: options || {} }),
+          MAX_NOTIFICATION_BYTES
+        );
       } catch (err) {
         return Promise.reject(new TypeError('Notification options must be serializable'));
       }
@@ -167,6 +171,148 @@
       Object.defineProperty(self.Notification, 'permission', { get: function () { return 'granted'; } });
     } catch (err) {}
   }
+
+  // -------------------------------------------------------------------------
+  // self.nostr
+  // -------------------------------------------------------------------------
+
+  /*
+   * The NIP-07 provider, for a worker.
+   *
+   * A site's window gets this injected as `window.nostr`; a worker has no
+   * window to inject into, and is often the only thing running — which is
+   * exactly when it is worth having, since a push about a message is not much
+   * of a notification until somebody decrypts it.
+   *
+   * Every call is a same-origin request the host answers, like everything else
+   * here, and the same token is what says it came from this site's worker. The
+   * host decides nothing new: the grants are the ones the site's window was
+   * given, read out of the store they were written to. See NsiteWorkerSigner.
+   *
+   * `self.nostr` being here says Tenna can answer, not that it will. Nobody
+   * signed in, and a permission refused, both come back as a rejected promise
+   * rather than as a missing object — the object is baked into this script
+   * when the worker is installed, and who is signed in changes long
+   * afterwards.
+   */
+
+  /** An argument longer than this is not one any honest call makes. */
+  var MAX_NOSTR_BYTES = 512 * 1024;
+
+  /** How long to keep asking about a call the user has not answered. */
+  var APPROVAL_TIMEOUT_MS = 90 * 1000;
+
+  /** How often to ask. */
+  var POLL_INTERVAL_MS = 1000;
+
+  /*
+   * One call at a time.
+   *
+   * A call nobody has answered before puts a notification in front of the
+   * user, and a worker looping over a conversation would otherwise put one
+   * there per message. The window's provider serialises for the same reason;
+   * see `nsiteNostrProvider.ts`.
+   */
+  var nostrQueue = Promise.resolve();
+
+  function nostrAsk(query) {
+    return host(NOSTR_PATH, query)
+      .then(function (res) {
+        if (!res.ok) throw new Error('Tenna could not answer');
+        return res.json();
+      })
+      .then(function (body) {
+        if (!body || typeof body !== 'object') throw new Error('Tenna could not answer');
+        if (body.error) throw new Error(String(body.error));
+        return body;
+      });
+  }
+
+  function sleep(ms) {
+    return new Promise(function (resolve) { setTimeout(resolve, ms); });
+  }
+
+  /*
+   * Ask until the user has answered, or until it is not worth asking.
+   *
+   * The host parks a call it cannot answer yet and says so, rather than
+   * holding this request open — the thread it would hold is the one every
+   * service worker in the app is served from, so waiting on a person there
+   * stops every other site. See NsiteWorkerSigner.
+   */
+  function poll(id, deadline) {
+    if (Date.now() >= deadline) {
+      // Say so, so the notification comes down with the call it can no longer
+      // answer. The host expires it on its own deadline either way, so this
+      // is the tidy path rather than the necessary one — which is why its
+      // failing changes nothing about what the site is told.
+      var timedOut = function () { throw new Error('Timed out waiting for approval'); };
+      return nostrAsk({ x: id }).then(timedOut, timedOut);
+    }
+
+    return sleep(POLL_INTERVAL_MS)
+      .then(function () { return nostrAsk({ w: id }); })
+      .then(function (body) {
+        if (body.pending) return poll(id, deadline);
+        if (body.result === undefined) throw new Error('Tenna could not answer');
+        return body.result;
+      });
+  }
+
+  function call(method, params) {
+    var run = function () {
+      var payload = encode(JSON.stringify(params || {}), MAX_NOSTR_BYTES);
+      if (payload === null) {
+        return Promise.reject(new TypeError('Arguments are too large'));
+      }
+
+      return nostrAsk({ m: method, p: payload }).then(function (body) {
+        if (body.pending) return poll(body.pending, Date.now() + APPROVAL_TIMEOUT_MS);
+        if (body.result === undefined) throw new Error('Tenna could not answer');
+        return body.result;
+      });
+    };
+
+    // Chained off the tail whatever happened to the one in front: a refusal
+    // is an answer, and the next call is still owed its turn.
+    var next = nostrQueue.then(run, run);
+    nostrQueue = next.then(function () {}, function () {});
+    return next;
+  }
+
+  self.nostr = {
+    getPublicKey: function () {
+      return call('getPublicKey', {});
+    },
+
+    signEvent: function (event) {
+      return call('signEvent', { event: event });
+    },
+
+    // As in the window: Tenna publishes on the relays the user configured, and
+    // a site asking which those are is asking the app rather than the key.
+    getRelays: function () {
+      return Promise.resolve({});
+    },
+
+    nip04: {
+      encrypt: function (pubkey, plaintext) {
+        return call('nip04.encrypt', { pubkey: pubkey, text: plaintext });
+      },
+      decrypt: function (pubkey, ciphertext) {
+        return call('nip04.decrypt', { pubkey: pubkey, text: ciphertext });
+      },
+    },
+
+    nip44: {
+      encrypt: function (pubkey, plaintext) {
+        return call('nip44.encrypt', { pubkey: pubkey, text: plaintext });
+      },
+      decrypt: function (pubkey, ciphertext) {
+        return call('nip44.decrypt', { pubkey: pubkey, text: ciphertext });
+      },
+    },
+  };
 
   // -------------------------------------------------------------------------
   // Windows

@@ -409,7 +409,7 @@ export function NsiteAppInfo({
 
   const handleRemove = (perm: NsitePermission) => {
     if (!user) return;
-    removeNsitePermission(siteId, user.pubkey, perm.type, perm.kind);
+    void removeNsitePermission(siteId, user.pubkey, perm.type, perm.kind);
     if (perm.type === 'push') forgetSubscriptions();
   };
 
@@ -422,7 +422,7 @@ export function NsiteAppInfo({
 
     if (!user) return;
     const hadPush = permissions.some((perm) => perm.type === 'push');
-    clearNsitePermissions(siteId, user.pubkey);
+    void clearNsitePermissions(siteId, user.pubkey);
     if (hadPush) forgetSubscriptions();
   };
 

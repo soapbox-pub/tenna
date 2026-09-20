@@ -27,10 +27,11 @@ import java.util.List;
  * One record per application that has ever been answered, written as a file of
  * its own so that revoking is a delete rather than a rewrite of everybody
  * else's grants. An application here is anything that can ask: an app on the
- * phone, named by the package name the binder reports, or a remote client,
- * named by the pubkey it talks to us with. Both are strings nobody but the
- * platform can put words in, which is the property that matters — a name a
- * caller could choose for itself would be a name a caller could borrow.
+ * phone, named by the package name the binder reports; a remote client, named
+ * by the pubkey it talks to us with; or an nsite, named by its subdomain. All
+ * three are strings nobody but the platform can put words in, which is the
+ * property that matters — a name a caller could choose for itself would be a
+ * name a caller could borrow.
  *
  * <p><b>Records are scoped to an account.</b> The file name mixes the account
  * pubkey in with the requester id, so a grant given while signed in as one
@@ -38,11 +39,14 @@ import java.util.List;
  * a public account and a private one has two identities on this device, and an
  * app that was let near the first has not been let near the second.
  *
- * <p>Unlike {@code nsitePermissions.ts}, which holds the same shape for sites
- * in the web layer's storage, this store is the original rather than a mirror.
- * It has to be: the content resolver and the relay path both answer with no
+ * <p><b>This store is the original and never a mirror.</b> The content
+ * resolver, the relay path and an nsite's service worker all answer with no
  * WebView anywhere, so the only copy that can be consulted at the moment of
- * the question is this one. The settings screen reads it back over the bridge.
+ * the question is this one. {@code nsitePermissions.ts} held the site half of
+ * it in the web layer's storage until a worker needed to read it, and now
+ * delegates here on Android — the sheet over a site and the sheet a
+ * notification opens write the same record, which is the point. The settings
+ * screen reads it all back over the bridge.
  *
  * <p>Grants carry no expiry. Tenna's answer to a site is {@code allow},
  * {@code deny} or {@code ask} and nothing else, and an app is not a harder
@@ -61,6 +65,15 @@ final class SignerApps {
     static final String KIND_BUNKER = "bunker";
     /** A web page that reached us with no package behind it. */
     static final String KIND_WEB = "web";
+    /**
+     * An nsite running inside Tenna, named by its subdomain.
+     *
+     * <p>That name is derived from the site's own pubkey, so it is a string
+     * nobody but the manifest can put words in — the same property a package
+     * name and a client pubkey have, and the one that makes a remembered grant
+     * mean anything.
+     */
+    static final String KIND_NSITE = "nsite";
 
     static final String ALLOW = "allow";
     static final String DENY = "deny";

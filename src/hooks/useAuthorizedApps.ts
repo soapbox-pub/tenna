@@ -68,16 +68,17 @@ function sourceSubtitle(source: AuthorizedSource, requesterId: string): string {
 }
 
 /**
- * Everything that has been given this account's key, from all three stores.
+ * Everything that has been given this account's key, in one list.
  *
- * Sites keep their grants in the web layer's storage, because a site always
- * has a WebView in front of it and nothing else needs to read them. Apps and
- * remote clients keep theirs natively, because the paths that answer them run
- * with no WebView at all. Three stores, because the question of where a grant
- * has to be readable from has three different answers — and one list, because
- * to the person reading it they are all the same thing.
+ * Sites, apps on the phone and remote clients all keep their grants in the
+ * same native store on Android, because every path that answers one of them
+ * can run with no WebView: a content resolver query, a relay socket, and —
+ * since a site's service worker learned to sign — a worker fetch for a site
+ * with no window open. Off Android a site's grants are still the web layer's
+ * localStorage, which is why they are read through `nsitePermissions` rather
+ * than picked out of the native list here.
  *
- * Nothing is migrated between them. This is a read.
+ * This is a read. The one write is revocation, below.
  */
 export function useAuthorizedApps() {
   const { user } = useCurrentUser();
@@ -95,7 +96,13 @@ export function useAuthorizedApps() {
   const read = useCallback(async (): Promise<AuthorizedApp[]> => {
     if (!pubkey) return [];
 
-    const sites: AuthorizedApp[] = listNsiteAllowances(pubkey).map((allowance) => {
+    const [allowances, native, connections] = await Promise.all([
+      listNsiteAllowances(pubkey),
+      listSignerApps(pubkey),
+      listSignerConnections(pubkey),
+    ]);
+
+    const sites: AuthorizedApp[] = allowances.map((allowance) => {
       // The tile the wall drew, off the disk. A site's artwork is a document
       // on Blossom and a blob beside it, which is a round trip per row and a
       // list that fills in raggedly — and it is a round trip for a picture
@@ -124,37 +131,37 @@ export function useAuthorizedApps() {
       };
     });
 
-    const [native, connections] = await Promise.all([
-      listSignerApps(pubkey),
-      listSignerConnections(pubkey),
-    ]);
-
     const byClient = new Map(
       connections.filter((c) => c.clientPubkey).map((c) => [c.clientPubkey, c]),
     );
 
-    const others: AuthorizedApp[] = native.map((app) => {
-      const source = (app.kind === 'bunker' || app.kind === 'web' ? app.kind : 'package') as
-        | 'package'
-        | 'bunker'
-        | 'web';
-      return {
-        id: `app:${app.requesterId}`,
-        source,
-        name: app.name || app.requesterId,
-        subtitle: sourceSubtitle(source, app.requesterId),
-        icon: app.icon,
-        adaptive: app.adaptive,
-        permissions: app.permissions.map((permission) => ({
-          type: permission.type,
-          kind: permission.kind ?? null,
-          allowed: permission.allowed,
-        })),
-        lastUsed: app.lastUsed,
-        requesterId: app.requesterId,
-        connection: byClient.get(app.requesterId),
-      };
-    });
+    const others: AuthorizedApp[] = native
+      // Sites are in this list too on Android, and `sites` above has already
+      // drawn them — with the artwork and the name the wall uses, which a
+      // native record has no way to know.
+      .filter((app) => app.kind !== 'nsite')
+      .map((app) => {
+        const source = (app.kind === 'bunker' || app.kind === 'web' ? app.kind : 'package') as
+          | 'package'
+          | 'bunker'
+          | 'web';
+        return {
+          id: `app:${app.requesterId}`,
+          source,
+          name: app.name || app.requesterId,
+          subtitle: sourceSubtitle(source, app.requesterId),
+          icon: app.icon,
+          adaptive: app.adaptive,
+          permissions: app.permissions.map((permission) => ({
+            type: permission.type,
+            kind: permission.kind ?? null,
+            allowed: permission.allowed,
+          })),
+          lastUsed: app.lastUsed,
+          requesterId: app.requesterId,
+          connection: byClient.get(app.requesterId),
+        };
+      });
 
     // A connection nobody has used yet has no grants and so no row above — but
     // it is listening on relays right now, which is exactly the thing a person
@@ -193,9 +200,11 @@ export function useAuthorizedApps() {
     };
   }, [read]);
 
-  // The native store has no change event — nothing else on this device writes
-  // to it while this screen is up — but the web layer's does, and a site's
-  // grants can be revoked from the shield over the site itself.
+  // The native store has no change event of its own, but every write that
+  // goes through `nsitePermissions` dispatches one — which covers the shield
+  // over a site, where a site's grants can also be revoked. A grant made in
+  // the native sheet a signing notification opens is the case this misses;
+  // it turns up on the next read.
   useEffect(() => {
     const onChange = () => void load();
     window.addEventListener('nsite-permissions-changed', onChange);
@@ -206,7 +215,7 @@ export function useAuthorizedApps() {
   const revoke = useCallback(
     async (app: AuthorizedApp, permission: AuthorizedPermission) => {
       if (app.siteId && pubkey) {
-        removeNsitePermission(
+        await removeNsitePermission(
           app.siteId,
           pubkey,
           permission.type as NsitePermissionType,
@@ -235,7 +244,7 @@ export function useAuthorizedApps() {
   const forget = useCallback(
     async (app: AuthorizedApp) => {
       if (app.siteId && pubkey) {
-        clearNsitePermissions(app.siteId, pubkey);
+        await clearNsitePermissions(app.siteId, pubkey);
       } else if (app.requesterId && pubkey && supportsSignerApps()) {
         await SignerApps.forget({ account: pubkey, requesterId: app.requesterId });
       } else if (app.connection && supportsSignerApps()) {

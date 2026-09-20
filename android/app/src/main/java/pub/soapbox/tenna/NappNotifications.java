@@ -897,11 +897,13 @@ final class NappNotifications {
     }
 
     /**
-     * A remote app is asking to use the key, and nobody has said yes or no.
+     * Something is asking to use the key, and nobody has said yes or no.
      *
-     * <p>There is no window to put this in — the request arrived on a relay
-     * socket held by a service, with the app closed — so a notification is the
-     * only way it reaches anybody. Tapping it opens the sheet.
+     * <p>There is no window to put this in. Either the request arrived on a
+     * relay socket held by a service with the app closed, or it came from an
+     * nsite's service worker, which can be the only thing this app is running
+     * — so a notification is the only way it reaches anybody. Tapping it opens
+     * the sheet, at whatever {@code open} says.
      *
      * <p>It says what was asked and never what was in it. A lock screen is
      * read by whoever is holding the phone.
@@ -912,10 +914,21 @@ final class NappNotifications {
         @NonNull String appName,
         @NonNull String what
     ) {
-        // Says so rather than failing quietly, because the caller has a client
-        // on the other end of a relay waiting for an answer. A request nobody
-        // can be shown is one that has to be refused out loud; letting it hang
-        // until it expires tells the client nothing and the user less.
+        return showSignerRequest(context, requestId, appName, what,
+            SignerActivity.bunkerIntent(context, requestId));
+    }
+
+    static boolean showSignerRequest(
+        @NonNull Context context,
+        @NonNull String requestId,
+        @NonNull String appName,
+        @NonNull String what,
+        @NonNull Intent intent
+    ) {
+        // Says so rather than failing quietly, because the caller has somebody
+        // waiting for an answer. A request nobody can be shown is one that has
+        // to be refused out loud; letting it hang until it expires tells the
+        // caller nothing and the user less.
         if (!isEnabled(context)) return false;
         ensureSignerChannel(context);
 
@@ -925,7 +938,7 @@ final class NappNotifications {
         PendingIntent open = PendingIntent.getActivity(
             context,
             requestId.hashCode(),
-            SignerActivity.bunkerIntent(context, requestId),
+            intent,
             PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE
         );
 

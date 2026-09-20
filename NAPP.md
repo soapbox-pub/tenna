@@ -1,10 +1,10 @@
 # What Tenna gives an nsite
 
-Two things a site cannot get from a plain browser tab: notifications while it
-is closed, and a place in the operating system's share menu. Both are the
-Android app only, and both are declared the way the web already declares them
-where the web has a way — a site written for Tenna is a site that still works
-anywhere else.
+Three things a site cannot get from a plain browser tab: notifications while it
+is closed, a signer inside its service worker, and a place in the operating
+system's share menu. All three are the Android app only, and each is declared
+the way the web already declares them where the web has a way — a site written
+for Tenna is a site that still works anywhere else.
 
 ## `window.napp` — notifications
 
@@ -437,6 +437,121 @@ moving on to the next event for the site, with a timeout of twenty seconds.
   do for gift wraps addressed to a user, will not deliver it.
 - **Web push on the web.** The iframe path used on the web and on iOS does
   not define `window.napp`.
+
+## `self.nostr` — the signer, inside the worker
+
+A site's window gets `window.nostr`, the ordinary NIP-07 provider. Its
+**service worker** gets `self.nostr`, the same interface, and that is the
+interesting one: a push about a message is not much of a notification until
+somebody decrypts it, and the worker is the only thing running.
+
+```js
+self.addEventListener('push', async (event) => {
+  const { event: dm } = event.data.json();
+
+  let body = 'New message';
+  if (self.nostr) {
+    try {
+      body = await self.nostr.nip44.decrypt(dm.pubkey, dm.content);
+    } catch {
+      // Nobody signed in, the user said no, or nobody answered. The
+      // notification still goes out; it just says less.
+    }
+  }
+
+  event.waitUntil(registration.showNotification('Alice', { body, tag: dm.id }));
+});
+```
+
+**Feature-detect it and expect it to fail.** `self.nostr` is absent on the web
+and on iOS, so the `if` is not optional. And where it is present, being present
+only says Tenna can answer — not that it will. The object is baked into the
+script when the worker is installed and who is signed in changes long
+afterwards, so "nobody is signed in" is a rejected promise rather than a
+missing object.
+
+### What is on it
+
+`getPublicKey`, `signEvent`, `nip04.encrypt`, `nip04.decrypt`,
+`nip44.encrypt`, `nip44.decrypt`, and `getRelays`, which returns `{}` as it
+does in the window. Everything returns a promise and rejects with an `Error`
+whose message says why. `signEvent` returns the whole signed event, as NIP-07
+does.
+
+`nip07.signSchnorr` and `decrypt_zap_event` are not there. Neither is in
+NIP-07.
+
+### Permission
+
+**The same grants the window has.** A site allowed to sign a kind 1 in its
+window is allowed to sign one in its worker, and revoking it from the shield
+menu or from Settings → Apps revokes both. They are one record; there is no
+second list of worker permissions to manage, and nothing to grant in advance.
+
+A call nobody has decided yet raises a **signing notification** — the same one
+a remote NIP-46 app raises, opening the same sheet, because it is the same
+question about the same key. There is no window to draw over, so that is the
+only place it can go.
+
+The call waits on the answer for **ninety seconds** and then rejects with
+`Timed out waiting for approval`. Tapping the notification and pressing Allow
+within that window answers the call that raised it; taking longer does not, and
+the site's first notification for that permission is the one that goes out
+without it. The decision is still written down, so every call after it is
+answered with nothing on screen.
+
+Two things reject without ever asking:
+
+- **Notifications turned off for Tenna**, which is also the only way the
+  notification could have been shown. Rejected out loud rather than left to
+  time out.
+- **Too many questions.** A worker gets a small budget of *unanswered* calls
+  per half minute, per kind of call. A call the user has already granted is not
+  a question and is not counted, however often it arrives. The ceiling exists
+  because a worker that can raise notifications in a loop can make the phone
+  unusable.
+
+### The twenty-second deadline
+
+`event.waitUntil()` inside a `push` handler is waited on for twenty seconds —
+see [Delivery](#delivery-the-service-worker) — and a permission prompt can
+easily outlast that. So the **first** call for a given permission will often
+miss its own notification even when the user says yes promptly: Tenna moves on
+to the next event for the site, and the `showNotification` that was waiting on
+the decrypt lands late or not at all.
+
+That is worth knowing and not worth designing around. Decrypt if you can,
+notify with what you have if you cannot, and the second push onwards has the
+grant already:
+
+```js
+const body = await decryptOrNull(dm);
+event.waitUntil(registration.showNotification(title, { body: body ?? 'New message' }));
+```
+
+### An installed worker does not have it yet
+
+The shim is appended when the worker's script is **fetched**, and the browser
+keeps that script for the life of the registration. A site whose worker was
+installed before this existed gets `self.nostr` the next time Chromium
+re-checks the script — on the next navigation to the site, or within a day.
+Nothing the site can do hurries it, and nothing breaks in the meantime; the
+feature detection simply says no.
+
+### Which account
+
+Whoever is signed in to Tenna, and the current one where several are. The same
+answer the window gets, and it can change under a long-lived worker: a site
+that signed as one account last week may be answered as another today, so read
+`getPublicKey()` rather than remembering what it said.
+
+### Elsewhere
+
+Not on the web, where there is no Tenna around the worker to ask. Not on iOS
+either: a worker there runs inside a notification service extension with about
+thirty seconds, a hard memory ceiling and no way to put anything in front of
+the user, so there is nothing that could answer a prompt. `self.nostr` is
+absent in both.
 
 ## `share_target` — a place in the OS share menu
 

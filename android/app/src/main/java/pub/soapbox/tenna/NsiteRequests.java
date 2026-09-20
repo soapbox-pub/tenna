@@ -48,6 +48,9 @@ import java.util.Map;
  *       {@value #OPEN_PATH} are the rest of what a worker can do to a
  *       notification: read the tray back, take one down, and open the window
  *       a tap on one leads to.
+ *   <li>{@code /.napp/nostr} — where a worker's {@code self.nostr} calls land,
+ *       which is the same token-authenticated shape for the same reason. See
+ *       {@link NsiteWorkerSigner}.
  *   <li>{@value #SHARE_PATH} — the page that turns a staged share into a real
  *       form POST at the site's own origin, for a {@code share_target} that
  *       asked for one. Only a document there can make that navigation.
@@ -150,15 +153,15 @@ final class NsiteRequests {
 
         String path = url.getPath();
 
-        // The four paths that do something rather than serve something. A
-        // worker's fetch arrives with no WebView attached, so the host in the
-        // URL is the only thing naming a site — and a host is not proof, since
-        // any site can fetch any other site's paths. The token is. See
-        // NappTokens.
+        // The paths that do something rather than serve something. A worker's
+        // fetch arrives with no WebView attached, so the host in the URL is
+        // the only thing naming a site — and a host is not proof, since any
+        // site can fetch any other site's paths. The token is. See NappTokens.
         if (NOTIFICATION_PATH.equals(path)
             || NOTIFICATIONS_PATH.equals(path)
             || CLOSE_PATH.equals(path)
-            || OPEN_PATH.equals(path)) {
+            || OPEN_PATH.equals(path)
+            || NsiteWorkerSigner.PATH.equals(path)) {
 
             if (!NappTokens.matches(context, siteId, query(url, AUTH_PARAM))) {
                 Log.i(TAG, "Refused an unauthenticated " + path + " for " + siteId);
@@ -168,6 +171,9 @@ final class NsiteRequests {
             if (NOTIFICATION_PATH.equals(path)) return notification(context, siteId, url);
             if (NOTIFICATIONS_PATH.equals(path)) return notifications(context, siteId, url);
             if (CLOSE_PATH.equals(path)) return close(context, siteId, url);
+            if (NsiteWorkerSigner.PATH.equals(path)) {
+                return NsiteWorkerSigner.serve(context, siteId, url);
+            }
             return open(context, siteId, url);
         }
 

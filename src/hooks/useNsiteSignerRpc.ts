@@ -7,6 +7,12 @@
  * Each method is gated by the permission system. If no stored decision
  * exists, a prompt is shown to the user. Prompts are serialized (one at a
  * time) to prevent overwhelming the user.
+ *
+ * This is the path for a site with a window. The same site's **service
+ * worker** asks for the same things over a reserved path answered in native
+ * code — see `NsiteWorkerSigner.java` — because a worker woken by a push has
+ * no window and no bridge to reach this hook with. Both consult one store, so
+ * a grant made here is honoured there; see `nsitePermissions.ts`.
  */
 import { useCallback, useRef, useState } from 'react';
 
@@ -179,7 +185,7 @@ export function useNsiteSignerRpc({
     ): Promise<void> => {
       if (!user) throw new Error('Not logged in');
 
-      const stored = getNsitePermission(siteId, user.pubkey, type, kind);
+      const stored = await getNsitePermission(siteId, user.pubkey, type, kind);
 
       if (stored === 'allow') return;
       if (stored === 'deny') throw new Error('User rejected');
@@ -188,7 +194,7 @@ export function useNsiteSignerRpc({
       const decision = await showPrompt(promptState);
 
       if (decision.remember) {
-        setNsitePermission(siteId, user.pubkey, siteName, type, kind, decision.allowed);
+        await setNsitePermission(siteId, user.pubkey, siteName, type, kind, decision.allowed);
       }
 
       if (!decision.allowed) {

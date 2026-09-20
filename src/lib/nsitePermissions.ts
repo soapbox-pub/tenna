@@ -1,5 +1,5 @@
 /**
- * Permission model and localStorage persistence for nsite NIP-07 signer proxy.
+ * What an nsite has been allowed to do with the user's key.
  *
  * Permissions are scoped to (userPubkey, siteId) and are granular:
  * - `signEvent` permissions are stored per event kind
@@ -7,7 +7,32 @@
  *
  * `getPublicKey` is always allowed (clicking "Run" implies consent) and is
  * not tracked in this system.
+ *
+ * ## Where the records live
+ *
+ * On Android, natively, in the same store that holds the grants given to apps
+ * on the phone and to remote clients — see `SignerApps.java`. It used to be
+ * the web layer's `localStorage` on every platform, on the reasoning that a
+ * site always has a WebView in front of it. A **service worker does not**: a
+ * site woken by a push has no window, no bridge and no `localStorage` of
+ * Tenna's to read, and it can still ask to sign and decrypt. So on Android the
+ * native store is the original and this module is a window onto it, which is
+ * what keeps one decision meaning the same thing in a site's window and in its
+ * worker.
+ *
+ * Elsewhere — the web build, and iOS, where a worker runs inside a
+ * notification extension that could not raise a prompt anyway — there is no
+ * native store, and `localStorage` remains the original.
+ *
+ * Every function here is therefore asynchronous, including the reads.
  */
+import {
+  getSignerApp,
+  listSignerApps,
+  SignerApps,
+  supportsSignerApps,
+} from '@/lib/signerAppsPlugin';
+
 import { getKindLabel } from '@/lib/kindLabels';
 
 // Re-export so existing consumers of `getKindLabel` from this module keep working.
@@ -23,6 +48,12 @@ export { getKindLabel } from '@/lib/kindLabels';
  * `push` is the one that isn't a signer call: it is a site asking to set
  * relay subscriptions that Tenna will hold open on its behalf and wake it for,
  * which is to say asking to send notifications.
+ *
+ * The strings are shared with `SignerTypes.java`, deliberately: an app asking
+ * to decrypt and a site asking to decrypt are the same question about the same
+ * key, and since Android now files both in one store they have to spell it the
+ * same way. `push` has no native counterpart — nothing but a site can ask for
+ * it — but it is stored alongside the rest.
  */
 export type NsitePermissionType =
   | 'signEvent'
@@ -57,7 +88,7 @@ export interface NsiteAllowance {
 }
 
 // ---------------------------------------------------------------------------
-// Storage helpers
+// localStorage — the original off Android, and the thing migrated on it
 // ---------------------------------------------------------------------------
 
 const STORAGE_KEY = 'nostr:nsite-permissions';
@@ -77,8 +108,16 @@ function readAllowances(): NsiteAllowance[] {
 /** Write all allowances to localStorage and notify same-tab subscribers. */
 function writeAllowances(allowances: NsiteAllowance[]): void {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(allowances));
-  // The `storage` event only fires across tabs. Dispatch a custom event so
-  // same-tab subscribers (see `useNsiteAllowance`) also re-render.
+  announce();
+}
+
+/**
+ * Say that something changed, for anything drawing a list of it.
+ *
+ * The `storage` event only fires across tabs, and the native store fires
+ * nothing at all, so both writes end here — see `useNsiteAllowance`.
+ */
+function announce(): void {
   window.dispatchEvent(new Event('nsite-permissions-changed'));
 }
 
@@ -94,6 +133,60 @@ function findAllowance(
 }
 
 // ---------------------------------------------------------------------------
+// Migration
+// ---------------------------------------------------------------------------
+
+/**
+ * Hand whatever localStorage still holds to the native store, once.
+ *
+ * Runs before the first native read of this session and not again. A grant the
+ * user made in a version that kept them up here is a grant they made, and
+ * asking for it a second time because the store moved underneath them is the
+ * sort of thing that teaches people to press Allow without reading.
+ *
+ * The local copy is cleared only once every record has been written, so an
+ * interrupted migration repeats rather than losing anything: `grant` replaces
+ * the answer to a question it already holds, so writing one twice is a no-op.
+ */
+let migration: Promise<void> | undefined;
+
+function migrate(): Promise<void> {
+  migration ??= (async () => {
+    const allowances = readAllowances();
+    if (allowances.length === 0) return;
+
+    for (const allowance of allowances) {
+      for (const permission of allowance.permissions) {
+        try {
+          await SignerApps.grant({
+            account: allowance.userPubkey,
+            requesterId: allowance.siteId,
+            appKind: 'nsite',
+            name: allowance.siteName || allowance.siteId,
+            type: permission.type,
+            ...(permission.kind === null ? {} : { kind: permission.kind }),
+            allowed: permission.allowed,
+          });
+        } catch {
+          // A record that would not cross is one the user is asked about
+          // again. Leave the rest of the migration to finish; stopping here
+          // would strand every grant behind it too.
+        }
+      }
+    }
+
+    localStorage.removeItem(STORAGE_KEY);
+  })();
+
+  return migration;
+}
+
+/** Whether the grants for sites live natively on this platform. */
+function native(): boolean {
+  return supportsSignerApps();
+}
+
+// ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
 
@@ -102,14 +195,30 @@ function findAllowance(
  *
  * @returns `'allow'` or `'deny'` if remembered, `'ask'` if no decision stored.
  */
-export function getNsitePermission(
+export async function getNsitePermission(
   siteId: string,
   userPubkey: string,
   type: NsitePermissionType,
   kind: number | null = null,
-): 'allow' | 'deny' | 'ask' {
-  const allowances = readAllowances();
-  const allowance = findAllowance(allowances, siteId, userPubkey);
+): Promise<'allow' | 'deny' | 'ask'> {
+  if (native()) {
+    await migrate();
+    try {
+      const { decision } = await SignerApps.decide({
+        account: userPubkey,
+        requesterId: siteId,
+        type,
+        ...(kind === null ? {} : { kind }),
+      });
+      return decision;
+    } catch {
+      // A store that could not be read has granted nothing. Asking is the
+      // safe direction: the worst of it is a prompt the user has seen before.
+      return 'ask';
+    }
+  }
+
+  const allowance = findAllowance(readAllowances(), siteId, userPubkey);
   if (!allowance) return 'ask';
 
   const match = allowance.permissions.find((p) => {
@@ -127,14 +236,34 @@ export function getNsitePermission(
  * Store a permission decision. Creates the allowance if it doesn't exist.
  * Updates an existing permission entry if one matches.
  */
-export function setNsitePermission(
+export async function setNsitePermission(
   siteId: string,
   userPubkey: string,
   siteName: string,
   type: NsitePermissionType,
   kind: number | null,
   allowed: boolean,
-): void {
+): Promise<void> {
+  if (native()) {
+    await migrate();
+    try {
+      await SignerApps.grant({
+        account: userPubkey,
+        requesterId: siteId,
+        appKind: 'nsite',
+        name: siteName || siteId,
+        type,
+        ...(kind === null ? {} : { kind }),
+        allowed,
+      });
+    } catch {
+      // A decision that could not be written is one the user is asked for
+      // again. Annoying, and better than a silent one.
+    }
+    announce();
+    return;
+  }
+
   const allowances = readAllowances();
   let allowance = findAllowance(allowances, siteId, userPubkey);
 
@@ -170,12 +299,28 @@ export function setNsitePermission(
 /**
  * Remove a single permission entry from a site's allowance.
  */
-export function removeNsitePermission(
+export async function removeNsitePermission(
   siteId: string,
   userPubkey: string,
   type: NsitePermissionType,
   kind: number | null,
-): void {
+): Promise<void> {
+  if (native()) {
+    await migrate();
+    try {
+      await SignerApps.revoke({
+        account: userPubkey,
+        requesterId: siteId,
+        type,
+        ...(kind === null ? {} : { kind }),
+      });
+    } catch {
+      // Nothing was taken back. The row stays, which is at least honest.
+    }
+    announce();
+    return;
+  }
+
   const allowances = readAllowances();
   const allowance = findAllowance(allowances, siteId, userPubkey);
   if (!allowance) return;
@@ -198,15 +343,44 @@ export function removeNsitePermission(
 /**
  * Clear all stored permissions for a site.
  */
-export function clearNsitePermissions(
+export async function clearNsitePermissions(
   siteId: string,
   userPubkey: string,
-): void {
+): Promise<void> {
+  if (native()) {
+    await migrate();
+    try {
+      await SignerApps.forget({ account: userPubkey, requesterId: siteId });
+    } catch {
+      // As above.
+    }
+    announce();
+    return;
+  }
+
   const allowances = readAllowances();
   const filtered = allowances.filter(
     (a) => !(a.siteId === siteId && a.userPubkey === userPubkey),
   );
   writeAllowances(filtered);
+}
+
+/** Turn one native record into the shape this module speaks. */
+function toAllowance(
+  userPubkey: string,
+  app: { requesterId: string; name: string; createdAt: number; permissions: Array<{ type: string; kind?: number; allowed: boolean }> },
+): NsiteAllowance {
+  return {
+    siteId: app.requesterId,
+    siteName: app.name || app.requesterId,
+    userPubkey,
+    permissions: app.permissions.map((permission) => ({
+      type: permission.type as NsitePermissionType,
+      kind: permission.kind ?? null,
+      allowed: permission.allowed,
+    })),
+    createdAt: app.createdAt,
+  };
 }
 
 /**
@@ -216,7 +390,14 @@ export function clearNsitePermissions(
  * and the connections to apps elsewhere — three different things that all
  * amount to somebody having been given the same key.
  */
-export function listNsiteAllowances(userPubkey: string): NsiteAllowance[] {
+export async function listNsiteAllowances(userPubkey: string): Promise<NsiteAllowance[]> {
+  if (native()) {
+    await migrate();
+    return (await listSignerApps(userPubkey))
+      .filter((app) => app.kind === 'nsite')
+      .map((app) => toAllowance(userPubkey, app));
+  }
+
   return readAllowances()
     .filter((allowance) => allowance.userPubkey === userPubkey)
     .sort((a, b) => b.createdAt - a.createdAt);
@@ -225,10 +406,16 @@ export function listNsiteAllowances(userPubkey: string): NsiteAllowance[] {
 /**
  * Get the full allowance record for a site, or undefined if none exists.
  */
-export function getNsiteAllowance(
+export async function getNsiteAllowance(
   siteId: string,
   userPubkey: string,
-): NsiteAllowance | undefined {
+): Promise<NsiteAllowance | undefined> {
+  if (native()) {
+    await migrate();
+    const app = await getSignerApp(userPubkey, siteId);
+    return app ? toAllowance(userPubkey, app) : undefined;
+  }
+
   return findAllowance(readAllowances(), siteId, userPubkey);
 }
 

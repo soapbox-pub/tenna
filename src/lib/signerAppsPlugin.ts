@@ -12,9 +12,9 @@ export interface SignerGrant {
 
 /** An application this device has answered for. */
 export interface SignerApp {
-  /** The calling package, or the client's pubkey for a remote app. */
+  /** The calling package, the client's pubkey, or a site's subdomain. */
   requesterId: string;
-  /** `package`, `bunker`, or `web`. */
+  /** `package`, `bunker`, `web`, or `nsite`. */
   kind: string;
   name: string;
   createdAt: number;
@@ -41,13 +41,20 @@ export interface SignerConnection {
   lastUsed: number;
 }
 
+/** What a caller was told last time it asked the same thing. */
+export type SignerDecision = 'allow' | 'deny' | 'ask';
+
 /**
  * Who has been given a key, for the screen that lists them.
  *
- * The grants themselves live on the native side, because the two paths that
- * answer without a WebView — a content resolver query and a relay socket —
- * have to be able to read them with no web layer running. This is the window
- * onto that, and the only things it writes are revocations.
+ * The grants themselves live on the native side, because the three paths that
+ * answer without a WebView — a content resolver query, a relay socket, and an
+ * nsite's service worker — have to be able to read them with no web layer
+ * running. This is the window onto that.
+ *
+ * Mostly it reads. `grant` is the exception, and it is there because the sheet
+ * over an nsite is drawn in React: the decision is made up here and has to be
+ * written down where a worker fetch can find it. See `nsitePermissions.ts`.
  *
  * Lists cross as JSON text rather than as objects, for the reason everything
  * else in this app does: Capacitor's coercion does not keep an arbitrarily
@@ -55,6 +62,22 @@ export interface SignerConnection {
  */
 export interface SignerAppsPlugin {
   list(options: { account: string }): Promise<{ apps: string }>;
+  get(options: { account: string; requesterId: string }): Promise<{ app: string | null }>;
+  decide(options: {
+    account: string;
+    requesterId: string;
+    type: string;
+    kind?: number;
+  }): Promise<{ decision: SignerDecision }>;
+  grant(options: {
+    account: string;
+    requesterId: string;
+    appKind?: string;
+    name?: string;
+    type: string;
+    kind?: number;
+    allowed: boolean;
+  }): Promise<void>;
   revoke(options: {
     account: string;
     requesterId: string;
@@ -94,6 +117,22 @@ export async function listSignerApps(account: string): Promise<SignerApp[]> {
     // An empty list is wrong in the safe direction: it shows nothing rather
     // than claiming nothing has been granted.
     return [];
+  }
+}
+
+/** One application's record, or null if it has never been answered. */
+export async function getSignerApp(
+  account: string,
+  requesterId: string,
+): Promise<SignerApp | null> {
+  if (!supportsSignerApps()) return null;
+  try {
+    const { app } = await SignerApps.get({ account, requesterId });
+    if (!app) return null;
+    const parsed: unknown = JSON.parse(app);
+    return parsed && typeof parsed === 'object' ? (parsed as SignerApp) : null;
+  } catch {
+    return null;
   }
 }
 

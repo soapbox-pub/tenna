@@ -1,12 +1,13 @@
 # What Tenna signs for
 
 Tenna holds a key. On Android it will use that key on behalf of other
-applications — one installed on the same phone, or one running somewhere else
-entirely — so that they never have to hold one themselves.
+applications — one installed on the same phone, one running somewhere else
+entirely, or a site running inside Tenna — so that they never have to hold one
+themselves.
 
-Nothing here is new on the Nostr wire. It is two existing protocols, NIP-55
-for an app on the phone and NIP-46 for an app that is not, answered by the same
-code and asked about with the same sheet.
+Nothing here is new on the Nostr wire. It is existing protocols — NIP-55 for an
+app on the phone, NIP-46 for an app that is not, NIP-07 for a site — answered
+by the same code and asked about with the same sheet.
 
 ## What it can answer for
 
@@ -128,13 +129,31 @@ can carry it. Tenna asks for the permission when a connection is made. If it is
 refused, the connection still does everything it was granted up front, and
 anything else is refused out loud rather than left to time out.
 
+## A site inside Tenna
+
+An nsite asks over `window.nostr`, injected into its window — and, since its
+service worker has no window to inject into, over `self.nostr` there too.
+[NAPP.md](NAPP.md) is the whole of what a site sees.
+
+The worker is the case worth stating here, because it is the one that reaches
+this code rather than the web layer. A site woken by a push has no window, no
+bridge and nothing on screen, so its calls are answered by the same class that
+answers an intent and a relay — against the same grants, which is why they are
+kept natively rather than in the browser storage that a worker cannot see.
+
+So a site allowed to decrypt in its window is allowed to decrypt in its
+worker, one switch in Settings turns off both, and a call nobody has decided
+raises the same notification a remote app's does. The one difference is that a
+worker will not wait forever: after ninety seconds the call is refused, the
+notification comes down, and the site is told why.
+
 ## Being asked
 
-The sheet is the same one a site inside Tenna gets, over a transparent window
-so whatever asked stays on screen underneath — which is the thing a person
-needs in order to answer. It names the caller by the string nobody can pick for
-themselves: an app's package name, or, for an app somewhere else, the plain
-fact that it is not on this phone.
+The sheet is the same one whatever asked, over a transparent window so whatever
+asked stays on screen underneath — which is the thing a person needs in order
+to answer. It names the caller by the string nobody can pick for themselves: an
+app's package name, a site's subdomain, or, for an app somewhere else, the
+plain fact that it is not on this phone.
 
 "Remember" is offered for anything the platform named. It is **not** offered to
 a web page, because every web page reaching a signer looks identical from here,

@@ -65,6 +65,78 @@ public class SignerAppsPlugin extends Plugin {
         call.resolve(result);
     }
 
+    /** One application's record, or null if it has never been answered. */
+    @PluginMethod
+    public void get(PluginCall call) {
+        String account = call.getString("account");
+        String requesterId = call.getString("requesterId");
+        if (account == null || account.length() != 64 || requesterId == null) {
+            call.reject("account and requesterId are required");
+            return;
+        }
+
+        SignerApps.Record record = SignerApps.get(getContext(), account, requesterId);
+
+        JSObject result = new JSObject();
+        result.put("app", record == null ? null : describe(record).toString());
+        call.resolve(result);
+    }
+
+    /**
+     * What this application was told last time it asked this.
+     *
+     * <p>{@code allow}, {@code deny} or {@code ask}. The web layer asks before
+     * it prompts, exactly as {@link TennaSigning#answer} does for every other
+     * transport, so that a grant made from one of them is honoured by all.
+     */
+    @PluginMethod
+    public void decide(PluginCall call) {
+        String account = call.getString("account");
+        String requesterId = call.getString("requesterId");
+        String type = call.getString("type");
+        if (account == null || requesterId == null || type == null) {
+            call.reject("account, requesterId and type are required");
+            return;
+        }
+
+        JSObject result = new JSObject();
+        result.put("decision",
+            SignerApps.decide(getContext(), account, requesterId, type, call.getInt("kind")));
+        call.resolve(result);
+    }
+
+    /**
+     * Write down an answer the user gave in the web layer.
+     *
+     * <p>The one write here that is not a revocation, and it exists because
+     * the sheet over an nsite is drawn in React while the record it produces
+     * has to be readable from a service worker fetch with no WebView in front
+     * of it. See {@code nsitePermissions.ts}.
+     */
+    @PluginMethod
+    public void grant(PluginCall call) {
+        String account = call.getString("account");
+        String requesterId = call.getString("requesterId");
+        String type = call.getString("type");
+        Boolean allowed = call.getBoolean("allowed");
+        if (account == null || requesterId == null || type == null || allowed == null) {
+            call.reject("account, requesterId, type and allowed are required");
+            return;
+        }
+
+        SignerApps.grant(
+            getContext(),
+            account,
+            requesterId,
+            call.getString("appKind", SignerApps.KIND_NSITE),
+            call.getString("name", requesterId),
+            type,
+            call.getInt("kind"),
+            allowed
+        );
+        call.resolve();
+    }
+
     /** Take back one thing an application was allowed to do. */
     @PluginMethod
     public void revoke(PluginCall call) {

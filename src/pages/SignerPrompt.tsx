@@ -61,10 +61,18 @@ export function SignerPrompt({
   // A remote app has no package either. What it cannot pick for itself is the
   // connection it is talking on, and the user made that one deliberately, so
   // the honest line is that it is not on this phone.
+  //
+  // A site reaches this sheet from its own service worker, with no window
+  // anywhere — see `NsiteWorkerSigner`. Its subdomain is derived from its
+  // pubkey, so that is the string it cannot pick for itself; what it is comes
+  // first because this line is truncated rather than wrapped, and a subdomain
+  // is long enough to push the useful half of the sentence off the end.
   const subtitle =
     request.appKind === 'bunker'
       ? 'Asking from somewhere else'
-      : request.requesterId ?? 'Asking from a web page';
+      : request.appKind === 'nsite'
+        ? `A site in Tenna — ${request.requesterId ?? ''}`.trim()
+        : request.requesterId ?? 'Asking from a web page';
 
   // Nobody signed in, or nobody whose key is on this device. There is nothing
   // to decide, so the sheet says so and offers one way out rather than a

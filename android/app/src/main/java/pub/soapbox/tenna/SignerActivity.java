@@ -60,16 +60,19 @@ public class SignerActivity extends BridgeActivity {
     /**
      * A request the user has not answered yet.
      *
-     * <p>Either an intent from an app on the phone, in which case {@link
-     * #parsed} is set and the answer goes back as an activity result, or a
-     * request that came off a relay, in which case {@link #bunker} is set and
-     * the answer goes back to the push service to be published. The sheet in
+     * <p>One of three, and exactly one of the first three fields says which.
+     * An intent from an app on the phone sets {@link #parsed}, and the answer
+     * goes back as an activity result. A request that came off a relay sets
+     * {@link #bunker}, and the answer goes back to the push service to be
+     * published. A call from an nsite's service worker sets {@link #site}, and
+     * the answer releases the fetch that worker is sitting on. The sheet in
      * between does not know the difference and does not need to: it is the
      * same question about the same key.
      */
     static final class Pending {
         @Nullable final SignerRequests.Parsed parsed;
         @Nullable final NappBunker.Pending bunker;
+        @Nullable final NsiteWorkerSigner.Pending site;
         /** The client's own id for this, echoed back with the answer. */
         @NonNull final String id;
         @NonNull final TennaSigning.Request request;
@@ -96,6 +99,7 @@ public class SignerActivity extends BridgeActivity {
         ) {
             this.parsed = parsed;
             this.bunker = null;
+            this.site = null;
             this.id = parsed.id;
             this.request = parsed.toRequest();
             this.accountPubkey = accountPubkey;
@@ -110,6 +114,7 @@ public class SignerActivity extends BridgeActivity {
         Pending(@NonNull NappBunker.Pending bunker) {
             this.parsed = null;
             this.bunker = bunker;
+            this.site = null;
             this.id = bunker.requestId;
             this.request = bunker.request;
             this.accountPubkey = bunker.accountPubkey;
@@ -119,6 +124,24 @@ public class SignerActivity extends BridgeActivity {
             // A remote client's icon is a URL it gave us, and fetching one on
             // the strength of a signing request would tell whoever hosts it
             // when the user is being asked to sign. Its initial will do.
+            this.icon = null;
+            this.adaptive = false;
+        }
+
+        /** From an nsite's service worker. */
+        Pending(@NonNull NsiteWorkerSigner.Pending site) {
+            this.parsed = null;
+            this.bunker = null;
+            this.site = site;
+            this.id = site.requestId;
+            this.request = site.request;
+            this.accountPubkey = site.accountPubkey;
+            this.requesterId = site.siteId;
+            this.appName = site.siteName;
+            this.appKind = SignerApps.KIND_NSITE;
+            // A site's artwork is a blob on Blossom, and this sheet has no
+            // network and no time. Its initial will do, as it does for a
+            // remote client.
             this.icon = null;
             this.adaptive = false;
         }
@@ -273,6 +296,40 @@ public class SignerActivity extends BridgeActivity {
                 // Decided in the time it took somebody to reach the
                 // notification — by the same app being answered on another
                 // request, most likely, with "remember" on it.
+                answer(pending, outcome);
+                return !additional;
+            }
+
+            queue.addLast(pending);
+            return false;
+        }
+
+        // A notification about a call from an nsite's service worker. Judged
+        // the same way and for the same reason: it arrived somewhere with no
+        // window, and the worker is holding its fetch open waiting on this.
+        String siteRequestId = siteRequestId(intent);
+        if (siteRequestId != null) {
+            NsiteWorkerSigner.Pending waiting = NsiteWorkerSigner.claim(this, siteRequestId);
+            if (waiting == null) {
+                // The worker gave up, or somebody answered this already. The
+                // notification goes with it rather than sitting there opening
+                // an empty sheet.
+                Log.i(TAG, "A site's worker is no longer waiting for an answer");
+                NappNotifications.cancelSignerRequest(this, siteRequestId);
+                return !additional;
+            }
+            NappNotifications.cancelSignerRequest(this, siteRequestId);
+
+            Pending pending = new Pending(waiting);
+            TennaSigning.Outcome outcome = TennaSigning.answer(
+                this, waiting.accountPubkey, waiting.siteId, waiting.request, false);
+
+            if (outcome.status == TennaSigning.Outcome.Status.NEEDS_ACTIVITY) {
+                forwards.addLast(pending);
+                return !additional;
+            }
+
+            if (outcome.status != TennaSigning.Outcome.Status.NEEDS_APPROVAL) {
                 answer(pending, outcome);
                 return !additional;
             }
@@ -626,6 +683,10 @@ public class SignerActivity extends BridgeActivity {
             // service owns the socket; it is told what the signer said rather
             // than asked to work it out again.
             NappPushService.resolveBunker(this, pending.bunker, outcome.isResult(), false, outcome);
+        } else if (pending.site != null) {
+            // A service worker is sitting on a fetch. Releasing it is the
+            // answer; nothing has to be published or handed back.
+            NsiteWorkerSigner.resolve(pending.site, outcome);
         } else if (pending.parsed != null) {
             if (outcome.isResult() && pending.accountPubkey != null) {
                 deliver(pending.parsed, outcome, pending.requesterId, pending.accountPubkey);
@@ -833,10 +894,13 @@ public class SignerActivity extends BridgeActivity {
         return (intent.getFlags() & Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY) != 0;
     }
 
-    // ── Requests that came off a relay ───────────────────────────────────────
+    // ── Requests raised from a notification ──────────────────────────────────
 
     /** The scheme a notification about a remote request opens this with. */
     private static final String BUNKER_SCHEME = "tenna-signer";
+
+    /** The scheme a notification about an nsite worker's call opens this with. */
+    private static final String SITE_SCHEME = "tenna-site-signer";
 
     /**
      * An intent that opens the sheet for a request raised off a relay.
@@ -857,11 +921,38 @@ public class SignerActivity extends BridgeActivity {
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
     }
 
+    /**
+     * An intent that opens the sheet for a call from an nsite's service
+     * worker.
+     *
+     * <p>A worker has no activity behind it either, and unlike a remote client
+     * it has a deadline — see {@link NsiteWorkerSigner}. Its own scheme so
+     * that the two registries are never asked for each other's ids.
+     */
+    @NonNull
+    static Intent siteIntent(@NonNull android.content.Context context, @NonNull String requestId) {
+        return new Intent(context, SignerActivity.class)
+            .setAction(Intent.ACTION_VIEW)
+            .setData(Uri.fromParts(SITE_SCHEME, requestId, null))
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+    }
+
     /** The request id a notification named, or null if this is not one. */
     @Nullable
     private static String bunkerRequestId(@NonNull Intent intent) {
+        return requestId(intent, BUNKER_SCHEME);
+    }
+
+    /** As above, for a call from a site's worker. */
+    @Nullable
+    private static String siteRequestId(@NonNull Intent intent) {
+        return requestId(intent, SITE_SCHEME);
+    }
+
+    @Nullable
+    private static String requestId(@NonNull Intent intent, @NonNull String scheme) {
         Uri data = intent.getData();
-        if (data == null || !BUNKER_SCHEME.equals(data.getScheme())) return null;
+        if (data == null || !scheme.equals(data.getScheme())) return null;
 
         String id = data.getSchemeSpecificPart();
         return id == null || id.isEmpty() ? null : id;

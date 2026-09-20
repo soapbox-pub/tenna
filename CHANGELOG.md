@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.8.2] - 2026-09-19
+
+Nothing changes on the wall. For sites, what arrives when something they are
+watching for turns up has changed shape: the event now travels with its id and
+the relays it came from, so a site can still say something where the event
+itself was too big to carry. A site that only reads the event needs no change.
+
+### Changed
+
+- What a site is handed when an event it is watching for arrives. The event
+  comes with its id and the relays it came from, in place of the single relay
+  and subscription number that were there before, and with a marker that tells
+  it apart from any other kind of notification the site listens for. A site
+  that only reads the event carries on unchanged; the id and the relays are
+  what it fetches the event with where the event was too big to travel with the
+  message.
+
 ## [0.8.1] - 2026-09-17
 
 A site with a notification waiting is marked on the wall. A small dot sits in

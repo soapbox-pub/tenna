@@ -366,12 +366,18 @@ public class NappPushService extends Service {
         subscription.since.accumulateAndGet(createdAt, Math::max);
         NappSubscriptions.markSeen(this, subscription.siteId, subscription.index, createdAt);
 
+        // The shape a site's worker reads — see NAPP.md. The event itself is
+        // always here on Android, where nothing caps the payload; `event_id`
+        // and `relays` are what iOS has to fall back on when a push is too
+        // large to carry the event, and a site written against both wants the
+        // one shape.
         String payload;
         try {
             JSONObject message = new JSONObject();
+            message.put("$type", "napp.push.payload");
+            message.put("event_id", eventId);
             message.put("event", event);
-            message.put("relay", relayUrl);
-            message.put("subscription", subscription.index);
+            message.put("relays", new JSONArray().put(relayUrl));
             payload = message.toString();
         } catch (JSONException e) {
             return;

@@ -54,8 +54,8 @@ import UserNotifications
  worker composes for a `push`, down to the `Someone` it falls back to when it
  cannot resolve a profile. A service worker written against the standard, for
  Android, renders here unchanged. It wants the same payload it gets there —
- `{ event, relay, subscription }`, see NAPP.md — which is what the push must
- carry in `event` for a site's own code to understand it.
+ `{ $type, event_id, event?, relays }`, see NAPP.md — which is why the parts
+ arrive in `userInfo` and are assembled into it here.
 
  ## What it costs
 
@@ -110,7 +110,11 @@ class NotificationService: UNNotificationServiceExtension {
         guard let content,
               let siteId = info["site"] as? String,
               NsiteOrigins.isSiteId(siteId),
-              let event = info["event"] as? String else {
+              let eventId = info["event_id"] as? String,
+              !eventId.isEmpty,
+              let push = Self.payload(eventId: eventId,
+                                      event: info["event"] as? [String: Any],
+                                      relays: info["relays"] as? [String] ?? []) else {
             contentHandler(request.content)
             return
         }
@@ -122,7 +126,7 @@ class NotificationService: UNNotificationServiceExtension {
                 Self.serve(siteId: siteId, path: path)
             }
 
-            let notifications = await host.deliver(push: event, timeout: Self.budget)
+            let notifications = await host.deliver(push: push, timeout: Self.budget)
             guard !Task.isCancelled else { return }
             NSLog("[NsiteNotify] worker returned %d notification(s)", notifications.count)
 
@@ -143,6 +147,38 @@ class NotificationService: UNNotificationServiceExtension {
 
             self.deliver(content)
         }
+    }
+
+    // MARK: - The payload
+
+    /**
+     The JSON a site's worker reads out of `event.data`.
+
+     Assembled here rather than sent whole, so that the shape lives in one
+     place on the device and the push server sends only the parts. What the
+     server puts in `userInfo` is `site`, `event_id`, `relays`, and `event` —
+     the last a nested object rather than a string, since escaping a string
+     spends bytes against a budget of four kilobytes for the whole push.
+
+     `event` is what makes a push worth reading, so it goes in whenever it
+     fits. When it does not, `event_id` and `relays` are what a worker has to
+     fetch it with, which is the whole reason the field is optional. See
+     NAPP.md.
+     */
+    private static func payload(eventId: String,
+                                event: [String: Any]?,
+                                relays: [String]) -> String? {
+        var message: [String: Any] = [
+            "$type": "napp.push.payload",
+            "event_id": eventId,
+            "relays": relays,
+        ]
+        if let event, JSONSerialization.isValidJSONObject(event) {
+            message["event"] = event
+        }
+
+        guard let data = try? JSONSerialization.data(withJSONObject: message) else { return nil }
+        return String(data: data, encoding: .utf8)
     }
 
     override func serviceExtensionTimeWillExpire() {

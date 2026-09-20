@@ -18,13 +18,27 @@ self.addEventListener('activate', (event) => {
 });
 
 self.addEventListener('push', (event) => {
-  const nostrEvent = event.data.json();
+  const { event: nostrEvent, event_id: eventId } = event.data.json();
+
+  // A push too large to carry the event carries its id and somewhere to look
+  // for it instead. A real site would fetch it; this one says what it has, so
+  // that the path a site takes when the event is missing is exercised at all.
+  if (!nostrEvent) {
+    event.waitUntil(
+      self.registration.showNotification('Something happened', {
+        body: `Event ${String(eventId).slice(0, 8)}`,
+        tag: String(eventId),
+      }),
+    );
+    return;
+  }
+
   const who = String(nostrEvent.pubkey || '').slice(0, 8) || 'someone';
 
   event.waitUntil(
     self.registration.showNotification(`${who} replied`, {
       body: String(nostrEvent.content || '').slice(0, 120),
-      tag: String(nostrEvent.id || ''),
+      tag: String(nostrEvent.id || eventId || ''),
     }),
   );
 });

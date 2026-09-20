@@ -110,7 +110,7 @@ that the usual code works unchanged:
 
 ```js
 self.addEventListener('push', (event) => {
-  const { event: nostrEvent, relay, subscription } = event.data.json();
+  const { event: nostrEvent } = event.data.json();
 
   event.waitUntil(
     self.registration.showNotification('New reply', {
@@ -127,14 +127,42 @@ self.addEventListener('push', (event) => {
 
 ```ts
 interface NappPushPayload {
-  /** The Nostr event, as the relay sent it. */
-  event: NostrEvent;
-  /** The relay it arrived from. */
-  relay: string;
-  /** Index into the array passed to `set()` of the subscription it matched. */
-  subscription: number;
+  /** Discriminator. Always this string. */
+  $type: 'napp.push.payload';
+  /** The event's id. Always present, whether or not the event itself is. */
+  event_id: string;
+  /** The Nostr event, as the relay sent it — see below. */
+  event?: NostrEvent;
+  /** Where the event came from, or where to look for it. */
+  relays: string[];
 }
 ```
+
+`$type` is there for a worker that answers more than one push service: a site
+with an ordinary web push subscription of its own gets both kinds of payload
+through the same listener, and this is what tells them apart. A site that has
+only this one can ignore it.
+
+**`event` may be absent.** On Android it never is. A push, though, is a
+message on somebody else's transport, and iOS gives the whole of one four
+kilobytes — so an event longer than that arrives as `event_id` and `relays`,
+which is what a worker fetches it with:
+
+```js
+const payload = event.data.json();
+
+if (!payload.event) {
+  // ask payload.relays for { ids: [payload.event_id] }
+}
+```
+
+A worker that only ever reads `payload.event` is a worker that shows nothing
+for a long note. Whether that is worth handling is the site's call, and the
+fallback is cheap: the id is enough for a `tag`, and a vaguer notification is
+better than none.
+
+`relays` names the relay the event arrived from, or, where Tenna did not see
+it arrive, the relays it is expected to be on. It is never empty on Android.
 
 `event.data.text()`, `.arrayBuffer()` and `.blob()` are also provided.
 `event.waitUntil()` works; Tenna waits for the promises before moving on to

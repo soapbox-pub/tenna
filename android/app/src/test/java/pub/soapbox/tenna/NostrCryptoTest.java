@@ -157,6 +157,48 @@ public class NostrCryptoTest {
                 NostrCipher.hexToBytes(signed.getString("sig"))));
     }
 
+    /**
+     * What the push service leans on: an event off a relay is only acted on if
+     * it is its own. Both halves have to be checked, so both are tampered with
+     * here — one changing the contents under a real signature, the other giving
+     * a real signature a new id to sit on.
+     */
+    @Test
+    public void verifyEventRejectsAnythingTamperedWith() throws Exception {
+        JSONObject signed = NostrCrypto.finalizeEvent(
+                1, "hello", vectorTags(), 1752969600L, SK_A);
+        assertTrue(NostrCrypto.verifyEvent(signed));
+
+        // Contents changed under a real signature: the id no longer hashes.
+        JSONObject edited = new JSONObject(signed.toString());
+        edited.put("content", "goodbye");
+        assertFalse(NostrCrypto.verifyEvent(edited));
+
+        // Same, with the id recomputed so it matches the new contents. Only
+        // the signature catches this one.
+        JSONObject reidentified = new JSONObject(edited.toString());
+        reidentified.put("id", NostrCrypto.eventId(
+                signed.getString("pubkey"), 1752969600L, 1, vectorTags(), "goodbye"));
+        assertFalse(NostrCrypto.verifyEvent(reidentified));
+
+        // Attributed to somebody who did not sign it.
+        JSONObject reattributed = new JSONObject(signed.toString());
+        reattributed.put("pubkey", PK_B);
+        assertFalse(NostrCrypto.verifyEvent(reattributed));
+
+        // A different kind, which is a different notification.
+        JSONObject rekinded = new JSONObject(signed.toString());
+        rekinded.put("kind", 4);
+        assertFalse(NostrCrypto.verifyEvent(rekinded));
+
+        // Malformed rather than forged: false, not an exception.
+        JSONObject unsigned = new JSONObject(signed.toString());
+        unsigned.remove("sig");
+        assertFalse(NostrCrypto.verifyEvent(unsigned));
+        assertFalse(NostrCrypto.verifyEvent(new JSONObject()));
+        assertFalse(NostrCrypto.verifyEvent(new JSONObject().put("sig", "not hex")));
+    }
+
     @Test
     public void signaturesAreNotDeterministicAcrossCalls() throws Exception {
         // BIP-340 with random aux: two signatures over one event differ. A

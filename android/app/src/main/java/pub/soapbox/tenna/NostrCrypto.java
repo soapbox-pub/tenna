@@ -217,6 +217,47 @@ final class NostrCrypto {
     }
 
     /**
+     * Whether a whole event is its own: the id is the hash of its contents,
+     * and the signature is that id signed by the pubkey it names.
+     *
+     * <p>This is the only thing standing between a relay and a lie. A relay is
+     * somebody else's server, and an unverified event is that server's opinion
+     * about what a user said — so everything arriving on a socket goes through
+     * here before anything else looks at it. Both halves matter: the signature
+     * alone would let a relay keep a real event's {@code sig} and change its
+     * {@code content}, and the id alone would let it write an event from
+     * scratch under anybody's pubkey.
+     *
+     * <p>False, never an exception, for anything malformed — a missing field,
+     * hex that isn't hex, a pubkey of the wrong length. Also false, for
+     * everything, on a device where libsecp256k1 did not load: nothing here can
+     * check a signature then, and an event that cannot be checked is not one we
+     * will act on. Callers that care about the difference ask
+     * {@link #isAvailable()}.
+     */
+    static boolean verifyEvent(JSONObject event) {
+        try {
+            String pubkey = event.optString("pubkey", "");
+            String id = event.optString("id", "");
+            String sig = event.optString("sig", "");
+            JSONArray tags = event.optJSONArray("tags");
+            if (tags == null) tags = new JSONArray();
+
+            String computed = eventId(
+                pubkey, event.optLong("created_at", 0), event.optInt("kind", -1),
+                tags, event.optString("content", ""));
+            if (!computed.equals(id)) return false;
+
+            return schnorrVerify(
+                NostrCipher.hexToBytes(id),
+                NostrCipher.hexToBytes(pubkey),
+                NostrCipher.hexToBytes(sig));
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    /**
      * Append a JSON string literal exactly as JavaScript's JSON.stringify:
      * escape {@code "} and {@code \}, use the two-char forms for
      * {@code \b \t \n \f \r}, {@code \\u00xx} for other control chars, and emit

@@ -231,23 +231,9 @@ final class AndroidSigner {
 
         try {
             JSONObject event = new JSONObject(eventJson);
-            String id = event.optString("id", "");
-            String pubkey = event.optString("pubkey", "");
             String sig = event.optString("sig", "");
 
-            JSONArray tags = event.optJSONArray("tags");
-            if (tags == null) tags = new JSONArray();
-
-            String computed = NostrCrypto.eventId(
-                pubkey, event.optLong("created_at", 0), event.optInt("kind", -1),
-                tags, event.optString("content", ""));
-
-            boolean sound = computed.equals(id) && NostrCrypto.schnorrVerify(
-                NostrCipher.hexToBytes(id),
-                NostrCipher.hexToBytes(pubkey),
-                NostrCipher.hexToBytes(sig));
-
-            if (!sound) {
+            if (!NostrCrypto.verifyEvent(event)) {
                 Log.w(TAG, "A signer app answered with an event that is not signed");
                 return TennaSigning.Outcome.error("The signer app returned an invalid signature");
             }

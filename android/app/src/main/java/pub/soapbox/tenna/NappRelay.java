@@ -94,6 +94,8 @@ final class NappRelay extends WebSocketListener {
     private boolean closed;
     private int attempt;
     private boolean authNoted;
+    /** Events this relay sent that weren't signed by who they claimed. */
+    private int forged;
     @Nullable private ScheduledFuture<?> reconnect;
 
     NappRelay(@NonNull OkHttpClient client, @NonNull String url, @NonNull Listener listener, @NonNull ScheduledExecutorService scheduler) {
@@ -219,6 +221,7 @@ final class NappRelay extends WebSocketListener {
 
     @Override
     public void onOpen(@NonNull WebSocket webSocket, @NonNull Response response) {
+        int dropped;
         synchronized (this) {
             if (webSocket != socket) {
                 webSocket.close(1000, null);
@@ -226,10 +229,14 @@ final class NappRelay extends WebSocketListener {
             }
             open = true;
             attempt = 0;
+            dropped = forged;
+            forged = 0;
             sent.clear();
             reconcile();
         }
-        Log.i(TAG, "Connected to " + url);
+        Log.i(TAG, dropped > 0
+            ? "Connected to " + url + ", which last sent " + dropped + " unverifiable event(s)"
+            : "Connected to " + url);
     }
 
     @Override
@@ -258,11 +265,29 @@ final class NappRelay extends WebSocketListener {
                 if (message.length() < 3) return;
                 JSONObject event = message.optJSONObject(2);
                 if (event == null) return;
+
                 NappPlan.Subscription subscription;
                 synchronized (this) {
                     subscription = desired.get(message.optString(1, ""));
                 }
-                if (subscription != null) listener.onEvent(url, subscription, event);
+                if (subscription == null) return;
+
+                // The boundary. A relay can say anything, and everything past
+                // this line is treated as something a user really wrote — it
+                // becomes a notification in the shade, or a request to sign.
+                // So an event that is not its own pubkey's is dropped here,
+                // once, for every caller, rather than in each of them.
+                //
+                // After the subscription lookup, not before: an event nobody
+                // asked for goes nowhere anyway, and a curve operation per
+                // frame is not something a relay gets to ask for by inventing
+                // REQ ids.
+                if (!NostrCrypto.verifyEvent(event)) {
+                    noteForgery();
+                    return;
+                }
+
+                listener.onEvent(url, subscription, event);
                 break;
             }
             case "CLOSED":
@@ -288,6 +313,30 @@ final class NappRelay extends WebSocketListener {
                 break;
             default:
                 break;
+        }
+    }
+
+    /**
+     * Say once that this relay sent something that wasn't signed by who it
+     * claimed, and count the rest.
+     *
+     * <p>Once per connection, because a relay that sends one forgery can send
+     * a million and logcat is not the place to have that argument. The count
+     * goes out with the next connection's line, so a run of them is still
+     * visible.
+     */
+    private void noteForgery() {
+        boolean first;
+        synchronized (this) {
+            first = forged++ == 0;
+        }
+        if (!first) return;
+
+        if (!NostrCrypto.isAvailable()) {
+            Log.w(TAG, "No libsecp256k1 on this device, so nothing from " + url
+                + " can be checked; dropping it all");
+        } else {
+            Log.w(TAG, url + " sent an event that was not signed by who it claims; dropping it");
         }
     }
 

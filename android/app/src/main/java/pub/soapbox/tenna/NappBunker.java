@@ -193,8 +193,12 @@ final class NappBunker {
         if (clientPubkey.length() != 64) return;
 
         // A relay handing us an event it made up would otherwise be a relay
-        // telling us we had been asked to sign something.
-        if (!verify(event)) {
+        // telling us we had been asked to sign something. NappRelay already
+        // checked this for anything off a socket; the cost of being sure is a
+        // curve operation on a request that only arrives when somebody is
+        // waiting for a signature, and this is the path where being wrong
+        // means signing.
+        if (!NostrCrypto.verifyEvent(event)) {
             Log.w(TAG, "Dropped a request that was not signed by who it claims");
             return;
         }
@@ -646,26 +650,4 @@ final class NappBunker {
             : NostrCipher.encrypt44(NostrCrypto.conversationKey(key, peer), plaintext);
     }
 
-    /** Whether the event's id and signature are its own. */
-    private static boolean verify(@NonNull JSONObject event) {
-        try {
-            String pubkey = event.optString("pubkey", "");
-            String id = event.optString("id", "");
-            String sig = event.optString("sig", "");
-            JSONArray tags = event.optJSONArray("tags");
-            if (tags == null) tags = new JSONArray();
-
-            String computed = NostrCrypto.eventId(
-                pubkey, event.optLong("created_at", 0), event.optInt("kind", -1),
-                tags, event.optString("content", ""));
-            if (!computed.equals(id)) return false;
-
-            return NostrCrypto.schnorrVerify(
-                NostrCipher.hexToBytes(id),
-                NostrCipher.hexToBytes(pubkey),
-                NostrCipher.hexToBytes(sig));
-        } catch (Exception e) {
-            return false;
-        }
-    }
 }

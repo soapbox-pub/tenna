@@ -54,6 +54,7 @@ import org.json.JSONException;
 import org.json.JSONObject;
 
 import java.io.ByteArrayOutputStream;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
@@ -106,6 +107,9 @@ public class NsiteWebViewPlugin extends Plugin {
 
     /** Injected object name the NIP-07 provider posts through. */
     private static final String HOST_OBJECT = "tennaHost";
+
+    /** Where the provider script asks whether it may send raw bytes. */
+    private static final String BINARY_MESSAGES_PLACEHOLDER = "%%NAPP_BINARY%%";
 
     @Nullable private ViewGroup container;
     @Nullable private WebView webView;
@@ -889,6 +893,12 @@ public class NsiteWebViewPlugin extends Plugin {
         // looking like a file.
         if (saving != null) saving.release();
 
+        // Requests the site had out are cancelled with it. A staged one holds
+        // a socket and a place in the site's in-flight count, and there is no
+        // longer anyone who could collect it.
+        String closingSite = NsiteOrigins.siteIdFor(host);
+        if (closingSite != null) NappFetch.forget(closingSite);
+
         WebView view = webView;
         ViewGroup frame = container;
         NsiteFileServer server = fileServer;
@@ -1153,6 +1163,15 @@ public class NsiteWebViewPlugin extends Plugin {
 
         if (providerScript == null) return;
 
+        // Whether a request body can be handed over as bytes. A fact about
+        // the WebView that happens to be installed rather than about the
+        // site, so the web layer leaves a hole for it, as it does for the
+        // worker shim's token. See `nsiteNostrProvider.ts`.
+        providerScript = providerScript.replace(
+            BINARY_MESSAGES_PLACEHOLDER,
+            supportsBinaryMessages() ? "true" : "false"
+        );
+
         if (!WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER)
             || !WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {
             // Without both, the provider would either arrive too late to be
@@ -1164,11 +1183,62 @@ public class NsiteWebViewPlugin extends Plugin {
         WebViewCompat.addWebMessageListener(view, HOST_OBJECT, allowed, (v, message, sourceOrigin, isMainFrame, proxy) -> {
             if (!isMainFrame) return;
             replyProxy = proxy;
-            forwardRpc(message);
+            onMessage(message);
         });
 
         WebViewCompat.addDocumentStartJavaScript(view, providerScript, allowed);
     }
+
+    /**
+     * Whether a site may hand this WebView raw bytes.
+     *
+     * <p>What a {@code napp.fetch} request body rides on. Without it the shim
+     * base64s the body into an ordinary message instead, which costs a third
+     * again in size and a copy in script — so it is worth asking, and not
+     * worth withholding the whole API over.
+     */
+    static boolean supportsBinaryMessages() {
+        return WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_ARRAY_BUFFER);
+    }
+
+    /**
+     * A message from the site's provider.
+     *
+     * <p>Two shapes. Almost everything is JSON-RPC text, forwarded to the web
+     * layer, which is where the prompts and the keys are. The exception is a
+     * {@code napp.fetch} request body, which arrives as raw bytes and is
+     * answered here — the whole point of that path is that a site's upload
+     * never has to be encoded, marshalled through Capacitor and decoded again
+     * just to reach a socket.
+     */
+    private void onMessage(@NonNull WebMessageCompat message) {
+        if (supportsBinaryMessages() && message.getType() == WebMessageCompat.TYPE_ARRAY_BUFFER) {
+            stageFetchBody(message.getArrayBuffer());
+            return;
+        }
+        forwardRpc(message);
+    }
+
+    /**
+     * The bytes of a {@code napp.fetch} body, with the ticket they belong to
+     * written across the front of them.
+     *
+     * <p>A message carries one payload and no metadata, so the ticket travels
+     * inside the buffer rather than beside it. It is a UUID, so it is exactly
+     * {@link #TICKET_PREFIX_BYTES} ASCII characters and the split needs no
+     * framing beyond that.
+     */
+    private void stageFetchBody(@NonNull byte[] buffer) {
+        if (buffer.length < TICKET_PREFIX_BYTES) return;
+
+        String ticket = new String(buffer, 0, TICKET_PREFIX_BYTES, StandardCharsets.US_ASCII);
+        byte[] body = Arrays.copyOfRange(buffer, TICKET_PREFIX_BYTES, buffer.length);
+
+        NappFetch.body(ticket, body);
+    }
+
+    /** The length of the UUID a body's buffer is prefixed with. */
+    private static final int TICKET_PREFIX_BYTES = 36;
 
     private void forwardRpc(@NonNull WebMessageCompat message) {
         String data = message.getData();
@@ -1176,32 +1246,98 @@ public class NsiteWebViewPlugin extends Plugin {
 
         try {
             JSONObject request = new JSONObject(data);
+            int id = request.optInt("id", -1);
+            String method = request.optString("method");
+            Object params = request.opt("params");
+
+            // napp.fetch is answered here rather than in the web layer, and is
+            // the only thing that is. Everything else on this channel is a
+            // question about the user's keys, which lives in React because
+            // that is where the grants and the prompt are; this one asks
+            // nobody anything, and its payload is bytes. Marshalling a site's
+            // upload through Capacitor to reach a socket would be a great deal
+            // of copying to arrive back where it started. See NappFetch.
+            if (method.startsWith("napp.fetch.")) {
+                JSONObject args = params instanceof JSONObject
+                    ? (JSONObject) params
+                    : new JSONObject();
+                answerFetch(id, method, args);
+                return;
+            }
+
             JSObject event = new JSObject();
-            event.put("id", request.optInt("id", -1));
-            event.put("method", request.optString("method"));
+            event.put("id", id);
+            event.put("method", method);
             // Params travel as JSON text. A signed event's tags are an
             // arbitrarily shaped array, and round-tripping that through
             // Capacitor's object coercion loses types.
-            event.put("params", request.opt("params") == null ? "{}" : request.get("params").toString());
+            event.put("params", params == null ? "{}" : params.toString());
             notifyListeners("nsiteRpc", event);
         } catch (JSONException ignored) {
             // A malformed message is the site's problem; it gets no reply.
         }
     }
 
-    /** Deliver a JSON-RPC response for a call previously raised as `nsiteRpc`. */
-    @PluginMethod
-    public void respond(PluginCall call) {
-        Integer id = call.getInt("id");
-        String result = call.getString("result");
-        String error = call.getString("error");
-
-        JavaScriptReplyProxy proxy = replyProxy;
-        if (id == null || proxy == null) {
-            call.resolve();
+    /** Answer one {@code napp.fetch.*} call, without leaving this thread. */
+    private void answerFetch(int id, @NonNull String method, @NonNull JSONObject params) {
+        String siteId = NsiteOrigins.siteIdFor(host);
+        if (siteId == null) {
+            sendRpcResponse(id, null, "No site");
             return;
         }
 
+        switch (method) {
+            case "napp.fetch.begin": {
+                try {
+                    String ticket = NappFetch.stage(siteId, params);
+                    sendRpcResponse(id, JSONObject.quote(ticket), null);
+                } catch (NappFetch.Refused e) {
+                    sendRpcResponse(id, null, e.getMessage());
+                }
+                return;
+            }
+
+            // The body, for a WebView too old to be handed raw bytes.
+            case "napp.fetch.body": {
+                String ticket = params.optString("ticket", null);
+                String encoded = params.optString("body", "");
+                byte[] body;
+                try {
+                    body = Base64.decode(encoded, Base64.URL_SAFE | Base64.NO_PADDING | Base64.NO_WRAP);
+                } catch (IllegalArgumentException e) {
+                    sendRpcResponse(id, null, "Malformed body");
+                    return;
+                }
+                NappFetch.body(ticket, body);
+                sendRpcResponse(id, "null", null);
+                return;
+            }
+
+            case "napp.fetch.abort": {
+                NappFetch.abort(params.optString("ticket", null));
+                sendRpcResponse(id, "null", null);
+                return;
+            }
+
+            default:
+                sendRpcResponse(id, null, "Method not found: " + method);
+        }
+    }
+
+    /**
+     * Write a JSON-RPC response back to the site's provider.
+     *
+     * <p>{@code result} is JSON <em>text</em>, parsed back out here, which is
+     * how it reaches this class from the web layer and is kept for the calls
+     * answered natively so that both have one implementation to be wrong in.
+     *
+     * @return whether it could be sent.
+     */
+    private boolean sendRpcResponse(int id, @Nullable String result, @Nullable String error) {
+        JavaScriptReplyProxy proxy = replyProxy;
+        if (proxy == null) return false;
+
+        final String payload;
         try {
             JSONObject response = new JSONObject();
             response.put("jsonrpc", "2.0");
@@ -1214,13 +1350,32 @@ public class NsiteWebViewPlugin extends Plugin {
             } else {
                 response.put("result", result == null ? JSONObject.NULL : new org.json.JSONTokener(result).nextValue());
             }
-            final String payload = response.toString();
-            getActivity().runOnUiThread(() -> proxy.postMessage(payload));
+            payload = response.toString();
         } catch (JSONException e) {
-            call.reject("Malformed response", e);
+            return false;
+        }
+
+        getActivity().runOnUiThread(() -> proxy.postMessage(payload));
+        return true;
+    }
+
+    /** Deliver a JSON-RPC response for a call previously raised as `nsiteRpc`. */
+    @PluginMethod
+    public void respond(PluginCall call) {
+        Integer id = call.getInt("id");
+        String result = call.getString("result");
+        String error = call.getString("error");
+
+        if (id == null) {
+            call.resolve();
             return;
         }
 
+        // Either it went or the site has gone and there was nobody to tell.
+        // Neither is the caller's fault and neither is recoverable, so this
+        // resolves regardless and a site whose window died is left to its own
+        // timeout — which it no longer has any way to notice.
+        sendRpcResponse(id, result, error);
         call.resolve();
     }
 }

@@ -34,6 +34,14 @@
   var WAKE_PATH = '/.napp/wake';
   var WAKE_PAGE = %%NAPP_WAKE_PAGE%%;
 
+  // The path a napp.fetch response is collected from, which needs the same
+  // protection for a different reason: it is Tenna's, not the site's, and a
+  // site whose fetch handler answers everything would hand its own window a
+  // cached page where the response to an API call should be. A handler that
+  // passes unknown requests through would be fine; one with an offline
+  // fallback would not, and there is no telling which a given site wrote.
+  var FETCH_PATH = '/.napp/fetch';
+
   /**
    * What proves to the host that a call on the paths below came from this
    * site's own worker.
@@ -56,17 +64,29 @@
   /** A URL is not a request body; anything longer than this is the site's bug. */
   var MAX_NOTIFICATION_BYTES = 64 * 1024;
 
+  function pathOf(url) {
+    try { return new URL(url).pathname; } catch (e) { return null; }
+  }
+
   function isWake(url) {
-    try { return new URL(url).pathname === WAKE_PATH; } catch (e) { return false; }
+    return pathOf(url) === WAKE_PATH;
+  }
+
+  /** Paths the site's own fetch handler does not get to answer. */
+  function isReserved(url) {
+    var path = pathOf(url);
+    return path === WAKE_PATH || path === FETCH_PATH;
   }
 
   if (self.FetchEvent && FetchEvent.prototype.respondWith) {
     var respondWith = FetchEvent.prototype.respondWith;
     FetchEvent.prototype.respondWith = function (response) {
-      if (isWake(this.request.url)) return;
+      if (isReserved(this.request.url)) return;
       return respondWith.call(this, response);
     };
     self.addEventListener('fetch', function (event) {
+      // The wake page is answered from here; the fetch path is simply left
+      // alone, so it falls through to the host that was going to serve it.
       if (!isWake(event.request.url)) return;
       respondWith.call(event, new Response(WAKE_PAGE, {
         headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' },
@@ -313,6 +333,110 @@
       },
     },
   };
+
+  // -------------------------------------------------------------------------
+  // self.napp.fetch
+  // -------------------------------------------------------------------------
+
+  /*
+   * An HTTP request made on the site's behalf, without CORS.
+   *
+   * The same API the site's window has as `window.napp.fetch`, with one
+   * ceiling the window does not share. A window stages its request over the
+   * message channel and its body crosses as raw bytes; a worker has no
+   * channel — the case worth having this for is the one with no window open
+   * at all — so the whole request, body included, is written into the URL.
+   *
+   * That is the same shape `self.nostr` uses and for the same reason, and it
+   * is why a worker's body is capped at 32 KB while a window's is capped at
+   * sixteen megabytes. A worker with a large upload to make should wake its
+   * window and let it do it.
+   *
+   * A request made from in here does not go through this worker's own `fetch`
+   * handler — a worker's own fetches never do — so unlike the window's, this
+   * one needs no protecting from the site's router.
+   */
+
+  /** A body longer than this has nowhere to go. Matches NappFetchPolicy. */
+  var MAX_FETCH_BODY_BYTES = 32 * 1024;
+
+  /** And the whole request, once it has been written out as a URL. */
+  var MAX_FETCH_BYTES = 96 * 1024;
+
+  /** Set when the failure is Tenna's answer rather than a server's. */
+  var FETCH_ERROR_HEADER = 'X-Napp-Error';
+
+  function abortError() {
+    try {
+      return new DOMException('The user aborted a request.', 'AbortError');
+    } catch (e) {
+      var err = new Error('The user aborted a request.');
+      err.name = 'AbortError';
+      return err;
+    }
+  }
+
+  /** base64url over bytes, where `encode` does it over text. */
+  function encodeBytes(bytes, limit) {
+    if (bytes.length > limit) return null;
+    var binary = '';
+    for (var i = 0; i < bytes.length; i += 0x8000) {
+      binary += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+    }
+    return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  }
+
+  function nappFetch(input, init) {
+    var request;
+    try {
+      request = new Request(input, init);
+    } catch (e) {
+      return Promise.reject(e);
+    }
+
+    var signal = request.signal;
+    if (signal && signal.aborted) return Promise.reject(abortError());
+
+    var headers = [];
+    request.headers.forEach(function (value, name) { headers.push([name, value]); });
+
+    return request
+      .arrayBuffer()
+      .then(function (buffer) {
+        var body = '';
+
+        if (buffer.byteLength > 0) {
+          body = encodeBytes(new Uint8Array(buffer), MAX_FETCH_BODY_BYTES);
+          if (body === null) {
+            throw new TypeError('A worker cannot send a body this large');
+          }
+        }
+
+        var payload = encode(JSON.stringify({
+          url: request.url,
+          method: request.method,
+          headers: headers,
+          redirect: request.redirect,
+          body: body,
+        }), MAX_FETCH_BYTES);
+
+        if (payload === null) throw new TypeError('The request is too large');
+
+        return fetch(
+          FETCH_PATH + '?a=' + encodeURIComponent(AUTH) + '&r=' + payload,
+          { cache: 'no-store', signal: signal }
+        );
+      })
+      .then(function (response) {
+        // What a browser would have rejected with rather than resolved: a
+        // refused address, a host that does not answer, a timeout.
+        var failure = response.headers.get(FETCH_ERROR_HEADER);
+        if (failure) throw new TypeError(failure);
+        return response;
+      });
+  }
+
+  self.napp = Object.freeze({ fetch: nappFetch });
 
   // -------------------------------------------------------------------------
   // Windows

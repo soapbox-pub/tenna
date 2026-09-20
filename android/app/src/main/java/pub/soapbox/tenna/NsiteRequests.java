@@ -51,6 +51,10 @@ import java.util.Map;
  *   <li>{@code /.napp/nostr} — where a worker's {@code self.nostr} calls land,
  *       which is the same token-authenticated shape for the same reason. See
  *       {@link NsiteWorkerSigner}.
+ *   <li>{@code /.napp/fetch} — where a {@code napp.fetch} is collected. The
+ *       one path here that answers with somebody else's bytes: the request was
+ *       made out on the network and this is the site reading the response back
+ *       in. See {@link NappFetch}, and note that it authenticates two ways.
  *   <li>{@value #SHARE_PATH} — the page that turns a staged share into a real
  *       form POST at the site's own origin, for a {@code share_target} that
  *       asked for one. Only a document there can make that navigation.
@@ -152,6 +156,24 @@ final class NsiteRequests {
         if (siteId == null) return null;
 
         String path = url.getPath();
+
+        // napp.fetch, which proves itself two ways because the request behind
+        // it arrived by one of two roads.
+        //
+        // A window staged its request over the message channel and holds a
+        // ticket: unguessable, one-shot, minted against this site, and
+        // therefore proof on its own. A worker had no channel to stage
+        // anything over — the interesting case is the one with no window at
+        // all — so its request is written out in the URL, and the site token
+        // is what says whose worker asked. See NappFetch and NappTokens.
+        if (NappFetch.PATH.equals(path)) {
+            if (query(url, NappFetch.TICKET_PARAM) == null
+                && !NappTokens.matches(context, siteId, query(url, AUTH_PARAM))) {
+                Log.i(TAG, "Refused an unauthenticated " + path + " for " + siteId);
+                return NsiteFileServer.Response.empty(403, "Forbidden").toWebResource();
+            }
+            return NappFetch.serve(siteId, url);
+        }
 
         // The paths that do something rather than serve something. A worker's
         // fetch arrives with no WebView attached, so the host in the URL is

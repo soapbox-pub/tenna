@@ -7,6 +7,7 @@ import { supportsNappPush } from '@/lib/nappPushPlugin';
 import { buildManifest, resolveServers } from '@/lib/nsiteFiles';
 import {
   NsiteWebView,
+  supportsNappFetch,
   type NsiteCapabilityEvent,
   type NsiteFrameRect,
   type NsiteRpcEvent,
@@ -31,6 +32,23 @@ import { cn } from '@/lib/utils';
  * machinery in `@/lib/safeArea` applies to this path. This is the only frame
  * a site in its own window ever gets, and that window is the whole screen.
  */
+/**
+ * The script to inject into the site's window, or nothing to inject.
+ *
+ * Nothing when there is nothing to define: no key to sign with and no member
+ * of `window.napp` this platform can honour. That is iOS with nobody signed
+ * in, and installing an empty function there would cost a user script and a
+ * message handler to define no API at all.
+ */
+function nsiteProviderScript(pubkey: string | undefined): string | undefined {
+  const push = supportsNappPush();
+  const fetch = supportsNappFetch();
+
+  if (!pubkey && !push && !fetch) return undefined;
+
+  return getNsiteNostrProviderScript(pubkey ?? null, 'webMessage', { push, fetch });
+}
+
 export function NsiteNative({
   event,
   name,
@@ -159,10 +177,15 @@ export function NsiteNative({
         servers: resolveServers(event),
         // A site in its own WebView can register a service worker, and the
         // push service can wake it, so this is the one frame that offers
-        // `window.napp.push` alongside `window.nostr`.
-        providerScript: pubkey
-          ? getNsiteNostrProviderScript(pubkey, 'webMessage', { napp: supportsNappPush() })
-          : undefined,
+        // `window.napp` alongside `window.nostr`.
+        //
+        // Installed for a logged-out reader too, which `window.nostr` alone
+        // never needed: `napp.fetch` is a question about the device rather
+        // than about a key, and a reader browsing a site still expects its
+        // pictures to load. The script withholds `window.nostr` when there is
+        // no pubkey to put in it — and is withheld entirely when it would
+        // define nothing at all, which on iOS with nobody signed in it would.
+        providerScript: nsiteProviderScript(pubkey),
         // The first URL, when the window was opened out of the share sheet.
         // Held in a ref like the callbacks: a share belongs to the open, and
         // re-reading it later would only reload the site over the user.

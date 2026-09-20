@@ -4,11 +4,22 @@
  * The script defines `window.nostr` conforming to the NIP-07 interface.
  * `getPublicKey()` returns the embedded pubkey instantly (always allowed).
  * All other methods (`signEvent`, `nip04.*`, `nip44.*`) send JSON-RPC 2.0
- * requests to the host and await responses. Where the host can deliver
- * notifications it also defines `window.napp.push`, over the same channel.
+ * requests to the host and await responses.
  *
- * A serial queue ensures only one RPC is in flight at a time, preventing
- * the host from being overwhelmed with concurrent permission prompts.
+ * `window.napp` carries what the web has no way to ask for and Tenna can
+ * give: `push`, where the host can hold relay subscriptions open, and
+ * `fetch`, an HTTP request made on the site's behalf without CORS. Both go
+ * over the same channel. Either can be absent, and the object itself is
+ * absent when both are — so `window.napp?.fetch` is the way to ask.
+ *
+ * `window.nostr` is defined only when somebody is signed in. `window.napp`
+ * does not depend on that: a request to another server is a question about
+ * the device rather than about a key, and has an answer for a logged-out
+ * reader too.
+ *
+ * A serial queue ensures only one key operation is in flight at a time,
+ * preventing the host from being overwhelmed with concurrent permission
+ * prompts. `napp.fetch` is outside it; see the note there.
  */
 
 /**
@@ -59,17 +70,26 @@ export interface NsiteBridgeOptions {
    * relay subscriptions open for it and wake its service worker for events.
    * Only where the host can honour it — see `supportsNappPush`.
    */
-  napp?: boolean;
+  push?: boolean;
+  /**
+   * Define `window.napp.fetch`, an HTTP request made on the site's behalf
+   * without CORS. Only on the native path, where there is a host to make it.
+   */
+  fetch?: boolean;
 }
 
 /**
- * The `window.napp` block, for hosts that can deliver.
+ * Filled in by the host with `true` or `false`: whether this WebView can be
+ * handed an `ArrayBuffer` over the message channel.
  *
- * Frozen, so a site cannot swap the methods out from under its own code —
- * or another script's — after the fact.
+ * Substituted natively rather than passed in, because it is a fact about the
+ * installed WebView rather than about the site — the same reason the worker
+ * shim's token and wake page are. See `NsiteWebViewPlugin.open`.
  */
-const NAPP_SOURCE = `
-  window.napp = Object.freeze({
+export const NSITE_BINARY_MESSAGES_PLACEHOLDER = '%%NAPP_BINARY%%';
+
+/** The `napp.push` member, for hosts that can deliver notifications. */
+const NAPP_PUSH_SOURCE = `
     push: Object.freeze({
       set: function(subscriptions) {
         return rpc('napp.push.set', { subscriptions: subscriptions });
@@ -77,19 +97,163 @@ const NAPP_SOURCE = `
       get: function() {
         return rpc('napp.push.get', {});
       }
-    })
-  });
+    }),`;
+
+/**
+ * The `napp.fetch` member.
+ *
+ * Deliberately a named function rather than a patched `window.fetch` or an
+ * option on one. A site opts in with `window.napp?.fetch ?? fetch` and every
+ * call site is then unchanged — but the ambient `fetch` stays the web's own,
+ * which is what every runtime that has faced this question has settled on:
+ * Tauri's http plugin exports a drop-in `fetch`, Electron has `net.fetch`, and
+ * Chrome extensions moved cross-origin requests *out* of the content script's
+ * `fetch` and into a message channel when MV3 landed. The one mainstream
+ * counter-example, Capacitor's `CapacitorHttp`, replaces the global and is
+ * known for breaking `Response` semantics for code that never asked for it.
+ *
+ * ## How a request gets out
+ *
+ * `shouldInterceptRequest` is never given a request body, so the request
+ * cannot simply be made and intercepted — it would arrive with its body gone.
+ * Instead the request is staged over this channel and the *response* comes
+ * back through interception, which is what makes the thing handed to the site
+ * a real `Response`: streaming body, real headers, no imitation.
+ *
+ * Two things are worth knowing about what that costs. `response.url` names
+ * the local collection path rather than where the bytes came from, because
+ * `Response.url` cannot be set from script; the honest answer is in the
+ * `X-Napp-Final-Url` header. And a failure that a browser would report by
+ * rejecting — a refused address, a dead host — arrives as a response carrying
+ * `X-Napp-Error`, which is turned back into a rejection here so that a site
+ * sees what it would see anywhere else.
+ */
+const NAPP_FETCH_SOURCE = `
+    fetch: function(input, init) {
+      return nappFetch(input, init);
+    },`;
+
+/**
+ * The body of `napp.fetch`, defined outside the frozen object so that the
+ * helpers it needs are not reachable from it.
+ */
+function nappFetchImplementation(): string {
+  return `
+  var FETCH_PATH = '/.napp/fetch';
+  var ERROR_HEADER = 'X-Napp-Error';
+  var BINARY_MESSAGES = ${NSITE_BINARY_MESSAGES_PLACEHOLDER};
+
+  function abortError() {
+    try {
+      return new DOMException('The user aborted a request.', 'AbortError');
+    } catch (e) {
+      var err = new Error('The user aborted a request.');
+      err.name = 'AbortError';
+      return err;
+    }
+  }
+
+  /** Base64url, for a WebView that cannot be handed bytes. */
+  function encodeBody(buffer) {
+    var bytes = new Uint8Array(buffer);
+    var binary = '';
+    // In chunks, because apply() on a few million arguments overflows the
+    // stack on every engine that has one.
+    for (var i = 0; i < bytes.length; i += 0x8000) {
+      binary += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+    }
+    return btoa(binary).replace(/\\+/g, '-').replace(/\\//g, '_').replace(/=+$/, '');
+  }
+
+  function sendBody(ticket, buffer) {
+    if (!BINARY_MESSAGES) {
+      return call('napp.fetch.body', { ticket: ticket, body: encodeBody(buffer) });
+    }
+
+    // One message carries one payload and no metadata, so the ticket rides
+    // in front of the bytes. It is a UUID, so the host knows where to cut.
+    var framed = new Uint8Array(36 + buffer.byteLength);
+    for (var i = 0; i < 36; i++) framed[i] = ticket.charCodeAt(i);
+    framed.set(new Uint8Array(buffer), 36);
+    ${NSITE_WEB_MESSAGE_OBJECT}.postMessage(framed.buffer);
+    return Promise.resolve();
+  }
+
+  function nappFetch(input, init) {
+    var request;
+    try {
+      request = new NativeRequest(input, init);
+    } catch (e) {
+      return Promise.reject(e);
+    }
+
+    var signal = request.signal;
+    if (signal && signal.aborted) return Promise.reject(abortError());
+
+    var headers = [];
+    request.headers.forEach(function(value, name) { headers.push([name, value]); });
+
+    return request.arrayBuffer().then(function(buffer) {
+      var hasBody = buffer.byteLength > 0;
+
+      return call('napp.fetch.begin', {
+        url: request.url,
+        method: request.method,
+        headers: headers,
+        redirect: request.redirect,
+        hasBody: hasBody
+      }).then(function(ticket) {
+        var giveUp = function() { call('napp.fetch.abort', { ticket: ticket }); };
+        if (signal) signal.addEventListener('abort', giveUp, { once: true });
+
+        var staged = hasBody ? sendBody(ticket, buffer) : Promise.resolve();
+
+        return staged
+          .then(function() {
+            return nativeFetch(FETCH_PATH + '?t=' + encodeURIComponent(ticket), {
+              cache: 'no-store',
+              signal: signal
+            });
+          })
+          .then(function(response) {
+            if (signal) signal.removeEventListener('abort', giveUp);
+
+            // What a browser would have rejected with rather than resolved.
+            var failure = response.headers.get(ERROR_HEADER);
+            if (failure) throw new TypeError(failure);
+
+            return response;
+          }, function(err) {
+            if (signal) signal.removeEventListener('abort', giveUp);
+            throw err;
+          });
+      });
+    });
+  }
 `;
+}
 
 export function getNsiteNostrProviderScript(
-  pubkey: string,
+  pubkey: string | null,
   transport: NsiteRpcTransport = 'postMessage',
   options: NsiteBridgeOptions = {},
 ): string {
   const { receive, send } = getTransportSource(transport);
 
+  const napp: string[] = [];
+  if (options.push) napp.push(NAPP_PUSH_SOURCE);
+  if (options.fetch) napp.push(NAPP_FETCH_SOURCE);
+
   return `(function() {
   'use strict';
+
+  // The originals, taken before any of the site's own code runs. Everything
+  // below is built out of these rather than out of whatever the page has on
+  // its globals by the time somebody calls it — a site that replaces fetch
+  // with its own wrapper, as half the world's SDKs do, must not thereby
+  // change what the provider does or be able to read what passes through it.
+  var nativeFetch = window.fetch.bind(window);
+  var NativeRequest = window.Request;
 
   // ------------------------------------------------------------------
   // Serial queue — one RPC at a time to avoid concurrent prompts
@@ -134,28 +298,42 @@ export function getNsiteNostrProviderScript(
   }
 ${receive}
 
-  function rpc(method, params) {
-    return enqueue(function() {
-      return new Promise(function(resolve, reject) {
-        var id = _nextId++;
-        _pending[id] = { resolve: resolve, reject: reject };
-        var payload = {
-          jsonrpc: '2.0',
-          id: id,
-          method: method,
-          params: params || {}
-        };
-        ${send}
-      });
+  /** One call, sent as soon as it is made. */
+  function call(method, params) {
+    return new Promise(function(resolve, reject) {
+      var id = _nextId++;
+      _pending[id] = { resolve: resolve, reject: reject };
+      var payload = {
+        jsonrpc: '2.0',
+        id: id,
+        method: method,
+        params: params || {}
+      };
+      ${send}
     });
   }
 
+  /**
+   * One call, waiting its turn.
+   *
+   * Everything that can put a question in front of the user goes through
+   * here, so that a site cannot raise four prompts at once. napp.fetch
+   * deliberately does not: it asks nobody anything, and a large upload
+   * queued in front of a signature would stall the signature behind it for
+   * as long as the upload took.
+   */
+  function rpc(method, params) {
+    return enqueue(function() {
+      return call(method, params);
+    });
+  }
+${options.fetch ? nappFetchImplementation() : ''}
   // ------------------------------------------------------------------
   // NIP-07 provider
   // ------------------------------------------------------------------
   var pubkey = ${JSON.stringify(pubkey)};
 
-  window.nostr = {
+  if (pubkey) window.nostr = {
     getPublicKey: function() {
       return Promise.resolve(pubkey);
     },
@@ -186,10 +364,17 @@ ${receive}
       }
     }
   };
-${options.napp ? NAPP_SOURCE : ''}
-  // Signal availability to the nsite.
+${napp.length === 0 ? '' : `
+  // Frozen, so a site cannot swap the methods out from under its own code —
+  // or another script's — after the fact.
+  window.napp = Object.freeze({${napp.join('')}
+  });
+`}
+  // Signal availability to the nsite. Only where there is a provider to be
+  // ready: \`window.napp\` can be there with nobody signed in, and a site
+  // waiting on this event is waiting for \`window.nostr\`.
   try {
-    window.dispatchEvent(new Event('nostr:ready'));
+    if (pubkey) window.dispatchEvent(new Event('nostr:ready'));
   } catch(e) {}
 })();`;
 }

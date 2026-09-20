@@ -1,10 +1,11 @@
 # What Tenna gives an nsite
 
-Three things a site cannot get from a plain browser tab: notifications while it
-is closed, a signer inside its service worker, and a place in the operating
-system's share menu. All three are the Android app only, and each is declared
-the way the web already declares them where the web has a way — a site written
-for Tenna is a site that still works anywhere else.
+Four things a site cannot get from a plain browser tab: notifications while it
+is closed, a signer inside its service worker, a place in the operating
+system's share menu, and an HTTP request that CORS does not stand in front of.
+All four are the Android app only, and each is declared the way the web
+already declares them where the web has a way — a site written for Tenna is a
+site that still works anywhere else.
 
 ## `window.napp` — notifications
 
@@ -437,6 +438,167 @@ moving on to the next event for the site, with a timeout of twenty seconds.
   do for gift wraps addressed to a user, will not deliver it.
 - **Web push on the web.** The iframe path used on the web and on iOS does
   not define `window.napp`.
+
+## `napp.fetch` — a request without CORS
+
+A native app can call any HTTP API it likes. A page cannot, because the
+browser will not let it read a cross-origin response the far end has not
+consented to — and an nsite is a page. So a site that wants to read an API
+with no `Access-Control-Allow-Origin` on it, or a Blossom server that never
+thought about browsers, has until now had to route it through somebody's
+proxy.
+
+```ts
+declare global {
+  interface Window {
+    readonly napp?: {
+      readonly push?: NappPush;
+      /** Exactly `fetch`, minus CORS. */
+      readonly fetch?: typeof fetch;
+    };
+  }
+}
+```
+
+It takes what `fetch` takes and returns what `fetch` returns — a real
+`Response`, with a streaming body and real headers, not an imitation of one.
+So the way to use it is to pick it up once and change nothing else:
+
+```js
+const http = window.napp?.fetch ?? fetch;
+
+const res = await http('https://api.example.com/thing', {
+  headers: { authorization: `Nostr ${token}` },
+});
+const data = await res.json();
+```
+
+On the web and on iOS `window.napp` is absent, `http` is the ordinary `fetch`,
+and the call is subject to CORS exactly as it was before. Nothing is branched
+and nothing breaks; a site simply gets more of what it asked for on Android.
+
+**Not a patched `window.fetch`, and not an option on one.** A site's own code
+is not the only code on its page, and an ambient `fetch` that is quietly more
+powerful than the web's is one every analytics script and transitive
+dependency inherits without anyone writing it down. It is also, less loftily,
+a great deal of `Response` semantics to reimplement correctly for callers who
+never opted in. Every runtime that has faced this has landed in the same
+place: Tauri's http plugin exports a drop-in `fetch` you import, Electron has
+`net.fetch`, and Chrome extensions *removed* the content script's privileged
+fetch in MV3 and moved cross-origin requests onto a message channel. The one
+mainstream counter-example replaces the global, and is known for it.
+
+### There is no permission
+
+Nothing is asked and nothing is stored. A site that cannot reach the network
+is not a site, so a prompt here would be a question with one sane answer,
+asked at the worst possible moment, teaching people to press Allow. There is
+no entry in the shield menu because there is no decision to revoke.
+
+What that costs is worth saying plainly: **any site you open can reach any
+https host, and tell it your IP address.** That is also true of every native
+app on the phone and of every web page in a browser tab; the difference is
+only that a browser would not let the page *read* the answer. What follows is
+what is done instead of asking.
+
+### The request is anonymous
+
+**No cookies, ever.** Nothing is stored and nothing is sent, and a site cannot
+set `Cookie` by hand to put them back. This is the reason lifting CORS is
+defensible at all: the rule exists to stop a page reading what the user's
+ambient credentials unlocked, and there are no ambient credentials here. A
+site that wants to authenticate sets its own `Authorization` header —
+including a NIP-98 one it signed with `window.nostr`.
+
+`Origin`, `Referer`, `Cookie`, `Host`, `Accept-Encoding`, `X-Forwarded-*`,
+`Sec-*`, `Proxy-*` and the connection headers cannot be set. `Set-Cookie` is
+stripped from the response before the site sees it. Most of these the
+`Headers` constructor would have refused anyway; they are refused again on the
+other side of the bridge, because the browser's list is not Tenna's to depend
+on.
+
+### Where it cannot go
+
+**`https` only.** Not `http`, not `file:`, not `data:`, not `content:`. The
+only plaintext hosts a phone can usefully reach are the ones on its own
+network, and those are refused for a better reason:
+
+**Nothing on the local network.** Loopback, `10.x`, `172.16–31.x`,
+`192.168.x`, link-local, carrier-grade NAT, IPv6 unique local, and the various
+reserved ranges are all refused — as is `*.localhost`, which is where every
+nsite lives. A phone sits inside a house, and a page that could fetch without
+CORS could otherwise read the router's admin page, another app's local server,
+or a printer, none of which it could reach from a browser.
+
+This is enforced on **the address actually connected to**, and again on every
+redirect hop. Refusing hostnames alone would stop nothing: any name under the
+site's own control can be given an `A` record of `127.0.0.1`, which is an
+ordinary DNS record and exactly how a page reaches something it should not
+see.
+
+Credentials in the URL (`https://user:pass@host/`) are refused.
+`CONNECT`, `TRACE` and `TRACK` are refused, as they are by `fetch`.
+
+### Ceilings
+
+| What                        | Limit                        |
+| --------------------------- | ---------------------------- |
+| request body, from a window | 16 MB                        |
+| request body, from a worker | 32 KB — see below            |
+| response                    | 64 MB                        |
+| requests in flight per site | 8                            |
+| redirects followed          | 5                            |
+| wait for response headers   | 30 seconds                   |
+
+A failure that a browser would report by rejecting — a refused address, a host
+that does not answer, a timeout — rejects here too, with a `TypeError`, as it
+would anywhere else. A server that answers with a 500 is an answer, and
+resolves.
+
+### What it cannot make true
+
+- **`response.url`** names an internal path rather than where the bytes came
+  from, because `Response.url` cannot be set from script. The real one, after
+  redirects, is in the **`X-Napp-Final-Url`** header.
+- **`response.type`** reads `basic`.
+- **`redirect: 'manual'`** behaves as `'follow'`. `'error'` works.
+- **No streaming request bodies.** The body is one buffer, which is where the
+  16 MB comes from. There is no upload progress.
+
+### In the service worker
+
+`self.napp.fetch` is the same function with the same signature, and it is
+worth having for the same reason `self.nostr` is: a worker woken by a push is
+often the only thing running, and what it needs to say may be behind an API
+call.
+
+```js
+self.addEventListener('push', async (event) => {
+  if (!self.napp) return;                     // the web, or iOS
+  const res = await self.napp.fetch(url);
+  // ...
+});
+```
+
+**One difference: a worker's request body is capped at 32 KB**, where a
+window's is capped at sixteen megabytes. A window stages its request over the
+message channel it already has, and its body crosses as raw bytes; a worker
+has no such channel — the case this is worth having for is the one with no
+window open at all — so its whole request, body included, is written into a
+URL. That is enough for a JSON API call and not enough for an upload. A worker
+with a large upload to make should wake its window and let it do it.
+
+Everything else is identical, including feature detection: `self.napp` is
+absent on the web and on iOS, and an installed worker does not get it until
+Chromium re-fetches its script — the same caveat as
+[`self.nostr`](#an-installed-worker-does-not-have-it-yet), for the same
+reason, since it arrives in the same shim.
+
+### Elsewhere
+
+Not on the web, where there is no host around the page to make the request,
+and not on iOS. `window.napp.fetch` and `self.napp.fetch` are both simply
+absent, which is what the `?? fetch` is for.
 
 ## `self.nostr` — the signer, inside the worker
 

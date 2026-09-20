@@ -53,6 +53,41 @@
     return Promise.resolve();
   }
 
+  /**
+   * A notification the host is showing, as `event.notification`.
+   *
+   * The same object Android's shim hands over — see `NappNotification` in
+   * `napp_sw_shim.js`, which this is a copy of, transport aside. The wire
+   * record the host sends is Tenna's own shape; what a site gets is the one
+   * the Notifications API describes, with the options flattened onto it and
+   * the host's key hidden, so a site round-tripping a notification through
+   * JSON does not carry Tenna's internals with it.
+   */
+  function NappNotification(record) {
+    var options = record.options || {};
+    this.title = String(record.title == null ? '' : record.title);
+    this.tag = String(record.tag == null ? '' : record.tag);
+    this.body = options.body == null ? '' : String(options.body);
+    this.data = options.data;
+    this.icon = options.icon == null ? '' : String(options.icon);
+    this.badge = options.badge == null ? '' : String(options.badge);
+    this.image = options.image == null ? '' : String(options.image);
+    this.actions = Array.isArray(options.actions) ? options.actions : [];
+    this.silent = !!options.silent;
+    this.renotify = !!options.renotify;
+    this.requireInteraction = !!options.requireInteraction;
+    this.timestamp = typeof options.timestamp === 'number' ? options.timestamp : 0;
+    this.dir = options.dir || 'auto';
+    this.lang = options.lang || '';
+    this.vibrate = options.vibrate || [];
+    Object.defineProperty(this, '__key', { value: String(record.key || '') });
+  }
+
+  NappNotification.prototype.close = function() {
+    if (!this.__key) return;
+    tell({ kind: 'close', key: this.__key });
+  };
+
   var listeners = {};
 
   self.registration = {
@@ -125,7 +160,7 @@
       } catch (err) {
         return null;
       }
-      properties.notification = { value: payload };
+      properties.notification = { value: new NappNotification(payload) };
       properties.action = { value: String(payload.action || '') };
       properties.reply = { value: payload.reply == null ? undefined : String(payload.reply) };
     }

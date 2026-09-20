@@ -34,6 +34,13 @@ import javax.crypto.spec.SecretKeySpec;
  * present, which the browser sets for a worker script fetch and for nothing a
  * site can arrange.
  *
+ * <p>It is no longer the only check, though it is still the load-bearing one.
+ * The client a request arrives on says whether a worker made it at all, and on
+ * a site's own profile says whose worker — see {@link NsiteRequests.Asker}.
+ * Neither can stand in for this: a site with no profile shares the default
+ * client with every other, and that client knows nothing but that the asker
+ * was a worker. Which worker is what this answers.
+ *
  * Derived rather than stored per site, from one random secret made on first
  * use. A worker script is cached by the browser for as long as the
  * registration lives, so the token baked into an installed worker has to stay

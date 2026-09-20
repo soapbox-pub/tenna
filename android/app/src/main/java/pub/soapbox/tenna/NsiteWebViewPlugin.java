@@ -1009,8 +1009,13 @@ public class NsiteWebViewPlugin extends Plugin {
             public WebResourceResponse shouldInterceptRequest(WebView v, WebResourceRequest request) {
                 // Everything the document itself asks for. Its worker's
                 // requests do not come through here — see NsiteProfiles and
-                // NsiteServiceWorkers — but both end up in the same router.
-                return NsiteRequests.serve(getContext(), request);
+                // NsiteServiceWorkers — but both end up in the same router,
+                // which is told which of them this is.
+                return NsiteRequests.serve(
+                    getContext(),
+                    request,
+                    NsiteRequests.Asker.window()
+                );
             }
 
             @Override

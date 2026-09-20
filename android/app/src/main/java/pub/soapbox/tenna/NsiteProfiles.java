@@ -99,7 +99,11 @@ final class NsiteProfiles {
         try {
             // Before setProfile, so that no worker in this profile can start
             // before the thing that serves it is in place.
-            serve(view.getContext().getApplicationContext(), ProfileStore.getInstance().getOrCreateProfile(name));
+            serve(
+                view.getContext().getApplicationContext(),
+                siteId,
+                ProfileStore.getInstance().getOrCreateProfile(name)
+            );
             WebViewCompat.setProfile(view, name);
             return true;
         } catch (RuntimeException e) {
@@ -190,8 +194,15 @@ final class NsiteProfiles {
      * has a client slot of its own — so the process-wide one that {@link
      * NsiteServiceWorkers} takes reaches only the default profile, and a site
      * moved off it would have no worker at all. Same router either way.
+     *
+     * <p>One difference, and it is the reason a profile is worth having here
+     * beyond the storage: this client belongs to one site. Nothing but that
+     * site's workers can reach it, so it can name the site it is answering for
+     * — which a request cannot, since a host in a URL is only a claim. The
+     * default profile's client has no such answer to give. See {@link
+     * NsiteRequests.Asker} and {@link NappTokens}.
      */
-    private static void serve(@NonNull Context app, @NonNull Profile profile) {
+    private static void serve(@NonNull Context app, @NonNull String siteId, @NonNull Profile profile) {
         if (!served.add(profile.getName())) return;
 
         try {
@@ -200,7 +211,7 @@ final class NsiteProfiles {
                 @Override
                 @Nullable
                 public WebResourceResponse shouldInterceptRequest(@NonNull WebResourceRequest request) {
-                    return NsiteRequests.serve(app, request);
+                    return NsiteRequests.serve(app, request, NsiteRequests.Asker.worker(siteId));
                 }
             });
         } catch (RuntimeException e) {

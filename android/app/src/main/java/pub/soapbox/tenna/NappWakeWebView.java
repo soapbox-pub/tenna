@@ -308,7 +308,11 @@ final class NappWakeWebView {
                 // Serves the wake page for a site whose worker doesn't claim
                 // navigations. One that does answers this itself, from the
                 // shim, and this is never reached.
-                return NsiteRequests.serve(app, request);
+                //
+                // A document, for all that there is no window around it: what
+                // this loads is a page, and the worker it exists to wake is
+                // served somewhere else entirely.
+                return NsiteRequests.serve(app, request, NsiteRequests.Asker.window());
             }
 
             @Override

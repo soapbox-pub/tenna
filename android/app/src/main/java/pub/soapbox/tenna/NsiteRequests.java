@@ -28,13 +28,18 @@ import java.util.Map;
  * Everything served under an nsite's own origin, from wherever it was asked
  * for.
  *
- * There are three askers and they must all answer alike: the site's own
- * WebView, the WebView the push service opens to wake a worker, and the
- * process-wide {@link NsiteServiceWorkers} client that every service worker
- * fetch goes to. Which one a given request arrives on is not the site's
+ * There are three askers: the site's own WebView, the WebView the push service
+ * opens to wake a worker, and the service worker client — the process-wide
+ * {@link NsiteServiceWorkers} one, or the per-site client {@link NsiteProfiles}
+ * sets — that every service worker fetch goes to. For the site's own files they
+ * answer alike, and which one a given request arrived on is none of the site's
  * business, so the routing lives here rather than in any of them.
  *
- * Two paths are Tenna's rather than the site's, and are reserved under every
+ * For Tenna's own paths it is very much the point. See {@link Asker}: the
+ * reserved paths below are a service worker's API and no page's, so a window
+ * asking for one is not a window of ours and is told there is nothing there.
+ *
+ * These paths are Tenna's rather than the site's, and are reserved under every
  * site origin:
  *
  * <ul>
@@ -134,6 +139,82 @@ final class NsiteRequests {
     private NsiteRequests() {}
 
     /**
+     * Which of this app's clients a request arrived on.
+     *
+     * <p>Nothing in a request says whether a service worker made it. There is
+     * no header for it, and {@code isForMainFrame} is false for a worker's
+     * fetch and for a page's subresource alike — so the only thing that knows
+     * is the client the request was handed to, and it knows for certain. A
+     * worker's fetches go to a {@code ServiceWorkerClient} and a document's go
+     * to its {@code WebViewClient}; Chromium cannot route one to the other.
+     *
+     * <p>Two facts come with it, and they defend different things.
+     *
+     * <ul>
+     *   <li><b>Whether it is a worker at all.</b> The reserved paths are the
+     *       worker's half of the APIs a page gets by injection — its
+     *       {@code window.nostr}, its {@code Notification} — so no page of ours
+     *       ever asks for one. Refusing the ones that do costs nothing and
+     *       means the site token is the second check rather than the only one.
+     *   <li><b>Which site's worker, where that is known.</b> A client set on a
+     *       site's own profile is reachable by that site's workers and no
+     *       other's, so it can say who is asking — which is exactly what a host
+     *       in a URL cannot do, and the hole {@link NappTokens} was written to
+     *       fill. On a WebView too old for profiles every site shares the
+     *       default client, which knows nothing, and the token is all there is.
+     * </ul>
+     */
+    static final class Asker {
+
+        private static final Asker WINDOW = new Asker(false, null);
+        private static final Asker ANY_WORKER = new Asker(true, null);
+
+        /** Whether a service worker made this request. */
+        final boolean worker;
+
+        /** The only site this client can be reached by, if it is one site's. */
+        @Nullable final String siteId;
+
+        private Asker(boolean worker, @Nullable String siteId) {
+            this.worker = worker;
+            this.siteId = siteId;
+        }
+
+        /** A document: the site's own WebView, or the one that wakes it. */
+        @NonNull
+        static Asker window() {
+            return WINDOW;
+        }
+
+        /** The default profile's worker client, shared by every site on it. */
+        @NonNull
+        static Asker worker() {
+            return ANY_WORKER;
+        }
+
+        /** The worker client of one site's own profile. */
+        @NonNull
+        static Asker worker(@NonNull String siteId) {
+            return new Asker(true, siteId);
+        }
+    }
+
+    /**
+     * Whether a path is one only a service worker has any business asking for.
+     *
+     * <p>{@link NappFetch#PATH} is not among them: it is the one reserved path
+     * with two legs, and a window's is the ordinary one. {@link #WAKE_PATH} is
+     * not either — it is a document, and a document is what loads it.
+     */
+    static boolean isWorkerPath(@Nullable String path) {
+        return NOTIFICATION_PATH.equals(path)
+            || NOTIFICATIONS_PATH.equals(path)
+            || CLOSE_PATH.equals(path)
+            || OPEN_PATH.equals(path)
+            || NsiteWorkerSigner.PATH.equals(path);
+    }
+
+    /**
      * Answer a request for a site's origin, or return null to let it go to the
      * network.
      *
@@ -147,7 +228,11 @@ final class NsiteRequests {
      * every byte an nsite is made of is public in the first place.
      */
     @Nullable
-    static WebResourceResponse serve(@NonNull Context context, @NonNull WebResourceRequest request) {
+    static WebResourceResponse serve(
+        @NonNull Context context,
+        @NonNull WebResourceRequest request,
+        @NonNull Asker asker
+    ) {
         Uri url = request.getUrl();
         if (!"https".equalsIgnoreCase(url.getScheme())) return null;
 
@@ -166,26 +251,35 @@ final class NsiteRequests {
         // anything over — the interesting case is the one with no window at
         // all — so its request is written out in the URL, and the site token
         // is what says whose worker asked. See NappFetch and NappTokens.
+        //
+        // The ticket is taken from either, because a site's worker may well be
+        // the thing that relays its window's fetch. The self-describing leg is
+        // a worker's alone.
         if (NappFetch.PATH.equals(path)) {
             if (query(url, NappFetch.TICKET_PARAM) == null
-                && !NappTokens.matches(context, siteId, query(url, AUTH_PARAM))) {
+                && !isOwnWorker(context, asker, siteId, query(url, AUTH_PARAM))) {
                 Log.i(TAG, "Refused an unauthenticated " + path + " for " + siteId);
                 return NsiteFileServer.Response.empty(403, "Forbidden").toWebResource();
             }
             return NappFetch.serve(siteId, url);
         }
 
-        // The paths that do something rather than serve something. A worker's
-        // fetch arrives with no WebView attached, so the host in the URL is
-        // the only thing naming a site — and a host is not proof, since any
-        // site can fetch any other site's paths. The token is. See NappTokens.
-        if (NOTIFICATION_PATH.equals(path)
-            || NOTIFICATIONS_PATH.equals(path)
-            || CLOSE_PATH.equals(path)
-            || OPEN_PATH.equals(path)
-            || NsiteWorkerSigner.PATH.equals(path)) {
+        // The paths that do something rather than serve something, and a
+        // service worker's API rather than a page's — a window does all of
+        // this over the bridge its window.nostr and Notification come from,
+        // and never asks here. So one that does is answered the way the site
+        // itself would answer a path it has no file at. See Asker.
+        if (isWorkerPath(path)) {
+            if (!asker.worker) {
+                Log.i(TAG, "Refused " + path + " asked for outside a worker");
+                return NsiteFileServer.Response.empty(404, "Not Found").toWebResource();
+            }
 
-            if (!NappTokens.matches(context, siteId, query(url, AUTH_PARAM))) {
+            // A worker's fetch arrives with no WebView attached, so the host in
+            // the URL is the only thing naming a site — and a host is not
+            // proof, since any site can fetch any other site's paths. The
+            // token is, and on a profile of its own the client is too.
+            if (!isOwnWorker(context, asker, siteId, query(url, AUTH_PARAM))) {
                 Log.i(TAG, "Refused an unauthenticated " + path + " for " + siteId);
                 return NsiteFileServer.Response.empty(403, "Forbidden").toWebResource();
             }
@@ -232,6 +326,41 @@ final class NsiteRequests {
 
         boolean workerScript = "script".equalsIgnoreCase(header(request, SERVICE_WORKER_HEADER));
         return server.serve(url, workerScript ? shim(context, siteId) : null).toWebResource();
+    }
+
+    /**
+     * Whether a request on a reserved path really came from this site's own
+     * service worker.
+     *
+     * <p>Two things can say so and both are checked: where the request came
+     * from, which is {@link #askerCouldBe}, and the token, which is the only
+     * answer available on the default profile. See {@link NappTokens}.
+     */
+    private static boolean isOwnWorker(
+        @NonNull Context context,
+        @NonNull Asker asker,
+        @NonNull String siteId,
+        @Nullable String token
+    ) {
+        return askerCouldBe(asker, siteId)
+            && NappTokens.matches(context, siteId, token);
+    }
+
+    /**
+     * Whether the client a request arrived on is one this site's worker could
+     * have reached.
+     *
+     * <p>Says nothing about the token; this is the half of the question that
+     * the shape of the app answers rather than a secret. A window is not a
+     * worker and never asks for these paths. And a client belonging to one
+     * site's profile cannot be reached by another site's worker at all, so a
+     * request there for a different site is one nothing should have been able
+     * to make — whereas the default profile's client, which every site left on
+     * it shares, has no opinion to offer. See {@link Asker}.
+     */
+    static boolean askerCouldBe(@NonNull Asker asker, @NonNull String siteId) {
+        if (!asker.worker) return false;
+        return asker.siteId == null || asker.siteId.equals(siteId);
     }
 
     /** Show a notification a worker asked for, and answer its fetch. */

@@ -51,9 +51,33 @@ final class NappWakeWebView {
     /** Injected object name the wake page talks through; the page looks for it by this name. */
     private static final String HOST_OBJECT = "nappHost";
 
-    private static final long DELIVERY_TIMEOUT_MS = 20_000;
+    /**
+     * How long a worker gets to settle its {@code waitUntil} promises.
+     *
+     * <p>Nothing outside is counting: delivery runs inside a foreground
+     * service, so this is a judgement about fairness rather than a deadline
+     * imposed on us. What it costs is queue latency — one site's hung worker
+     * holds that site's next event for this long, and a burst is that many
+     * times over — which is why it is not simply enormous.
+     *
+     * <p><b>iOS cannot follow this.</b> There a worker is run inside a
+     * {@code UNNotificationServiceExtension}, which the system kills at around
+     * thirty seconds, so its budget stays at twenty and is documented
+     * separately. See {@code NotificationService.swift}.
+     */
+    private static final long DELIVERY_TIMEOUT_MS = 60_000;
+
+    /** How long the wake page itself gets to come up. A different failure; see {@link #timedOut}. */
     private static final long READY_TIMEOUT_MS = 15_000;
-    private static final long IDLE_MS = 30_000;
+
+    /**
+     * How long this survives an empty queue.
+     *
+     * <p>Kept level with the delivery deadline so that a site whose events
+     * arrive in a burst is not torn down and navigated again between two of
+     * them.
+     */
+    private static final long IDLE_MS = 60_000;
 
     interface OnIdle {
         void onIdle(@NonNull NappWakeWebView view);

@@ -86,6 +86,13 @@ class NotificationService: UNNotificationServiceExtension {
     /// seconds and `serviceExtensionTimeWillExpire()` is the last word; this
     /// stops short of it so that a worker that hangs still loses to a
     /// deliberate hand-off rather than to the watchdog.
+    ///
+    /// Android gives a worker sixty seconds, and this deliberately does not
+    /// follow it. There delivery runs inside a foreground service and the
+    /// number is a choice about queue fairness; here it is most of a hard
+    /// limit somebody else set. Raising this buys a few seconds and trades a
+    /// deliberate hand-off for a kill, which is the wrong way round. So the
+    /// deadline a site can rely on is platform-dependent — see NAPP.md.
     private static let budget: TimeInterval = 20
 
     private var contentHandler: ((UNNotificationContent) -> Void)?

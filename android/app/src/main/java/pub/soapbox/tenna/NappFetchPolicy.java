@@ -66,12 +66,77 @@ final class NappFetchPolicy {
     /**
      * The largest body a site's <b>worker</b> may send.
      *
-     * <p>Far smaller, and for a different reason: a worker has no message
-     * channel to stage anything over, so its whole request — body included —
-     * is a URL. That is the same constraint the notification payload lives
-     * under, and roughly the same number. See {@link NappFetch}.
+     * <p>The same number, reached by a longer road. A worker has no message
+     * channel to stage anything over, so a body has to arrive as a URL — but
+     * it does not have to arrive as <em>one</em> URL. Above
+     * {@link #MAX_WORKER_INLINE_BODY_BYTES} it is staged a chunk at a time and
+     * written straight to the socket as it comes, so what bounds it is this
+     * policy rather than anything about the transport. See {@link NappFetch}.
      */
-    static final int MAX_WORKER_BODY_BYTES = 32 * 1024;
+    static final int MAX_WORKER_BODY_BYTES = 16 * 1024 * 1024;
+
+    /**
+     * The largest body a worker may send in the request URL itself.
+     *
+     * <p>Worth having as a fast path: below this a request is one interception
+     * and no staging at all, which for the JSON API call that is most of what
+     * {@code napp.fetch} is for is the whole story.
+     *
+     * <p>The ceiling above it is Chromium's. Measured rather than assumed: a
+     * URL of 2,000,033 characters reaches {@code shouldInterceptRequest}
+     * intact, and one of 2 MiB fails the {@code fetch} outright, which is
+     * {@code url::kMaxURLChars} doing exactly what it says. A body expands by
+     * about nine tenths on the way into a URL — base64 into JSON, then the
+     * JSON base64 again — so half a megabyte arrives as about 932,300
+     * characters, comfortably inside it.
+     */
+    static final int MAX_WORKER_INLINE_BODY_BYTES = 512 * 1024;
+
+    /**
+     * The largest self-describing request, as the base64 arrives in the URL.
+     *
+     * <p>Not a policy so much as a refusal to allocate a decode buffer for
+     * something that cannot be honest: this is Chromium's own ceiling, so
+     * anything longer did not arrive. The real limit on an inline request is
+     * the shim's, which is checked before the URL is built.
+     */
+    static final int MAX_WORKER_REQUEST_BYTES = 2 * 1024 * 1024;
+
+    /** The largest single staged chunk, before base64. */
+    static final int MAX_CHUNK_BYTES = 512 * 1024;
+
+    /**
+     * How many chunks are held between the worker and the socket.
+     *
+     * <p>This is the whole memory cost of a staged body, whatever its size:
+     * two chunks in the queue and one being written. It is also what the
+     * collecting fetch may still be waiting on when it arrives, so it is kept
+     * small enough that flushing it fits inside {@link #HEADERS_TIMEOUT_MS} on
+     * a connection worth uploading over at all.
+     */
+    static final int MAX_STAGED_CHUNKS = 2;
+
+    /**
+     * How long a staging request waits for room before telling the worker to
+     * ask again.
+     *
+     * <p>Short, and that is the point. {@link NsiteWorkerSigner} explains at
+     * length why blocking in {@code shouldInterceptRequest} is a hazard — the
+     * thread is Chromium's and every service worker in the process shares it —
+     * so this parks for a quarter of a second at most and then answers
+     * {@code 202}, leaving the worker to retry the same chunk. Backpressure
+     * without a held thread.
+     */
+    static final long CHUNK_PARK_MS = 250;
+
+    /**
+     * How long the body stream waits for the next chunk before giving up.
+     *
+     * <p>The backstop for a worker that was killed halfway through an upload.
+     * Without it {@code writeTo} would block on a queue nobody is ever going
+     * to add to, holding a socket open for as long as the process lives.
+     */
+    static final long CHUNK_STALL_MS = 30_000;
 
     /** The largest response that will be relayed, in bytes. */
     static final long MAX_RESPONSE_BYTES = 64L * 1024 * 1024;

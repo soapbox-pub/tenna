@@ -167,7 +167,8 @@ it arrive, the relays it is expected to be on. It is never empty on Android.
 
 `event.data.text()`, `.arrayBuffer()` and `.blob()` are also provided.
 `event.waitUntil()` works; Tenna waits for the promises before moving on to
-the next event for the site, with a timeout of twenty seconds.
+the next event for the site, with a timeout of sixty seconds on Android and
+twenty on iOS — see [The delivery deadline](#the-delivery-deadline).
 
 #### `showNotification(title, options)`
 
@@ -419,7 +420,8 @@ self.addEventListener('notificationclick', (event) => {
 **Swiping one away** raises `notificationclose`.
 
 `event.waitUntil()` works on all of these. Tenna waits for the promises before
-moving on to the next event for the site, with a timeout of twenty seconds.
+moving on to the next event for the site, with a timeout of sixty seconds on
+Android and twenty on iOS — see [The delivery deadline](#the-delivery-deadline).
 
 #### What is not there yet
 
@@ -604,8 +606,7 @@ Credentials in the URL (`https://user:pass@host/`) are refused.
 
 | What                        | Limit                        |
 | --------------------------- | ---------------------------- |
-| request body, from a window | 16 MB                        |
-| request body, from a worker | 32 KB — see below            |
+| request body                | 16 MB, from a window or a worker alike |
 | response                    | 64 MB                        |
 | requests in flight per site | 8                            |
 | redirects followed          | 5                            |
@@ -623,8 +624,14 @@ resolves.
   redirects, is in the **`X-Napp-Final-Url`** header.
 - **`response.type`** reads `basic`.
 - **`redirect: 'manual'`** behaves as `'follow'`. `'error'` works.
-- **No streaming request bodies.** The body is one buffer, which is where the
-  16 MB comes from. There is no upload progress.
+- **No streaming request bodies**, in the sense the API means: the body is
+  something with a known size, not a `ReadableStream` produced as it goes, and
+  there is no upload progress. What crosses to the host *is* streamed, which is
+  where the 16 MB stops being a memory cost, but a site cannot see that.
+- **A large body cannot survive a 307 or a 308.** Those ask for the same body a
+  second time, and above the size at which a worker's body is staged there is
+  no second time — the request fails rather than being replayed. A 301, 302 or
+  303 is fine: the standard turns those into a bodiless GET anyway.
 
 ### In the service worker
 
@@ -641,13 +648,31 @@ self.addEventListener('push', async (event) => {
 });
 ```
 
-**One difference: a worker's request body is capped at 32 KB**, where a
-window's is capped at sixteen megabytes. A window stages its request over the
-message channel it already has, and its body crosses as raw bytes; a worker
-has no such channel — the case this is worth having for is the one with no
-window open at all — so its whole request, body included, is written into a
-URL. That is enough for a JSON API call and not enough for an upload. A worker
-with a large upload to make should wake its window and let it do it.
+**It has the same 16 MB ceiling a window has**, and gets there by a different
+road that is worth knowing about only if something goes wrong.
+
+A window stages its request over the message channel it already has, and its
+body crosses as raw bytes. A worker has no such channel — the case this is
+worth having for is the one with no window open at all — so everything it says
+has to go through a URL. A URL is not a body, but a body does not have to be
+one URL: under half a megabyte the whole request rides in the URL of a single
+fetch, and above that the body is handed over a chunk at a time and written to
+the socket as it arrives. Neither side ever holds all of it.
+
+For a site this is invisible. `self.napp.fetch(url, { method: 'POST', body })`
+is the same call with the same signature whatever the body's size, and a
+`Blob` is the best thing to hand it — Tenna slices what it needs without the
+rest being in memory. Two consequences do leak out:
+
+- **A big upload is many round trips inside the phone**, though not on the
+  network — the request itself is one HTTP request, made once.
+- **A 307 or 308 redirect will fail** on a staged body. See
+  [What it cannot make true](#what-it-cannot-make-true).
+
+There is still a clock. A worker woken by a push has sixty seconds on Android
+and twenty on iOS, and sixteen megabytes does not go over a mobile connection
+in either — see [The delivery deadline](#the-delivery-deadline). What the size
+limit stopped being is the thing in the way.
 
 Everything else is identical, including feature detection: `self.napp` is
 absent on the web and on iOS, and an installed worker does not get it until
@@ -734,14 +759,34 @@ Two things reject without ever asking:
   because a worker that can raise notifications in a loop can make the phone
   unusable.
 
-### The twenty-second deadline
+### The delivery deadline
 
-`event.waitUntil()` inside a `push` handler is waited on for twenty seconds —
-see [Delivery](#delivery-the-service-worker) — and a permission prompt can
-easily outlast that. So the **first** call for a given permission will often
-miss its own notification even when the user says yes promptly: Tenna moves on
-to the next event for the site, and the `showNotification` that was waiting on
-the decrypt lands late or not at all.
+`event.waitUntil()` inside a `push`, `notificationclick` or
+`notificationclose` handler is waited on for a bounded time, after which Tenna
+moves on to the next event for the site. **How long depends on the platform,
+and there is no way to ask:**
+
+| Platform | Deadline   | Set by                                           |
+| -------- | ---------- | ------------------------------------------------ |
+| Android  | 60 seconds | Tenna, as a judgement about queue fairness       |
+| iOS      | 20 seconds | the system, near enough                          |
+
+They differ because they are not the same kind of number. On Android delivery
+runs inside a foreground service and nothing outside is counting, so the limit
+is a choice: long enough for real work, short enough that one site's hung
+worker does not hold up its own next event for very long. On iOS a worker runs
+inside a `UNNotificationServiceExtension`, which the system kills at around
+thirty seconds; twenty leaves room to hand over a fallback notification
+deliberately rather than be cut off mid-sentence.
+
+**Write for twenty and you are correct everywhere.** A handler that needs
+longer will work on Android and lose its tail on iOS, which for a notification
+means the difference between the real message and "New message".
+
+A permission prompt can outlast either. So the **first** call for a given
+permission will often miss its own notification even when the user says yes
+promptly: Tenna moves on, and the `showNotification` that was waiting on the
+decrypt lands late or not at all.
 
 That is worth knowing and not worth designing around. Decrypt if you can,
 notify with what you have if you cannot, and the second push onwards has the

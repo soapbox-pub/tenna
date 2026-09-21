@@ -28,6 +28,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -42,6 +43,7 @@ import okhttp3.OkHttpClient;
 import okhttp3.Request;
 import okhttp3.RequestBody;
 import okhttp3.ResponseBody;
+import okio.BufferedSink;
 
 /**
  * {@code napp.fetch} — an HTTP request made on a site's behalf, without CORS.
@@ -73,15 +75,32 @@ import okhttp3.ResponseBody;
  *       proof: unguessable, one-shot, minted against one site, and expiring in
  *       {@value NappFetchPolicy#TICKET_TTL_MS} milliseconds.
  *   <li><b>A worker</b> has no channel — the interesting case is the one with
- *       no window open at all — so its whole request, body included, is the
- *       URL, authenticated with the site token baked into its shim exactly as
- *       {@link NsiteWorkerSigner} is. A URL is not a body, so that leg is
- *       capped at {@value NappFetchPolicy#MAX_WORKER_BODY_BYTES} bytes.
+ *       no window open at all — so its request is the URL, authenticated with
+ *       the site token baked into its shim exactly as
+ *       {@link NsiteWorkerSigner} is. Up to
+ *       {@value NappFetchPolicy#MAX_WORKER_INLINE_BODY_BYTES} bytes the body
+ *       rides in that URL too and the whole request is one interception.
+ *   <li><b>A worker with more to say than that</b> stages the body in chunks:
+ *       {@link #OPEN_PATH} mints a ticket and starts the call, {@link
+ *       #PUT_PATH} hands over one chunk at a time, and the collecting fetch
+ *       reads the answer back. A URL is not a body, but a body does not have
+ *       to arrive as one URL.
  * </ul>
  *
- * <p>One API, two ceilings. The alternative was a loopback socket every other
- * app on the device could also reach, to spare a worker a size limit it will
- * almost never meet.
+ * <h2>Why staging streams rather than buffers</h2>
+ *
+ * <p>The chunks are not gathered up and then sent. The call is started when
+ * the ticket is opened, and the request body is a stream that pulls from a
+ * queue {@value NappFetchPolicy#MAX_STAGED_CHUNKS} chunks deep — so a chunk
+ * handed over is on its way to the socket before the next one is asked for,
+ * and a sixteen-megabyte upload costs about a megabyte of memory rather than
+ * sixteen. The queue being bounded is also what applies backpressure: a worker
+ * that outruns the network is told to ask again rather than allowed to fill a
+ * buffer.
+ *
+ * <p>A staged body is one-shot, as any stream is. A redirect that would need
+ * it a second time is refused rather than replayed; one that turns the request
+ * into a GET drops it, which is what the standard asks for anyway.
  *
  * <h2>Why the interception thread is only held for headers</h2>
  *
@@ -101,11 +120,29 @@ final class NappFetch {
     /** Where a staged or self-describing request is collected. */
     static final String PATH = "/.napp/fetch";
 
+    /** Where a worker opens a ticket for a body too big to go in one URL. */
+    static final String OPEN_PATH = "/.napp/fetch/open";
+
+    /** Where a worker hands over one chunk of such a body. */
+    static final String PUT_PATH = "/.napp/fetch/put";
+
+    /** Where a worker abandons one. */
+    static final String ABORT_PATH = "/.napp/fetch/abort";
+
     /** Query parameter naming a request staged over the message channel. */
     static final String TICKET_PARAM = "t";
 
     /** Query parameter carrying a whole request as base64url JSON. */
     static final String REQUEST_PARAM = "r";
+
+    /** Query parameter declaring how many bytes of body are coming. */
+    static final String LENGTH_PARAM = "n";
+
+    /** Query parameter numbering a staged chunk, from zero. */
+    static final String SEQUENCE_PARAM = "i";
+
+    /** Query parameter carrying one staged chunk, as base64url. */
+    static final String CHUNK_PARAM = "c";
 
     /**
      * Header set when the failure is Tenna's answer rather than a server's.
@@ -219,6 +256,158 @@ final class NappFetch {
     }
 
     /**
+     * A worker's body, arriving one chunk at a time.
+     *
+     * <p>A hand-off between two threads that must not be allowed to wait on
+     * each other for long. The worker's side is an interception and is parked
+     * for {@value NappFetchPolicy#CHUNK_PARK_MS} milliseconds at most; the
+     * socket's side is one of {@link #WORKERS} and may wait as long as
+     * {@value NappFetchPolicy#CHUNK_STALL_MS}, since a thread of ours blocking
+     * on a queue costs nobody anything.
+     */
+    private static final class Staged {
+        /** What the worker said was coming, and what {@code Content-Length} will say. */
+        final long length;
+
+        private final ArrayBlockingQueue<byte[]> chunks =
+            new ArrayBlockingQueue<>(NappFetchPolicy.MAX_STAGED_CHUNKS);
+
+        /** Set when nothing more will be accepted, for any of the reasons. */
+        private volatile boolean closed;
+
+        /** Bytes taken from the worker so far. Guarded by {@link #offer}'s monitor. */
+        private long accepted;
+
+        /** The chunk number expected next. Guarded by {@link #offer}'s monitor. */
+        private int next;
+
+        Staged(long length) {
+            this.length = length;
+        }
+
+        /** What became of a chunk the worker offered. */
+        enum Accept { TOOK_IT, FULL, REFUSED, DONE }
+
+        /**
+         * Take one chunk, or say why not.
+         *
+         * <p>{@code FULL} is not a failure: it means the socket has not caught
+         * up, and the worker is expected to offer the same chunk again. So the
+         * sequence number is only advanced once the chunk is really on the
+         * queue.
+         */
+        @NonNull
+        synchronized Accept offer(int sequence, @NonNull byte[] chunk) {
+            // Synchronized across the park as well as the bookkeeping, so that
+            // two chunks claiming the same number cannot both get past the
+            // check and be written twice. Nothing else takes this monitor —
+            // `take` and `close` deliberately do not — so parking under it
+            // holds up no one but another chunk, which is the point.
+            if (closed) return Accept.REFUSED;
+            // Already had it. Nothing here should produce a duplicate, but
+            // answering one by writing the bytes twice would be the worst
+            // available way to find out.
+            if (sequence < next) return Accept.DONE;
+            if (sequence > next) return Accept.REFUSED;
+            if (accepted + chunk.length > length) return Accept.REFUSED;
+
+            boolean took;
+            try {
+                took = chunks.offer(chunk, NappFetchPolicy.CHUNK_PARK_MS, TimeUnit.MILLISECONDS);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return Accept.REFUSED;
+            }
+
+            if (!took) return closed ? Accept.REFUSED : Accept.FULL;
+
+            next++;
+            accepted += chunk.length;
+            return Accept.TOOK_IT;
+        }
+
+        /** The next chunk to write, for {@link StagedBody}. */
+        @NonNull
+        byte[] take() throws IOException {
+            byte[] chunk;
+            try {
+                chunk = chunks.poll(NappFetchPolicy.CHUNK_STALL_MS, TimeUnit.MILLISECONDS);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new IOException("Interrupted");
+            }
+
+            if (chunk == null) {
+                // Nothing came. Either the worker was killed mid-upload or it
+                // simply stopped; either way there is no body to finish.
+                throw new IOException("The request body stalled");
+            }
+            if (closed) throw new IOException("The request body was abandoned");
+            return chunk;
+        }
+
+        /**
+         * Stop accepting, and unblock whoever is waiting on either side.
+         *
+         * <p>The sentinel matters: a {@code writeTo} parked in {@link #take}
+         * would otherwise sit there for the full stall timeout holding a
+         * socket, for a body that is never going to arrive.
+         */
+        void close() {
+            closed = true;
+            chunks.offer(new byte[0]);
+        }
+    }
+
+    /**
+     * The request body OkHttp writes from, pulling as the worker supplies.
+     *
+     * <p>One-shot, in OkHttp's sense and in the plain one: the chunks are gone
+     * once written, so a retry of any kind has nothing to send. Redirects are
+     * followed by hand here, and {@link #execute} refuses the ones that would
+     * need the body again.
+     */
+    private static final class StagedBody extends RequestBody {
+        private final Staged staged;
+        @Nullable private final MediaType contentType;
+
+        StagedBody(@NonNull Staged staged, @Nullable MediaType contentType) {
+            this.staged = staged;
+            this.contentType = contentType;
+        }
+
+        @Nullable
+        @Override
+        public MediaType contentType() {
+            return contentType;
+        }
+
+        @Override
+        public long contentLength() {
+            return staged.length;
+        }
+
+        @Override
+        public boolean isOneShot() {
+            return true;
+        }
+
+        @Override
+        public void writeTo(@NonNull BufferedSink sink) throws IOException {
+            long written = 0;
+            while (written < staged.length) {
+                byte[] chunk = staged.take();
+                sink.write(chunk);
+                // Flushed as it goes, so that a chunk handed over is really on
+                // its way rather than sitting in Okio's buffer waiting for the
+                // next one. It is what makes the queue depth the memory cost.
+                sink.flush();
+                written += chunk.length;
+            }
+        }
+    }
+
+    /**
      * One request, from staging to the last byte read off it.
      *
      * <p>Held in {@link #staged} only between being minted and being
@@ -230,13 +419,24 @@ final class NappFetch {
         @NonNull final String id;
         @NonNull final String siteId;
         @NonNull final Plan plan;
-        final long expiresAt;
+
+        /**
+         * When {@link #sweep} may drop this, if nobody has come back for it.
+         *
+         * <p>Not final, because a staged body legitimately outlives the TTL: a
+         * sixteen-megabyte upload takes longer than thirty seconds and the
+         * ticket has to survive every chunk of it. Each chunk pushes this out,
+         * so what expires is an idle ticket rather than a slow one.
+         */
+        volatile long expiresAt;
 
         final CountDownLatch ready = new CountDownLatch(1);
         /** Guards the accounting in {@link #release}, which has several callers. */
         final AtomicBoolean released = new AtomicBoolean();
 
         @Nullable volatile byte[] body;
+        /** Set instead of {@link #body} when the body is arriving in chunks. */
+        @Nullable volatile Staged staging;
         volatile boolean started;
         volatile boolean aborted;
         @Nullable volatile Call call;
@@ -376,13 +576,8 @@ final class NappFetch {
      */
     @NonNull
     private static WebResourceResponse serveInline(@NonNull String siteId, @NonNull String encoded) {
-        JSONObject request;
-        try {
-            byte[] json = Base64.decode(encoded, Base64.URL_SAFE | Base64.NO_PADDING | Base64.NO_WRAP);
-            request = new JSONObject(new String(json, StandardCharsets.UTF_8));
-        } catch (IllegalArgumentException | JSONException e) {
-            return error("Malformed request");
-        }
+        JSONObject request = requestFrom(encoded);
+        if (request == null) return error("Malformed request");
 
         Plan plan;
         byte[] body = null;
@@ -392,8 +587,8 @@ final class NappFetch {
             String encodedBody = request.optString("body", null);
             if (encodedBody != null && !encodedBody.isEmpty()) {
                 body = Base64.decode(encodedBody, Base64.URL_SAFE | Base64.NO_PADDING | Base64.NO_WRAP);
-                if (body.length > NappFetchPolicy.MAX_WORKER_BODY_BYTES) {
-                    return error("Request body is too large for a worker");
+                if (body.length > NappFetchPolicy.MAX_WORKER_INLINE_BODY_BYTES) {
+                    return error("Request body is too large to send in one piece");
                 }
             }
         } catch (Refused e) {
@@ -405,6 +600,75 @@ final class NappFetch {
         Ticket ticket = new Ticket(UUID.randomUUID().toString(), siteId, plan);
         ticket.body = body;
 
+        if (!take(siteId)) return error("Too many requests in flight");
+
+        start(ticket);
+        return collect(ticket);
+    }
+
+    /**
+     * Decode the self-describing form of a request.
+     *
+     * <p>The length is checked before anything is allocated. Two megabytes is
+     * {@code GURL}'s own ceiling, so a longer one did not arrive by any honest
+     * road; the ceiling that actually bounds an inline request is the shim's,
+     * applied before the URL was built.
+     */
+    @Nullable
+    private static JSONObject requestFrom(@NonNull String encoded) {
+        if (encoded.length() > NappFetchPolicy.MAX_WORKER_REQUEST_BYTES) return null;
+        try {
+            byte[] json = Base64.decode(encoded, Base64.URL_SAFE | Base64.NO_PADDING | Base64.NO_WRAP);
+            return new JSONObject(new String(json, StandardCharsets.UTF_8));
+        } catch (IllegalArgumentException | JSONException e) {
+            return null;
+        }
+    }
+
+    // ── Staging, for a worker with a body too big for one URL ────────────────
+
+    /**
+     * Mint a ticket for a body that is going to arrive in chunks, and start
+     * the request.
+     *
+     * <p>Starting it now is the point: by the time the first chunk is handed
+     * over the connection is open and OkHttp is already asking for bytes, so a
+     * chunk goes to the socket rather than into a buffer.
+     */
+    @NonNull
+    static WebResourceResponse open(@NonNull String siteId, @NonNull Uri url) {
+        String encoded = query(url, REQUEST_PARAM);
+        if (encoded == null) return error("No request");
+
+        String declared = query(url, LENGTH_PARAM);
+        if (declared == null) return error("No body length");
+
+        long length;
+        try {
+            length = Long.parseLong(declared);
+        } catch (NumberFormatException e) {
+            return error("No body length");
+        }
+        if (length <= 0) return error("No body length");
+        if (length > NappFetchPolicy.MAX_WORKER_BODY_BYTES) {
+            return error("Request body is too large");
+        }
+
+        JSONObject request = requestFrom(encoded);
+        if (request == null) return error("Malformed request");
+
+        Plan plan;
+        try {
+            plan = planFrom(request);
+        } catch (Refused e) {
+            return error(e.getMessage());
+        }
+
+        if (!plan.hasBody) return error("That request said it had no body");
+
+        Ticket ticket = new Ticket(UUID.randomUUID().toString(), siteId, plan);
+        ticket.staging = new Staged(length);
+
         synchronized (staged) {
             sweep();
             int running = count(siteId);
@@ -412,10 +676,121 @@ final class NappFetch {
                 return error("Too many requests in flight");
             }
             inFlight.put(siteId, running + 1);
+            staged.put(ticket.id, ticket);
         }
 
         start(ticket);
-        return collect(ticket);
+
+        Map<String, String> headers = new HashMap<>();
+        headers.put("Cache-Control", "no-store");
+        return json(headers, "{\"ticket\":\"" + ticket.id + "\"}");
+    }
+
+    /**
+     * Take one chunk of a staged body.
+     *
+     * <p>Answers three ways, and the middle one is the interesting one.
+     * {@code 204} means it is on its way to the socket. {@code 202} means the
+     * queue is full and the worker should offer the same chunk again — the
+     * socket has not caught up, which on a phone is the ordinary case rather
+     * than an error. Anything else is the end of the request.
+     */
+    @NonNull
+    static WebResourceResponse put(@NonNull String siteId, @NonNull Uri url) {
+        String ticketId = query(url, TICKET_PARAM);
+
+        Ticket ticket;
+        synchronized (staged) {
+            ticket = ticketId == null ? null : staged.get(ticketId);
+        }
+        // Not swept and not removed: the ticket has to survive every chunk and
+        // is only taken out of the map by the collecting fetch.
+        if (ticket == null || !ticket.siteId.equals(siteId)) return error("No such request");
+
+        Staged staging = ticket.staging;
+        if (staging == null) return error("That request is not taking chunks");
+
+        String numbered = query(url, SEQUENCE_PARAM);
+        if (numbered == null) return error("Bad chunk number");
+
+        int sequence;
+        try {
+            sequence = Integer.parseInt(numbered);
+        } catch (NumberFormatException e) {
+            return error("Bad chunk number");
+        }
+        if (sequence < 0) return error("Bad chunk number");
+
+        String encoded = query(url, CHUNK_PARAM);
+        if (encoded == null || encoded.isEmpty()) return error("No chunk");
+
+        byte[] chunk;
+        try {
+            chunk = Base64.decode(encoded, Base64.URL_SAFE | Base64.NO_PADDING | Base64.NO_WRAP);
+        } catch (IllegalArgumentException e) {
+            return error("Malformed chunk");
+        }
+        if (chunk.length == 0) return error("No chunk");
+        if (chunk.length > NappFetchPolicy.MAX_CHUNK_BYTES) return error("That chunk is too large");
+
+        // A request that has already failed — a refused redirect, a dead
+        // server — is not worth feeding. Saying so ends the worker's loop at
+        // once rather than after the whole body has been handed over.
+        if (ticket.response != null || ticket.error != null) {
+            return error(ticket.error == null ? "That request has already been answered" : ticket.error);
+        }
+
+        Staged.Accept accepted = staging.offer(sequence, chunk);
+
+        // Anything but a refusal is progress, including being told the queue
+        // is full — the worker is still there and still trying. What the TTL
+        // is for is a ticket nobody is feeding at all.
+        if (accepted != Staged.Accept.REFUSED) {
+            ticket.expiresAt = System.currentTimeMillis() + NappFetchPolicy.TICKET_TTL_MS;
+        }
+
+        switch (accepted) {
+            case TOOK_IT:
+            case DONE:
+                return empty(204, "No Content");
+            case FULL:
+                return empty(202, "Accepted");
+            default:
+                return error(ticket.error == null ? "That chunk was not expected" : ticket.error);
+        }
+    }
+
+    /** Give up on a staged request, by the road a worker has to say it. */
+    @NonNull
+    static WebResourceResponse abandon(@NonNull String siteId, @NonNull Uri url) {
+        String ticketId = query(url, TICKET_PARAM);
+
+        Ticket ticket;
+        synchronized (staged) {
+            ticket = ticketId == null ? null : staged.get(ticketId);
+            if (ticket != null && ticket.siteId.equals(siteId)) staged.remove(ticketId);
+        }
+
+        if (ticket != null && ticket.siteId.equals(siteId)) {
+            ticket.error = "Aborted";
+            drop(ticket);
+            release(ticket);
+        }
+
+        // Always the same answer. There is nothing for a site to learn from
+        // whether a ticket it made up existed.
+        return empty(204, "No Content");
+    }
+
+    /** Claim a place in the in-flight count, or say there is none. */
+    private static boolean take(@NonNull String siteId) {
+        synchronized (staged) {
+            sweep();
+            int running = count(siteId);
+            if (running >= NappFetchPolicy.MAX_IN_FLIGHT_PER_SITE) return false;
+            inFlight.put(siteId, running + 1);
+        }
+        return true;
     }
 
     /** Wait for the headers and turn them into something Chromium will serve. */
@@ -568,6 +943,11 @@ final class NappFetch {
             } catch (IOException | RuntimeException e) {
                 ticket.error = reasonFrom(e);
             } finally {
+                // Nothing more will be written, whether it went or not. A
+                // worker still offering chunks is told so by `put`, which
+                // reads the error this just set.
+                Staged staging = ticket.staging;
+                if (staging != null) staging.close();
                 ticket.ready.countDown();
             }
         });
@@ -587,6 +967,7 @@ final class NappFetch {
         String url = ticket.plan.url;
         String method = ticket.plan.method;
         byte[] body = ticket.body;
+        Staged staging = ticket.staging;
         List<String[]> headers = ticket.plan.headers;
 
         for (int hop = 0; hop <= NappFetchPolicy.MAX_REDIRECTS; hop++) {
@@ -610,7 +991,9 @@ final class NappFetch {
 
             RequestBody payload = null;
             if (NappFetchPolicy.allowsBody(method)) {
-                payload = RequestBody.create(body == null ? new byte[0] : body, contentType);
+                payload = staging != null
+                    ? new StagedBody(staging, contentType)
+                    : RequestBody.create(body == null ? new byte[0] : body, contentType);
             }
             builder.method(method, payload);
 
@@ -636,7 +1019,21 @@ final class NappFetch {
             if (NappFetchPolicy.redirectBecomesGet(status, method)) {
                 method = "GET";
                 body = null;
+                // Whatever the worker has left to hand over is no longer
+                // wanted. Closing it says so, rather than leaving the worker
+                // offering chunks to a request that has moved on without them.
+                if (staging != null) {
+                    staging.close();
+                    staging = null;
+                }
                 headers = withoutEntityHeaders(headers);
+            } else if (staging != null) {
+                // A 307 or a 308 asks for the same body a second time, and a
+                // stream has no second time. Every HTTP client refuses this;
+                // the alternative is buffering sixteen megabytes on the chance
+                // that a server redirects.
+                staging.close();
+                throw new IOException("Cannot follow that redirect with a staged body");
             }
 
             if (!from.host().equalsIgnoreCase(next.host())) {
@@ -779,6 +1176,11 @@ final class NappFetch {
     private static void drop(@NonNull Ticket ticket) {
         ticket.aborted = true;
 
+        // Before cancelling, so that a `writeTo` parked on the queue is
+        // released rather than left to sit out the stall timeout.
+        Staged staging = ticket.staging;
+        if (staging != null) staging.close();
+
         Call call = ticket.call;
         if (call != null) call.cancel();
 
@@ -836,6 +1238,35 @@ final class NappFetch {
             "Bad Gateway",
             headers,
             new ByteArrayInputStream(new byte[0])
+        );
+    }
+
+    /** An answer with nothing in it, for the staging paths. */
+    @NonNull
+    private static WebResourceResponse empty(int status, @NonNull String reason) {
+        Map<String, String> headers = new HashMap<>();
+        headers.put("Cache-Control", "no-store");
+
+        return new WebResourceResponse(
+            "text/plain",
+            "UTF-8",
+            status,
+            reason,
+            headers,
+            new ByteArrayInputStream(new byte[0])
+        );
+    }
+
+    /** An answer the shim reads as JSON, for the one staging path that says something. */
+    @NonNull
+    private static WebResourceResponse json(@NonNull Map<String, String> headers, @NonNull String body) {
+        return new WebResourceResponse(
+            "application/json",
+            "UTF-8",
+            200,
+            "OK",
+            headers,
+            new ByteArrayInputStream(body.getBytes(StandardCharsets.UTF_8))
         );
     }
 

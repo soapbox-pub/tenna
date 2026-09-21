@@ -72,10 +72,20 @@
     return pathOf(url) === WAKE_PATH;
   }
 
-  /** Paths the site's own fetch handler does not get to answer. */
+  /**
+   * Paths the site's own fetch handler does not get to answer.
+   *
+   * The staging paths under `/.napp/fetch/` are in here for the same reason
+   * the collecting one is, and rather more urgently: a site whose router
+   * answers everything would swallow a chunk on its way to the socket and the
+   * upload would hang rather than merely return the wrong bytes.
+   */
   function isReserved(url) {
     var path = pathOf(url);
-    return path === WAKE_PATH || path === FETCH_PATH;
+    if (path === null) return false;
+    return path === WAKE_PATH
+      || path === FETCH_PATH
+      || path.indexOf(FETCH_PATH + '/') === 0;
   }
 
   if (self.FetchEvent && FetchEvent.prototype.respondWith) {
@@ -341,27 +351,51 @@
   /*
    * An HTTP request made on the site's behalf, without CORS.
    *
-   * The same API the site's window has as `window.napp.fetch`, with one
-   * ceiling the window does not share. A window stages its request over the
-   * message channel and its body crosses as raw bytes; a worker has no
-   * channel — the case worth having this for is the one with no window open
-   * at all — so the whole request, body included, is written into the URL.
+   * The same API the site's window has as `window.napp.fetch`, and the same
+   * ceiling — but reached by a longer road, because a worker has no message
+   * channel to stage bytes over. The case worth having this for is the one
+   * with no window open at all, so everything has to go through a URL, which
+   * is the shape `self.nostr` uses and for the same reason.
    *
-   * That is the same shape `self.nostr` uses and for the same reason, and it
-   * is why a worker's body is capped at 32 KB while a window's is capped at
-   * sixteen megabytes. A worker with a large upload to make should wake its
-   * window and let it do it.
+   * A URL is not a body. But a body does not have to be one URL:
+   *
+   *   - Under MAX_FETCH_BODY_BYTES the whole request goes in the URL of the
+   *     collecting fetch, and the call is a single interception. That is the
+   *     JSON API call this mostly exists for, and it costs one round trip.
+   *   - Above it the body is staged a chunk at a time. `open` mints a ticket
+   *     and starts the request, each chunk is a `put`, and the last step is
+   *     the same collecting fetch. The host writes each chunk to the socket as
+   *     it arrives rather than gathering them up, so neither side ever holds
+   *     the whole body.
+   *
+   * A `put` answering 202 means the network has not caught up and the same
+   * chunk should be offered again. That is backpressure, and it is why the
+   * host can keep its queue small: see NappFetch.
    *
    * A request made from in here does not go through this worker's own `fetch`
    * handler — a worker's own fetches never do — so unlike the window's, this
    * one needs no protecting from the site's router.
    */
 
-  /** A body longer than this has nowhere to go. Matches NappFetchPolicy. */
-  var MAX_FETCH_BODY_BYTES = 32 * 1024;
+  /** Where a body too large for one URL is handed over. See NappFetch. */
+  var FETCH_OPEN_PATH = '/.napp/fetch/open';
+  var FETCH_PUT_PATH = '/.napp/fetch/put';
+  var FETCH_ABORT_PATH = '/.napp/fetch/abort';
+
+  /** A body up to this goes in the URL whole. Matches NappFetchPolicy. */
+  var MAX_FETCH_BODY_BYTES = 512 * 1024;
 
   /** And the whole request, once it has been written out as a URL. */
-  var MAX_FETCH_BYTES = 96 * 1024;
+  var MAX_FETCH_BYTES = 768 * 1024;
+
+  /** A body up to this is staged in chunks. Level with the window's. */
+  var MAX_STAGED_BODY_BYTES = 16 * 1024 * 1024;
+
+  /** How much of it goes in each of those. Matches NappFetchPolicy. */
+  var CHUNK_BYTES = 512 * 1024;
+
+  /** How long to wait before offering a chunk the host had no room for. */
+  var CHUNK_RETRY_MS = 50;
 
   /** Set when the failure is Tenna's answer rather than a server's. */
   var FETCH_ERROR_HEADER = 'X-Napp-Error';
@@ -386,6 +420,141 @@
     return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
   }
 
+  function sleep(ms) {
+    return new Promise(function (resolve) { setTimeout(resolve, ms); });
+  }
+
+  /** The `r=` payload: everything about a request except the bytes of its body. */
+  function describe(request, headers, body) {
+    return encode(JSON.stringify({
+      url: request.url,
+      method: request.method,
+      headers: headers,
+      redirect: request.redirect,
+      body: body === undefined ? '' : body,
+      hasBody: body === undefined,
+    }), MAX_FETCH_BYTES);
+  }
+
+  function collect(ticket, signal) {
+    return fetch(
+      FETCH_PATH + '?t=' + encodeURIComponent(ticket),
+      { cache: 'no-store', signal: signal }
+    );
+  }
+
+  /**
+   * Hand over one chunk, offering it again for as long as the host is full.
+   *
+   * Resolves true when it is taken and false when the host says the request
+   * is over — a redirect that dropped the body, a server that has already
+   * answered, a connection that failed. Neither is an error here: the
+   * collecting fetch is what says what really happened, and it is about to
+   * run either way.
+   */
+  function putChunk(ticket, sequence, encoded, signal) {
+    var url = FETCH_PUT_PATH
+      + '?a=' + encodeURIComponent(AUTH)
+      + '&t=' + encodeURIComponent(ticket)
+      + '&i=' + sequence
+      + '&c=' + encoded;
+
+    return fetch(url, { cache: 'no-store', signal: signal }).then(function (response) {
+      if (response.status === 204) return true;
+      if (response.status !== 202) return false;
+      return sleep(CHUNK_RETRY_MS).then(function () {
+        return putChunk(ticket, sequence, encoded, signal);
+      });
+    });
+  }
+
+  /**
+   * Send a body the URL cannot hold, a slice at a time.
+   *
+   * The body is kept as a Blob rather than an ArrayBuffer throughout, because
+   * a Blob is not obliged to be resident: slicing one gives back the bytes
+   * that are wanted without the rest ever being in the heap. So a sixteen
+   * megabyte upload costs about a chunk on this side too.
+   */
+  function stage(request, headers, blob, signal) {
+    var payload = describe(request, headers, undefined);
+    if (payload === null) return Promise.reject(new TypeError('The request is too large'));
+
+    var url = FETCH_OPEN_PATH
+      + '?a=' + encodeURIComponent(AUTH)
+      + '&r=' + payload
+      + '&n=' + blob.size;
+
+    return fetch(url, { cache: 'no-store', signal: signal })
+      .then(function (response) {
+        var failure = response.headers.get(FETCH_ERROR_HEADER);
+        if (failure) throw new TypeError(failure);
+        return response.json();
+      })
+      .then(function (opened) {
+        var ticket = opened && opened.ticket;
+        if (!ticket) throw new TypeError('The request could not be staged');
+
+        var sequence = 0;
+        var offset = 0;
+
+        function next() {
+          if (offset >= blob.size) return collect(ticket, signal);
+
+          var end = Math.min(offset + CHUNK_BYTES, blob.size);
+          var slice = blob.slice(offset, end);
+          offset = end;
+
+          return slice.arrayBuffer().then(function (buffer) {
+            var encoded = encodeBytes(new Uint8Array(buffer), CHUNK_BYTES);
+            // Cannot happen — the slice is CHUNK_BYTES at most — but a null
+            // here would otherwise become the string "null" in a URL.
+            if (encoded === null) throw new TypeError('The request is too large');
+
+            return putChunk(ticket, sequence++, encoded, signal).then(function (took) {
+              // The host has stopped wanting the rest. Go and read why.
+              return took ? next() : collect(ticket, signal);
+            });
+          });
+        }
+
+        return next().catch(function (error) {
+          // Tell the host, so that a socket is not held open waiting for
+          // bytes this worker is no longer going to send.
+          fetch(
+            FETCH_ABORT_PATH
+              + '?a=' + encodeURIComponent(AUTH)
+              + '&t=' + encodeURIComponent(ticket),
+            { cache: 'no-store' }
+          ).catch(function () {});
+          throw error;
+        });
+      });
+  }
+
+  /** Send a body small enough to ride in the URL of the collecting fetch. */
+  function inline(request, headers, blob, signal) {
+    var bytes = blob.size === 0
+      ? Promise.resolve(null)
+      : blob.arrayBuffer().then(function (buffer) { return new Uint8Array(buffer); });
+
+    return bytes.then(function (body) {
+      var encoded = '';
+      if (body !== null) {
+        encoded = encodeBytes(body, MAX_FETCH_BODY_BYTES);
+        if (encoded === null) throw new TypeError('The request is too large');
+      }
+
+      var payload = describe(request, headers, encoded);
+      if (payload === null) throw new TypeError('The request is too large');
+
+      return fetch(
+        FETCH_PATH + '?a=' + encodeURIComponent(AUTH) + '&r=' + payload,
+        { cache: 'no-store', signal: signal }
+      );
+    });
+  }
+
   function nappFetch(input, init) {
     var request;
     try {
@@ -401,31 +570,14 @@
     request.headers.forEach(function (value, name) { headers.push([name, value]); });
 
     return request
-      .arrayBuffer()
-      .then(function (buffer) {
-        var body = '';
-
-        if (buffer.byteLength > 0) {
-          body = encodeBytes(new Uint8Array(buffer), MAX_FETCH_BODY_BYTES);
-          if (body === null) {
-            throw new TypeError('A worker cannot send a body this large');
-          }
+      .blob()
+      .then(function (blob) {
+        if (blob.size > MAX_STAGED_BODY_BYTES) {
+          throw new TypeError('A worker cannot send a body this large');
         }
-
-        var payload = encode(JSON.stringify({
-          url: request.url,
-          method: request.method,
-          headers: headers,
-          redirect: request.redirect,
-          body: body,
-        }), MAX_FETCH_BYTES);
-
-        if (payload === null) throw new TypeError('The request is too large');
-
-        return fetch(
-          FETCH_PATH + '?a=' + encodeURIComponent(AUTH) + '&r=' + payload,
-          { cache: 'no-store', signal: signal }
-        );
+        return blob.size > MAX_FETCH_BODY_BYTES
+          ? stage(request, headers, blob, signal)
+          : inline(request, headers, blob, signal);
       })
       .then(function (response) {
         // What a browser would have rejected with rather than resolved: a

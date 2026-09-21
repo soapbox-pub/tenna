@@ -60,6 +60,11 @@ import java.util.Map;
  *       one path here that answers with somebody else's bytes: the request was
  *       made out on the network and this is the site reading the response back
  *       in. See {@link NappFetch}, and note that it authenticates two ways.
+ *   <li>{@code /.napp/fetch/open}, {@code /.napp/fetch/put} and
+ *       {@code /.napp/fetch/abort} — how a worker hands over a request body
+ *       too large to fit in the URL of the fetch itself, a chunk at a time.
+ *       The missing request body again, answered by sending it as many URLs
+ *       instead of one.
  *   <li>{@value #SHARE_PATH} — the page that turns a staged share into a real
  *       form POST at the site's own origin, for a {@code share_target} that
  *       asked for one. Only a document there can make that navigation.
@@ -205,12 +210,19 @@ final class NsiteRequests {
      * <p>{@link NappFetch#PATH} is not among them: it is the one reserved path
      * with two legs, and a window's is the ordinary one. {@link #WAKE_PATH} is
      * not either — it is a document, and a document is what loads it.
+     *
+     * <p>Its staging neighbours are, though. A window stages a body over the
+     * message channel it already has and has no use for these; a worker, which
+     * has no channel, hands a large body over a chunk at a time through them.
      */
     static boolean isWorkerPath(@Nullable String path) {
         return NOTIFICATION_PATH.equals(path)
             || NOTIFICATIONS_PATH.equals(path)
             || CLOSE_PATH.equals(path)
             || OPEN_PATH.equals(path)
+            || NappFetch.OPEN_PATH.equals(path)
+            || NappFetch.PUT_PATH.equals(path)
+            || NappFetch.ABORT_PATH.equals(path)
             || NsiteWorkerSigner.PATH.equals(path);
     }
 
@@ -287,6 +299,9 @@ final class NsiteRequests {
             if (NOTIFICATION_PATH.equals(path)) return notification(context, siteId, url);
             if (NOTIFICATIONS_PATH.equals(path)) return notifications(context, siteId, url);
             if (CLOSE_PATH.equals(path)) return close(context, siteId, url);
+            if (NappFetch.OPEN_PATH.equals(path)) return NappFetch.open(siteId, url);
+            if (NappFetch.PUT_PATH.equals(path)) return NappFetch.put(siteId, url);
+            if (NappFetch.ABORT_PATH.equals(path)) return NappFetch.abandon(siteId, url);
             if (NsiteWorkerSigner.PATH.equals(path)) {
                 return NsiteWorkerSigner.serve(context, siteId, url);
             }

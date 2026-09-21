@@ -1,15 +1,24 @@
 # Changelog
 
-## [Unreleased]
+## [0.10.0] - 2026-09-20
 
-A site can put a notification in the shade while it is open, and not only
-while it is closed. Until now `registration.showNotification()` worked in a
-site's service worker and was simply missing from its page — so a site with
-something to say about what the reader was looking at had no way to say it.
-Both roads now lead to the same row.
+A site has an address somebody can send somebody else. Press an nsite:// link
+anywhere on the phone — in a message, on a web page, inside another site — and
+Tenna opens the site it names. Sites can also put a notification up while they
+are open rather than only while they are closed, and can read an answer from a
+server a browser tab would not let them read.
 
 ### Added
 
+- An address for a site, spelled `nsite://`, and registered on Android and
+  iOS so that a link to one anywhere on the device opens the site it names. A
+  site can be named by its key, by the name its publisher gave it, or by a
+  domain name pointing at either, and the path after it is the site's own.
+  Opening is all a link does: nothing arriving this way is added to the wall,
+  pinned, or allowed anything, and a domain repointed at a different key is a
+  different site with none of the old one's storage. On the web, where no app
+  is allowed to claim a scheme, pasting the address into the search bar works
+  as it always has.
 - Notifications from a site's own window, on Android. `Notification` and
   `registration.showNotification()` work in the page as they do in the worker
   and as they do in a mobile browser, onto the same tray: a notification put
@@ -18,6 +27,15 @@ Both roads now lead to the same row.
   Chrome and Firefox for Android throw, pointing at `showNotification()`,
   because a click belongs to the service worker on Android and always has.
   `Notification.permission` and `requestPermission()` are real.
+- A site can ask any https server for something and read the answer, on
+  Android. A browser refuses that unless the far end has agreed to it in
+  advance, which is why a site wanting to read an ordinary API has had to
+  route the request through somebody else's proxy. Nothing is asked of the
+  user, so nothing about them is sent either: the request carries no cookies
+  and no sign of which site made it, and it cannot reach anything on the
+  phone's own network — the router, a printer, another app — or anything that
+  is not https. A site written for a browser is unchanged; there is one name
+  to pick up and nothing else to do.
 
 ### Changed
 
@@ -28,6 +46,14 @@ Both roads now lead to the same row.
   notification, and neither of which is how any browser has ever treated one.
   Permissions already given are carried over; nobody is asked twice. A site
   can now notify a reader who is not signed in.
+
+### Fixed
+
+- A link whose address was really a private key is refused rather than read as
+  a site. Written out, a key is the same shape as a site's name, so one pasted
+  into Tenna was taken for a site — and part of it went out to a relay as a
+  question about it. Anything naming a number too large to be a key is turned
+  away now.
 
 ## [0.9.0] - 2026-09-20
 

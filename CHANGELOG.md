@@ -1,5 +1,33 @@
 # Changelog
 
+## [0.10.1] - 2026-09-21
+
+Nothing changes on the wall. The part of a site that runs while the site is
+closed can now send a server as much as the site's own window can — sixteen
+megabytes rather than thirty-two kilobytes — so uploading a picture in the
+background is no longer out of reach. It also gets a minute on Android to
+finish what a notification needed, up from twenty seconds, which is enough
+time to fetch somebody's face before saying who a message is from.
+
+### Changed
+
+- How much a site can send a server while it is closed. The part of a site
+  that runs in the background was held to thirty-two kilobytes a request where
+  the site's own window could send sixteen megabytes; both are sixteen
+  megabytes now. Nothing is called differently, whatever the size of what it
+  carries, and handing over something to upload as a file rather than as bytes
+  lets Tenna pass it along a piece at a time without the whole of it sitting in
+  memory. A request that big is handed over once, so a server answering it by
+  asking for the same thing at another address is refused rather than asked
+  twice.
+- A site gets sixty seconds on Android to finish what it was doing about a
+  notification, where it had twenty. Nothing outside is counting that time, so
+  the number was only ever a judgement about keeping one site from holding up
+  another, and twenty seconds is not much for a site that has to fetch a
+  picture before it can say who a message is from. On iPhone the limit belongs
+  to the system rather than to Tenna and stays at twenty, so a site written to
+  finish inside twenty is still right everywhere.
+
 ## [0.10.0] - 2026-09-20
 
 A site has an address somebody can send somebody else. Press an nsite:// link

@@ -1,6 +1,6 @@
 import type { NostrEvent } from '@nostrify/nostrify';
 import { useSeoMeta } from '@unhead/react';
-import { useState } from 'react';
+import { useCallback, useState } from 'react';
 
 import { AddAppDialog } from '@/components/AddAppDialog';
 import { AddAppTile, AppIcon, AppIconPending } from '@/components/AppIcon';
@@ -11,6 +11,7 @@ import { NsiteViewer } from '@/components/NsiteViewer';
 import { WallSearch } from '@/components/WallSearch';
 import { useActiveTheme } from '@/hooks/useActiveTheme';
 import { useNappUnread } from '@/hooks/useNappUnread';
+import { useNsiteOpenLink } from '@/hooks/useNsiteOpenRequest';
 import { usePendingShare } from '@/hooks/useNsiteShare';
 import { useWall } from '@/hooks/useWall';
 import { useWallDrag } from '@/hooks/useWallDrag';
@@ -57,8 +58,20 @@ const Index = () => {
   // The site tuned in over the wall, where a site can't be given a window of
   // its own. On Android pressing a tile launches one instead and nothing here
   // ever fills — see `useNsiteWindow`.
-  const [active, setActive] = useState<{ event: NostrEvent; channel?: number } | null>(null);
+  const [active, setActive] = useState<
+    { event: NostrEvent; channel?: number; path?: string } | null
+  >(null);
   const [adding, setAdding] = useState(false);
+
+  // A site somebody linked to from outside Tenna. It is resolved and opened
+  // the same way a tile is, and until it has been, the wall stays off the
+  // screen: the user pressed a link to a site, and a home screen is not it.
+  const tuneIn = useCallback(
+    (event: NostrEvent, path: string | null) =>
+      setActive({ event, path: path ?? undefined }),
+    [],
+  );
+  const { opening } = useNsiteOpenLink(tuneIn);
 
   // Which tile is showing its menu. One at a time, and held here rather than
   // in the tile, because the hold that opens a menu is the first half of the
@@ -91,6 +104,13 @@ const Index = () => {
   // Counted here, over the stored list, so that a site still loading holds
   // its number and the ones after it don't shift when it arrives.
   let channel = 0;
+
+  // Nothing of the wall's, on purpose. Between a link arriving and the site
+  // behind it being found there is a relay round trip, and the home screen is
+  // the one thing that must not be on screen during it — the user asked for a
+  // site. `NsiteViewer` plays its own tune-in over this the moment the
+  // manifest lands.
+  if (opening) return <div className="min-h-screen bg-background" />;
 
   return (
     // No background of its own: `body` paints the theme's, and anything opaque
@@ -244,6 +264,7 @@ const Index = () => {
         <NsiteViewer
           event={active.event}
           channel={active.channel}
+          openPath={active.path}
           onClose={() => setActive(null)}
         />
       )}

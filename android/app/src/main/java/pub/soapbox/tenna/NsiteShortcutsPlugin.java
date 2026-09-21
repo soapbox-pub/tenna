@@ -109,6 +109,11 @@ public class NsiteShortcutsPlugin extends Plugin {
         String shareTarget = call.getString("shareTarget");
         final String shareToken = call.getString("shareToken");
         final int channel = call.getInt("channel", 0);
+        // Screened the way a worker's is, and for the same reason: it reaches
+        // a URL the site is loaded at, and "//elsewhere.example" is not a
+        // place inside a site. The path on an `nsite://` link is a stranger's
+        // string.
+        final String path = NappOptions.path(call.getString("path"));
 
         if (siteId == null || label == null || label.isEmpty() || event == null) {
             call.reject("siteId, label and event are required");
@@ -141,6 +146,14 @@ public class NsiteShortcutsPlugin extends Plugin {
                 // share back on screen the next time it is read.
                 Intent held = getActivity().getIntent();
                 if (held != null) held.removeExtra(NsiteShareActivity.EXTRA_SHARE_TOKEN);
+            } else if (path != null) {
+                // A named place is the other thing that has to reach the site
+                // rather than its window — see `pathIntentFor`. Resuming would
+                // bring the site forward on whatever page it was left on.
+                getActivity().startActivity(
+                    NsiteAppActivity.pathIntentFor(context, site, path),
+                    ActivityOptions.makeCustomAnimation(context, 0, 0).toBundle()
+                );
             } else if (!resumeWindow(site)) {
                 getActivity().startActivity(
                     NsiteAppActivity.intentFor(context, site, channel, true),

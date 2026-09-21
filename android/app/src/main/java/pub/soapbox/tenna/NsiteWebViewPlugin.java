@@ -1089,10 +1089,25 @@ public class NsiteWebViewPlugin extends Plugin {
             return;
         }
 
+        // A link to another site is not a link out of Tenna at all, so it does
+        // not go to the OS. Tenna registers this scheme itself, and letting the
+        // device answer it would start Tenna's own task, resolve the site on
+        // the wall, and only then open it — a visible detour through a home
+        // screen nobody asked for. The window resolves it instead.
+        if (NSITE_SCHEME.equalsIgnoreCase(scheme)) {
+            JSObject link = new JSObject();
+            link.put("url", url.toString());
+            notifyListeners("nsiteLink", link);
+            return;
+        }
+
         if (!NativeApps.openUri(getContext(), url.toString())) {
             Log.i(TAG, "Nothing on the device answers for " + url);
         }
     }
+
+    /** The scheme a site is named by outside Tenna. See src/lib/nsiteUrl.ts. */
+    private static final String NSITE_SCHEME = "nsite";
 
     /**
      * Schemes a site never gets to hand the device.

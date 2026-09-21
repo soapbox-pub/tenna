@@ -3,6 +3,7 @@ import { DeepLinkHandler } from "./components/DeepLinkHandler";
 import { Onboarding } from "./components/onboarding/Onboarding";
 import { ScrollToTop } from "./components/ScrollToTop";
 import { useNsiteLaunch } from "@/hooks/useNsiteLaunch";
+import { useNsiteOpenAsking } from "@/hooks/useNsiteOpenRequest";
 import { useOnboarding } from "@/hooks/useOnboarding";
 import { isSignerSheet, useSignerPrompt } from "@/hooks/useSignerPrompt";
 
@@ -17,6 +18,7 @@ import { SignerPrompt } from "./pages/SignerPrompt";
 
 export function AppRouter() {
   const { pending, launch } = useNsiteLaunch();
+  const asking = useNsiteOpenAsking();
   const signer = useSignerPrompt();
   const onboarding = useOnboarding();
 
@@ -49,7 +51,13 @@ export function AppRouter() {
   // The question is asked before the first paint because the answer decides
   // what the app *is*; rendering the channel wall for a frame and then
   // replacing it would flash a home screen the user never asked for.
-  if (pending) return <div className="min-h-screen bg-background" />;
+  //
+  // The same question is asked of the link this launch may have begun with,
+  // and for the same reason: a site linked to from another app is the site the
+  // user asked for, and the wall must not paint in front of it while the
+  // manifest is being fetched. That one is one bridge call and settles at
+  // once; the wall holds the link itself from there. See `nsiteOpenRequest`.
+  if (pending || asking) return <div className="min-h-screen bg-background" />;
   if (launch) return <NsiteApp launch={launch} />;
 
   // Everything above this point is a launch that is not the app: a question

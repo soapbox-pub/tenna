@@ -51,6 +51,27 @@
             </intent-filter>
 
             <!--
+                A site, named the way sites are named outside Tenna:
+                nsite://<npub|pubkeyB36+dTag|naddr|nip05>/<path>. See
+                src/lib/nsiteUrl.ts for the grammar, which is Ditto Browser's.
+
+                It lands on the wall and the wall opens the site, because a
+                site is not a page of Tenna's: on this platform it gets a task
+                of its own, and MainActivity is where a link can arrive at all.
+
+                Opening is all that happens. Any web page can navigate to an
+                nsite: link, so what arrives is attacker-chosen — and what it
+                buys is a site on screen, which is what a tile buys. Nothing is
+                added to the wall, pinned, or granted. See DeepLinkHandler.
+            -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="nsite" />
+            </intent-filter>
+
+            <!--
                 What a pinned nsite may be offered from the share sheet. See
                 @xml/shortcuts, whose <share-target> entries send the share on
                 to NsiteShareActivity.

@@ -4,6 +4,7 @@ import { useCallback, useState } from 'react';
 import { NsiteViewer } from '@/components/NsiteViewer';
 import { WhiteNoise } from '@/components/WhiteNoise';
 import { useNsiteOpenPath, useNsiteRefresh, type NsiteLaunch } from '@/hooks/useNsiteLaunch';
+import { useNsiteLinkListener, useNsiteOpenLink } from '@/hooks/useNsiteOpenRequest';
 import { useNsiteShareDelivery, useShareToken } from '@/hooks/useNsiteShare';
 import { NsiteShortcuts } from '@/lib/nsiteShortcutsPlugin';
 import { getNsiteName } from '@/lib/nsiteSubdomain';
@@ -31,6 +32,18 @@ interface NsiteAppProps {
  * next time.
  */
 export function NsiteApp({ launch }: NsiteAppProps) {
+  // A link from this site to another one. It is resolved here and opened as a
+  // task of its own beside this window, which is what a site is; this window
+  // stays exactly where it was, because the user followed a link out of the
+  // site rather than out of the app.
+  //
+  // There is nowhere in this window to tune a second site in, and nowhere one
+  // would be wanted: a window is one site's. So the fallback for a platform
+  // that cannot give a site a window does nothing — and no such platform has a
+  // site window to reach this code from.
+  useNsiteLinkListener();
+  useNsiteOpenLink(useCallback(() => {}, []));
+
   // Frozen for the session. `useNsiteRefresh` may turn up a newer manifest a
   // second or two in, and adopting it would tear the site's WebView down and
   // reload it under whatever the user was doing.

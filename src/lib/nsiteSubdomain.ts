@@ -64,9 +64,28 @@ export function hexToBase36(hex: string): string {
   return b36.padStart(BASE36_LENGTH, '0');
 }
 
-/** Decode a base36-encoded 32-byte value back to a 64-char hex string. */
-function base36ToHex(b36: string): string {
+/**
+ * Decode a base36-encoded 32-byte value back to a 64-char hex string, or null
+ * if it isn't one.
+ *
+ * Fifty base36 characters hold more than 32 bytes — about six times more — so a
+ * label can be exactly the right length, entirely in the right alphabet, and
+ * still name a number no key or event id could be. Without the range check
+ * such a label produces a *65*-character "pubkey" that goes on to be an
+ * `authors` filter, and the app asks a relay a question about something that
+ * does not exist.
+ *
+ * It is also what refuses an `nsec`. A bech32 secret key is 63 characters,
+ * which is exactly a DNS label, and its first fifty are all in the base36
+ * alphabet — so without this, `nsite://nsec1…/` parses as a named site and the
+ * first fifty characters of somebody's secret key are sent to a relay. Every
+ * `nsec1…` label begins with `n`, worth at least 23 × 36^49, which is past
+ * 2^256 by a factor of six; so is every `note1…`. An `npub1…` is decoded as an
+ * npub before it ever reaches here.
+ */
+function base36ToHex(b36: string): string | null {
   const n = [...b36].reduce((acc, ch) => acc * 36n + BigInt(parseInt(ch, 36)), 0n);
+  if (n >= 1n << 256n) return null;
   return n.toString(16).padStart(64, '0');
 }
 
@@ -116,7 +135,8 @@ export function parseNsiteSubdomain(subdomain: string): ParsedNsiteSubdomain | n
   // Snapshot: leading "v" followed by the base36 snapshot event id
   if (/^v[0-9a-z]{50}$/.test(subdomain)) {
     try {
-      return { kind: NSITE_SNAPSHOT_KIND, id: base36ToHex(subdomain.slice(1)) };
+      const id = base36ToHex(subdomain.slice(1));
+      return id ? { kind: NSITE_SNAPSHOT_KIND, id } : null;
     } catch {
       return null;
     }
@@ -132,7 +152,7 @@ export function parseNsiteSubdomain(subdomain: string): ParsedNsiteSubdomain | n
 
   try {
     const pubkey = base36ToHex(b36Part);
-    return { kind: NSITE_NAMED_KIND, pubkey, identifier: dTag };
+    return pubkey ? { kind: NSITE_NAMED_KIND, pubkey, identifier: dTag } : null;
   } catch {
     return null;
   }

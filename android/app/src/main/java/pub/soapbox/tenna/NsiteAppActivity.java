@@ -105,6 +105,29 @@ public class NsiteAppActivity extends BridgeActivity {
     }
 
     /**
+     * The intent that opens a site at a place inside it, from the wall.
+     *
+     * What an {@code nsite://<site>/somewhere} link asks for. Like a share and
+     * unlike every other way in from the wall, this has to reach the *site*
+     * rather than merely reach its window, so it goes in as an intent even
+     * when the task is already up — a window resumed without one would come
+     * forward on whatever page it was left on, which is not the page the link
+     * named.
+     *
+     * {@code fromWall} because a link arrives at Tenna, so Tenna's task is
+     * what is behind the window and the shutoff has somewhere to collapse to.
+     */
+    static Intent pathIntentFor(
+        @NonNull Context context,
+        @NonNull String siteId,
+        @NonNull String path
+    ) {
+        Intent intent = intentFor(context, siteId, 0, true);
+        intent.putExtra(EXTRA_PATH, path);
+        return intent;
+    }
+
+    /**
      * The intent a notification's body fires, and the one a worker's
      * {@code clients.openWindow()} comes back out to.
      *

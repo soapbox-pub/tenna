@@ -2,6 +2,8 @@ import { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Capacitor } from '@capacitor/core';
 
+import { requestNsiteOpen } from '@/lib/nsiteOpenRequest';
+
 /**
  * Forwards OS-level deep-link opens into the React Router navigation stack.
  *
@@ -87,6 +89,19 @@ export function DeepLinkHandler() {
           // secret that proves the connection, and a URL is remembered.
           if (url.protocol === 'nostrconnect:') {
             navigate('/settings/apps/connect', { state: { connect: event.url } });
+            return;
+          }
+
+          // A site, named the way sites are named outside Tenna. It is not a
+          // route and cannot become one — Tenna has no URL for a site, and on
+          // Android a site is a task rather than a page — so it goes to the
+          // wall, which is what opens sites. See `nsiteOpenRequest`.
+          //
+          // The fall-through below would be wrong for it besides: the site is
+          // in the authority, so `pathname` is empty and the navigation would
+          // be to nowhere.
+          if (url.protocol === 'nsite:') {
+            requestNsiteOpen(event.url);
             return;
           }
 

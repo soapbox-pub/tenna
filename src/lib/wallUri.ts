@@ -20,6 +20,21 @@
  * manifest and the device's package list are — and both are there for the
  * same reason, so that a tile has something to draw before the source it
  * really comes from has answered.
+ *
+ * ## Two spellings of `nsite:`
+ *
+ * The one above is opaque — one colon, no `//` — and is the wall's alone. It
+ * is a storage format, it carries relay hints in a query, and it names a site
+ * rather than a place inside one, because a tile is a site.
+ *
+ * The other is `nsite://<subdomain>/<path>`, which is a URL people send each
+ * other and the OS hands to Tenna. It has no room for relay hints, since the
+ * query belongs to the site — see `nsiteUrl.ts`. Reading one here is
+ * defensive rather than expected: `nsiteUri()` builds every address the wall
+ * stores, so a navigable URL should never reach this. But the two are one
+ * scheme, they will be confused, and the confusion is cheap to absorb. Any
+ * path on such a URL is dropped, which is what taking a page off a link and
+ * putting the site on the wall means.
  */
 import { parseNsiteSubdomain } from '@/lib/nsiteSubdomain';
 
@@ -84,10 +99,16 @@ export function parseWallUri(uri: string): WallAddress | null {
   }
 
   if (url.protocol === 'nsite:') {
-    // Opaque path: everything between the scheme and the query.
-    const id = decodeURIComponent(url.pathname);
+    // The authority, when the URI has one, and otherwise the opaque path:
+    // everything between the scheme and the query. A host is lowercased
+    // because `nsite:` is not a special scheme, so `URL` leaves its case
+    // alone; the opaque form is Tenna's own and is already a label.
+    const id = url.host ? url.host.toLowerCase() : decodeURIComponent(url.pathname);
     if (!id || !parseNsiteSubdomain(id)) return null;
-    return { kind: 'nsite', id, relays: tidyRelays(url.searchParams.getAll('relay')) };
+    // A navigable URL carries no hints — its query is the site's — so only the
+    // opaque spelling is asked for any.
+    const relays = url.host ? [] : tidyRelays(url.searchParams.getAll('relay'));
+    return { kind: 'nsite', id, relays };
   }
 
   if (url.protocol === 'android-app:') {

@@ -85,6 +85,15 @@ export interface NsiteShortcutsPlugin {
     shareTarget?: string;
     /** A staged share to hand the site once its window is up. */
     shareToken?: string;
+    /**
+     * A site-absolute path to open the site at, instead of its front page.
+     *
+     * The same thing a notification's path does, asked by a link instead: an
+     * `nsite://<site>/somewhere` names a place, and the window opens there
+     * whether it is starting cold or already up. Omitted by every other
+     * caller, which names a site and lets it decide where that begins.
+     */
+    path?: string;
   }): Promise<void>;
 
   /**

@@ -22,8 +22,20 @@ interface UseNsiteWindowResult {
 interface UseNsiteOpenerResult {
   /** Whether this platform can give a site a window at all. */
   available: boolean;
-  /** Open a site's window, or bring the one it has forward. */
-  open: (event: NostrEvent, name: string, app?: NsiteApp, channel?: number) => void;
+  /**
+   * Open a site's window, or bring the one it has forward.
+   *
+   * `path` opens the site somewhere other than its front page, which is what
+   * an `nsite://` link naming one asks for. Omitted everywhere else: a tile
+   * and a search result name a site and not a place in it.
+   */
+  open: (
+    event: NostrEvent,
+    name: string,
+    app?: NsiteApp,
+    channel?: number,
+    path?: string,
+  ) => void;
 }
 
 /**
@@ -44,7 +56,7 @@ export function useNsiteOpener(): UseNsiteOpenerResult {
   const { toast } = useToast();
 
   const open = useCallback(
-    (event: NostrEvent, name: string, app?: NsiteApp, channel?: number) => {
+    (event: NostrEvent, name: string, app?: NsiteApp, channel?: number, path?: string) => {
       const siteId = getNsiteSubdomain(event);
 
       void (async () => {
@@ -54,6 +66,7 @@ export function useNsiteOpener(): UseNsiteOpenerResult {
             label: name,
             event: JSON.stringify(event),
             channel,
+            path,
             // The wall is the only place a site's manifest is read, so it is
             // the only place its share_target can be kept current. A window
             // opened from here refreshes what a pinned shortcut will offer

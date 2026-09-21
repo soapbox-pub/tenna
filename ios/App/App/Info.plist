@@ -25,9 +25,10 @@
 	<!-- The schemes another app may hand Tenna, mirroring the intent filters in
 	     AndroidManifest.xml. `nostrconnect` is a NIP-46 client asking this
 	     signer to connect; DeepLinkHandler routes it to /settings/apps.
-	     `nostrsigner` is deliberately absent — answering it means being a
-	     signer for other apps, which is the SignerApps plugin, and that is
-	     Android-only. -->
+	     `nsite` is a site, which the wall opens — see src/lib/nsiteUrl.ts for
+	     the grammar. `nostrsigner` is deliberately absent — answering it means
+	     being a signer for other apps, which is the SignerApps plugin, and
+	     that is Android-only. -->
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>
@@ -38,6 +39,16 @@
 			<key>CFBundleURLSchemes</key>
 			<array>
 				<string>nostrconnect</string>
+			</array>
+		</dict>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>pub.soapbox.tenna.nsite</string>
+			<key>CFBundleTypeRole</key>
+			<string>Viewer</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>nsite</string>
 			</array>
 		</dict>
 	</array>

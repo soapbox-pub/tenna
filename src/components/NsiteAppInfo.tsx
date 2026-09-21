@@ -40,7 +40,9 @@ import {
   removeNsiteBrowserPermission,
   type NsiteBrowserPermission,
 } from '@/lib/nsiteBrowserPermissions';
+import { requestNsiteOpen } from '@/lib/nsiteOpenRequest';
 import { getNsiteSubdomain, NSITE_SNAPSHOT_KIND } from '@/lib/nsiteSubdomain';
+import { isNsiteUrl, nsiteUrl } from '@/lib/nsiteUrl';
 import { cn, middleEllipsis } from '@/lib/utils';
 
 interface NsiteAppInfoProps {
@@ -332,7 +334,7 @@ export function NsiteAppInfo({
       // A manifest that cannot be addressed still has a site behind it.
     }
 
-    list.push(`nsite://${siteId}`);
+    list.push(nsiteUrl(siteId));
     return list;
   }, [event, siteId]);
   const allowance = useNsiteAllowance(siteId, user?.pubkey);
@@ -432,12 +434,23 @@ export function NsiteAppInfo({
   /**
    * Hand an address to the device.
    *
-   * Nothing here registers `nostr:` or `nsite://` itself, so this is a
-   * question for whatever else is installed — and one that often has no
-   * answer, which is why the answer is waited for and said out loud.
+   * Nothing here registers `nostr:`, so that one is a question for whatever
+   * else is installed — and one that often has no answer, which is why the
+   * answer is waited for and said out loud.
+   *
+   * `nsite://` is the exception, because Tenna answers for it: going out to
+   * the OS would come straight back in through Tenna's own intent filter, and
+   * from inside a site's window it would surface the wall on the way. It is
+   * taken here instead, and opens the site it names.
    */
   const handleOpenUri = (uri: string) => {
     const scheme = uri.split(':')[0];
+
+    if (isNsiteUrl(uri)) {
+      requestNsiteOpen(uri);
+      onOpenChange(false);
+      return;
+    }
 
     if (!supportsNativeApps()) {
       // No plugin to ask. The WebView hands an unknown scheme to the OS on

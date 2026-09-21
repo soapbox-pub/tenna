@@ -160,6 +160,24 @@ export interface NsiteWebViewPlugin {
     event: 'nsitePermissions',
     handler: () => void,
   ): Promise<PluginListenerHandle>;
+
+  /**
+   * The site followed a link to another site.
+   *
+   * A link out of a site's window is normally handed to the device, because
+   * the window is one site's and not a browser. An `nsite://` link is the
+   * exception: the thing it names is a site, and Tenna is what opens sites —
+   * so rather than go out to the OS and come back in through Tenna's own
+   * intent filter, with a task switch through the wall on the way, it is
+   * raised here and the window opens the sibling site itself.
+   *
+   * The URL is a string a stranger's page wrote. It is resolved through
+   * exactly the path a pasted address takes and is worth exactly as much.
+   */
+  addListener(
+    event: 'nsiteLink',
+    handler: (event: { url: string }) => void,
+  ): Promise<PluginListenerHandle>;
 }
 
 export const NsiteWebView = registerPlugin<NsiteWebViewPlugin>('NsiteWebView');

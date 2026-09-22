@@ -100,9 +100,28 @@ export interface SignerAppsPlugin {
 
 export const SignerApps = registerPlugin<SignerAppsPlugin>('SignerApps');
 
-/** Whether this build can answer another application at all. */
+/** Said once per window, and only where it means a mistake. See below. */
+let warned = false;
+
+/**
+ * Whether this build can answer another application at all.
+ *
+ * False off Android, where there is no native store and never was. False on
+ * Android only if this window's activity did not register the plugin, which
+ * is a mistake rather than a platform — every caller quietly falls back to
+ * `localStorage`, and a grant written there is one nothing else can read. So
+ * that case says so, once, rather than looking like the web build.
+ */
 export function supportsSignerApps(): boolean {
-  return Capacitor.getPlatform() === 'android' && Capacitor.isPluginAvailable('SignerApps');
+  if (Capacitor.getPlatform() !== 'android') return false;
+
+  if (Capacitor.isPluginAvailable('SignerApps')) return true;
+
+  if (!warned) {
+    warned = true;
+    console.warn('SignerApps is not registered in this activity; grants cannot be kept');
+  }
+  return false;
 }
 
 /** The applications this account has answered for. */

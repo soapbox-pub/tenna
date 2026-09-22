@@ -188,6 +188,15 @@ public class NsiteAppActivity extends BridgeActivity {
         // asking, and a `signEvent` that arrived to find no signer would be
         // the one thing a site's own window could not do.
         registerPlugin(TennaSignerPlugin.class);
+        // And the store the answer is written to. A site's grants used to be
+        // the web layer's `localStorage`, which every window has; they are
+        // native now, so that a worker with no window can read them — and a
+        // window without this plugin silently falls back to the old store
+        // (see `native()` in `nsitePermissions.ts`). The decision then lives
+        // somewhere nothing else looks: not the settings screen, not the
+        // site's worker, and not the next launch, which migrates the stray
+        // record out of localStorage and leaves the window asking again.
+        registerPlugin(SignerAppsPlugin.class);
         super.onCreate(savedInstanceState);
 
         silenceTransitions();

@@ -147,6 +147,9 @@ function findAllowance(
  * The local copy is cleared only once every record has been written, so an
  * interrupted migration repeats rather than losing anything: `grant` replaces
  * the answer to a question it already holds, so writing one twice is a no-op.
+ * A record that would not cross therefore keeps the whole local copy alive —
+ * the alternative is deleting a decision the user made and nothing now holds,
+ * which is the one outcome worse than migrating late.
  */
 let migration: Promise<void> | undefined;
 
@@ -154,6 +157,8 @@ function migrate(): Promise<void> {
   migration ??= (async () => {
     const allowances = readAllowances();
     if (allowances.length === 0) return;
+
+    let crossed = true;
 
     for (const allowance of allowances) {
       for (const permission of allowance.permissions) {
@@ -169,13 +174,15 @@ function migrate(): Promise<void> {
           });
         } catch {
           // A record that would not cross is one the user is asked about
-          // again. Leave the rest of the migration to finish; stopping here
-          // would strand every grant behind it too.
+          // again. Let the rest of the migration finish — stopping here would
+          // strand every grant behind it too — but keep the local copy, so
+          // the next launch has something to try again with.
+          crossed = false;
         }
       }
     }
 
-    localStorage.removeItem(STORAGE_KEY);
+    if (crossed) localStorage.removeItem(STORAGE_KEY);
   })();
 
   return migration;
@@ -347,9 +354,12 @@ export async function setNsitePermission(
         ...(kind === null ? {} : { kind }),
         allowed,
       });
-    } catch {
+    } catch (error) {
       // A decision that could not be written is one the user is asked for
-      // again. Annoying, and better than a silent one.
+      // again. Annoying, and better than a silent one — but said out loud,
+      // because from the outside it is indistinguishable from a user who
+      // never ticked the box.
+      console.warn('Could not remember a decision about a site', error);
     }
     announce();
     return;

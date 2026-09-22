@@ -18,8 +18,10 @@ public class MainActivity extends BridgeActivity {
         // Only here. The wall is the one screen that puts an app on itself or
         // launches one, and it never runs in a site's window.
         registerPlugin(NativeAppsPlugin.class);
-        // Likewise: who has been given a key is a settings screen, and
-        // settings are only reachable from Tenna's own window.
+        // Not only here, unlike the two above. Listing who has been given a
+        // key is a settings screen, but the same plugin is the store a site's
+        // permission sheet writes to, and a site is answered in a window of
+        // its own. See `NsiteAppActivity`.
         registerPlugin(SignerAppsPlugin.class);
         super.onCreate(savedInstanceState);
 

@@ -35,10 +35,6 @@ import java.util.Map;
  * answer alike, and which one a given request arrived on is none of the site's
  * business, so the routing lives here rather than in any of them.
  *
- * For Tenna's own paths it is very much the point. See {@link Asker}: the
- * reserved paths below are a service worker's API and no page's, so a window
- * asking for one is not a window of ours and is told there is nothing there.
- *
  * These paths are Tenna's rather than the site's, and are reserved under every
  * site origin:
  *
@@ -46,25 +42,10 @@ import java.util.Map;
  *   <li>{@value #WAKE_PATH} — the page the push service navigates to in order
  *       to reach the site's worker. A site whose worker claims navigations
  *       answers this itself, from the shim; otherwise it is served here.
- *   <li>{@value #NOTIFICATION_PATH} — where the shim sends a
- *       {@code showNotification}. A GET, with the payload in the query, because
- *       {@code shouldInterceptRequest} is never given a request body. Its
- *       neighbours {@value #NOTIFICATIONS_PATH}, {@value #CLOSE_PATH} and
- *       {@value #OPEN_PATH} are the rest of what a worker can do to a
- *       notification: read the tray back, take one down, and open the window
- *       a tap on one leads to.
- *   <li>{@code /.napp/nostr} — where a worker's {@code self.nostr} calls land,
- *       which is the same token-authenticated shape for the same reason. See
- *       {@link NsiteWorkerSigner}.
- *   <li>{@code /.napp/fetch} — where a {@code napp.fetch} is collected. The
- *       one path here that answers with somebody else's bytes: the request was
- *       made out on the network and this is the site reading the response back
- *       in. See {@link NappFetch}, and note that it authenticates two ways.
- *   <li>{@code /.napp/fetch/open}, {@code /.napp/fetch/put} and
- *       {@code /.napp/fetch/abort} — how a worker hands over a request body
- *       too large to fit in the URL of the fetch itself, a chunk at a time.
- *       The missing request body again, answered by sending it as many URLs
- *       instead of one.
+ *   <li>{@code /.napp/fetch} — where a <em>window's</em> {@code napp.fetch} is
+ *       collected. The one path here that answers with somebody else's bytes:
+ *       the request was made out on the network and this is the site reading
+ *       the response back in. See {@link NappFetch}.
  *   <li>{@value #SHARE_PATH} — the page that turns a staged share into a real
  *       form POST at the site's own origin, for a {@code share_target} that
  *       asked for one. Only a document there can make that navigation.
@@ -72,14 +53,23 @@ import java.util.Map;
  *       that page to fetch back and put in the form.
  * </ul>
  *
- * That same missing request body is what decides how a share is answered. A
+ * <p>A <b>service worker</b> used to have half a dozen paths of its own here —
+ * one per thing it could ask Tenna for, each a GET with its payload written
+ * out as base64 in the query string, because {@code shouldInterceptRequest} is
+ * never given a request body. It has a {@link NappPort} now, and a port carries
+ * bytes, speaks in both directions, and lands on a thread of Tenna's. What is
+ * left of the worker's business here is the wake page and the script it is
+ * installed from, both of which are documents and neither of which a port could
+ * have replaced.
+ *
+ * <p>That same missing request body is what decides how a share is answered. A
  * POST navigation only reaches here when the site's service worker did not
  * claim it — a worker that did would have taken it long before — so arriving
  * here at all is proof there is nobody to hand it to, and it is answered with
  * a page saying so rather than with the site's own index.
  *
- * Nothing outside this process can reach either. Interception is not a socket:
- * a request only arrives here because a WebView of ours made it.
+ * Nothing outside this process can reach any of it. Interception is not a
+ * socket: a request only arrives here because a WebView of ours made it.
  */
 final class NsiteRequests {
 
@@ -87,33 +77,6 @@ final class NsiteRequests {
 
     /** The page the push service loads to reach a site's service worker. */
     static final String WAKE_PATH = "/.napp/wake";
-
-    /** Where a worker's {@code showNotification} lands. */
-    static final String NOTIFICATION_PATH = "/.napp/notification";
-
-    /** Where a worker's {@code getNotifications} lands. */
-    static final String NOTIFICATIONS_PATH = "/.napp/notifications";
-
-    /** Where a worker's {@code Notification.close} lands. */
-    static final String CLOSE_PATH = "/.napp/close";
-
-    /** Where a worker's {@code clients.openWindow} and {@code focus} land. */
-    static final String OPEN_PATH = "/.napp/open";
-
-    /** Query parameter carrying the base64url notification payload. */
-    static final String PAYLOAD_PARAM = "p";
-
-    /** Query parameter naming one notification, by the key the host gave it. */
-    static final String KEY_PARAM = "k";
-
-    /** Query parameter naming a site-absolute path to open the site at. */
-    static final String URL_PARAM = "u";
-
-    /** Query parameter narrowing {@link #NOTIFICATIONS_PATH} to one tag. */
-    static final String TAG_PARAM = "tag";
-
-    /** Query parameter proving the caller is the site's own worker. */
-    static final String AUTH_PARAM = "a";
 
     /** The page that submits a staged share as a form, for a POST target. */
     static final String SHARE_PATH = "/.tenna/share";
@@ -133,98 +96,22 @@ final class NsiteRequests {
     /** Placeholder in the shim source for the site's own token. */
     private static final String SITE_TOKEN_PLACEHOLDER = "%%NAPP_SITE_TOKEN%%";
 
+    /** Placeholder in the shim source for whether bytes may cross as bytes. */
+    private static final String BINARY_PLACEHOLDER = "%%NAPP_BINARY%%";
+
+    /** Placeholder in the port script for the object a window talks through. */
+    private static final String HOST_OBJECT_PLACEHOLDER = "%%NAPP_HOST_OBJECT%%";
+
     /** Placeholder in the share page for the form it is to build. */
     private static final String SHARE_PLAN_PLACEHOLDER = "%%TENNA_SHARE_PLAN%%";
 
     @Nullable private static String wakePage;
     @Nullable private static String sharePage;
     @Nullable private static String shim;
+    @Nullable private static String portScript;
     private static boolean assetsLoaded;
 
     private NsiteRequests() {}
-
-    /**
-     * Which of this app's clients a request arrived on.
-     *
-     * <p>Nothing in a request says whether a service worker made it. There is
-     * no header for it, and {@code isForMainFrame} is false for a worker's
-     * fetch and for a page's subresource alike — so the only thing that knows
-     * is the client the request was handed to, and it knows for certain. A
-     * worker's fetches go to a {@code ServiceWorkerClient} and a document's go
-     * to its {@code WebViewClient}; Chromium cannot route one to the other.
-     *
-     * <p>Two facts come with it, and they defend different things.
-     *
-     * <ul>
-     *   <li><b>Whether it is a worker at all.</b> The reserved paths are the
-     *       worker's half of the APIs a page gets by injection — its
-     *       {@code window.nostr}, its {@code Notification} — so no page of ours
-     *       ever asks for one. Refusing the ones that do costs nothing and
-     *       means the site token is the second check rather than the only one.
-     *   <li><b>Which site's worker, where that is known.</b> A client set on a
-     *       site's own profile is reachable by that site's workers and no
-     *       other's, so it can say who is asking — which is exactly what a host
-     *       in a URL cannot do, and the hole {@link NappTokens} was written to
-     *       fill. On a WebView too old for profiles every site shares the
-     *       default client, which knows nothing, and the token is all there is.
-     * </ul>
-     */
-    static final class Asker {
-
-        private static final Asker WINDOW = new Asker(false, null);
-        private static final Asker ANY_WORKER = new Asker(true, null);
-
-        /** Whether a service worker made this request. */
-        final boolean worker;
-
-        /** The only site this client can be reached by, if it is one site's. */
-        @Nullable final String siteId;
-
-        private Asker(boolean worker, @Nullable String siteId) {
-            this.worker = worker;
-            this.siteId = siteId;
-        }
-
-        /** A document: the site's own WebView, or the one that wakes it. */
-        @NonNull
-        static Asker window() {
-            return WINDOW;
-        }
-
-        /** The default profile's worker client, shared by every site on it. */
-        @NonNull
-        static Asker worker() {
-            return ANY_WORKER;
-        }
-
-        /** The worker client of one site's own profile. */
-        @NonNull
-        static Asker worker(@NonNull String siteId) {
-            return new Asker(true, siteId);
-        }
-    }
-
-    /**
-     * Whether a path is one only a service worker has any business asking for.
-     *
-     * <p>{@link NappFetch#PATH} is not among them: it is the one reserved path
-     * with two legs, and a window's is the ordinary one. {@link #WAKE_PATH} is
-     * not either — it is a document, and a document is what loads it.
-     *
-     * <p>Its staging neighbours are, though. A window stages a body over the
-     * message channel it already has and has no use for these; a worker, which
-     * has no channel, hands a large body over a chunk at a time through them.
-     */
-    static boolean isWorkerPath(@Nullable String path) {
-        return NOTIFICATION_PATH.equals(path)
-            || NOTIFICATIONS_PATH.equals(path)
-            || CLOSE_PATH.equals(path)
-            || OPEN_PATH.equals(path)
-            || NappFetch.OPEN_PATH.equals(path)
-            || NappFetch.PUT_PATH.equals(path)
-            || NappFetch.ABORT_PATH.equals(path)
-            || NsiteWorkerSigner.PATH.equals(path);
-    }
 
     /**
      * Answer a request for a site's origin, or return null to let it go to the
@@ -242,70 +129,39 @@ final class NsiteRequests {
     @Nullable
     static WebResourceResponse serve(
         @NonNull Context context,
-        @NonNull WebResourceRequest request,
-        @NonNull Asker asker
+        @NonNull WebResourceRequest request
     ) {
         Uri url = request.getUrl();
         if (!"https".equalsIgnoreCase(url.getScheme())) return null;
 
         String host = url.getHost();
+
         String siteId = NsiteOrigins.siteIdFor(host);
         if (siteId == null) return null;
 
         String path = url.getPath();
 
-        // napp.fetch, which proves itself two ways because the request behind
-        // it arrived by one of two roads.
-        //
-        // A window staged its request over the message channel and holds a
-        // ticket: unguessable, one-shot, minted against this site, and
-        // therefore proof on its own. A worker had no channel to stage
-        // anything over — the interesting case is the one with no window at
-        // all — so its request is written out in the URL, and the site token
-        // is what says whose worker asked. See NappFetch and NappTokens.
-        //
-        // The ticket is taken from either, because a site's worker may well be
-        // the thing that relays its window's fetch. The self-describing leg is
-        // a worker's alone.
+        // A window collecting a napp.fetch it staged over the bridge. The
+        // ticket is the proof on its own: unguessable, one-shot, and minted
+        // against this site. A worker never comes here — it has a port, and
+        // makes the whole request over that. See NappFetch.
         if (NappFetch.PATH.equals(path)) {
-            if (query(url, NappFetch.TICKET_PARAM) == null
-                && !isOwnWorker(context, asker, siteId, query(url, AUTH_PARAM))) {
-                Log.i(TAG, "Refused an unauthenticated " + path + " for " + siteId);
+            if (query(url, NappFetch.TICKET_PARAM) == null) {
+                Log.i(TAG, "Refused a ticketless " + path + " for " + siteId);
                 return NsiteFileServer.Response.empty(403, "Forbidden").toWebResource();
             }
             return NappFetch.serve(siteId, url);
         }
 
-        // The paths that do something rather than serve something, and a
-        // service worker's API rather than a page's — a window does all of
-        // this over the bridge its window.nostr and Notification come from,
-        // and never asks here. So one that does is answered the way the site
-        // itself would answer a path it has no file at. See Asker.
-        if (isWorkerPath(path)) {
-            if (!asker.worker) {
-                Log.i(TAG, "Refused " + path + " asked for outside a worker");
-                return NsiteFileServer.Response.empty(404, "Not Found").toWebResource();
-            }
-
-            // A worker's fetch arrives with no WebView attached, so the host in
-            // the URL is the only thing naming a site — and a host is not
-            // proof, since any site can fetch any other site's paths. The
-            // token is, and on a profile of its own the client is too.
-            if (!isOwnWorker(context, asker, siteId, query(url, AUTH_PARAM))) {
-                Log.i(TAG, "Refused an unauthenticated " + path + " for " + siteId);
-                return NsiteFileServer.Response.empty(403, "Forbidden").toWebResource();
-            }
-
-            if (NOTIFICATION_PATH.equals(path)) return notification(context, siteId, url);
-            if (NOTIFICATIONS_PATH.equals(path)) return notifications(context, siteId, url);
-            if (CLOSE_PATH.equals(path)) return close(context, siteId, url);
-            if (NappFetch.OPEN_PATH.equals(path)) return NappFetch.open(siteId, url);
-            if (NappFetch.PUT_PATH.equals(path)) return NappFetch.put(siteId, url);
-            if (NappFetch.ABORT_PATH.equals(path)) return NappFetch.abandon(siteId, url);
-            if (NsiteWorkerSigner.PATH.equals(path)) {
-                return NsiteWorkerSigner.serve(context, siteId, url);
-            }
-            return open(context, siteId, url);
+        // A worker ringing for a port, which is the one thing it cannot ask
+        // for over one. Bodiless, and answered with nothing: what it sets in
+        // motion is a document being told to carry a port across. See NappPort.
+        if (NappPort.PATH.equals(path)) {
+            boolean anyone = NappPort.wanted(siteId);
+            if (!anyone) Log.i(TAG, "No window to get " + siteId + "'s worker a port");
+            return NsiteFileServer.Response
+                .empty(anyone ? 204 : 404, anyone ? "No Content" : "Not Found")
+                .toWebResource();
         }
 
         if (WAKE_PATH.equals(path)) {
@@ -341,149 +197,6 @@ final class NsiteRequests {
 
         boolean workerScript = "script".equalsIgnoreCase(header(request, SERVICE_WORKER_HEADER));
         return server.serve(url, workerScript ? shim(context, siteId) : null).toWebResource();
-    }
-
-    /**
-     * Whether a request on a reserved path really came from this site's own
-     * service worker.
-     *
-     * <p>Two things can say so and both are checked: where the request came
-     * from, which is {@link #askerCouldBe}, and the token, which is the only
-     * answer available on the default profile. See {@link NappTokens}.
-     */
-    private static boolean isOwnWorker(
-        @NonNull Context context,
-        @NonNull Asker asker,
-        @NonNull String siteId,
-        @Nullable String token
-    ) {
-        return askerCouldBe(asker, siteId)
-            && NappTokens.matches(context, siteId, token);
-    }
-
-    /**
-     * Whether the client a request arrived on is one this site's worker could
-     * have reached.
-     *
-     * <p>Says nothing about the token; this is the half of the question that
-     * the shape of the app answers rather than a secret. A window is not a
-     * worker and never asks for these paths. And a client belonging to one
-     * site's profile cannot be reached by another site's worker at all, so a
-     * request there for a different site is one nothing should have been able
-     * to make — whereas the default profile's client, which every site left on
-     * it shares, has no opinion to offer. See {@link Asker}.
-     */
-    static boolean askerCouldBe(@NonNull Asker asker, @NonNull String siteId) {
-        if (!asker.worker) return false;
-        return asker.siteId == null || asker.siteId.equals(siteId);
-    }
-
-    /** Show a notification a worker asked for, and answer its fetch. */
-    private static WebResourceResponse notification(Context context, String siteId, Uri url) {
-        String encoded;
-        try {
-            encoded = url.getQueryParameter(PAYLOAD_PARAM);
-        } catch (UnsupportedOperationException e) {
-            encoded = null;
-        }
-        if (encoded == null) {
-            return NsiteFileServer.Response.empty(400, "Bad Request").toWebResource();
-        }
-
-        JSONObject payload;
-        try {
-            byte[] bytes = Base64.decode(encoded, Base64.URL_SAFE | Base64.NO_PADDING | Base64.NO_WRAP);
-            payload = new JSONObject(new String(bytes, StandardCharsets.UTF_8));
-        } catch (IllegalArgumentException | JSONException e) {
-            return NsiteFileServer.Response.empty(400, "Bad Request").toWebResource();
-        }
-
-        boolean shown = NappNotifications.show(context, siteId, payload);
-        return NsiteFileServer.Response
-            .empty(shown ? 200 : 403, shown ? "OK" : "Forbidden")
-            .toWebResource();
-    }
-
-    /**
-     * The site's notifications as they currently stand, for
-     * {@code registration.getNotifications()}.
-     *
-     * Only its own — the site id comes off the request's host, so a site can
-     * no more read another's tray than it can post to it.
-     */
-    private static WebResourceResponse notifications(Context context, String siteId, Uri url) {
-        String tag = query(url, TAG_PARAM);
-        JSONArray out = new JSONArray();
-
-        for (NappNotificationStore.Entry entry : NappNotificationStore.list(context, siteId)) {
-            if (tag != null && !tag.equals(entry.tag)) continue;
-            try {
-                JSONObject json = new JSONObject();
-                json.put("key", entry.key);
-                json.put("tag", entry.tag);
-                json.put("title", entry.title);
-                json.put("options", new JSONObject(entry.options));
-                out.put(json);
-            } catch (JSONException e) {
-                // An unreadable record is one the site never hears about.
-            }
-        }
-
-        return json(out.toString());
-    }
-
-    /** Take one of the site's notifications down. */
-    private static WebResourceResponse close(Context context, String siteId, Uri url) {
-        String key = query(url, KEY_PARAM);
-        if (key == null || !key.startsWith(NsiteSites.key(siteId) + "/")) {
-            return NsiteFileServer.Response.empty(400, "Bad Request").toWebResource();
-        }
-
-        NappNotifications.cancel(context, siteId, key);
-        return NsiteFileServer.Response.empty(200, "OK").toWebResource();
-    }
-
-    /**
-     * Open or resume the site's own window, at a path of its choosing.
-     *
-     * What {@code clients.openWindow()} and {@code WindowClient.focus()} mean
-     * here. Neither works in a WebView on its own — a worker has no way to
-     * make a browsing context, and focusing one is a window-manager act rather
-     * than a web one — so both come back out to the host, which starts the
-     * same activity a notification's tap does.
-     *
-     * A site can only open itself: the id is the request's host, and the path
-     * is refused unless it is one inside the site. And only just after the
-     * user acted on one of its notifications, which is the case the API is
-     * for.
-     */
-    private static WebResourceResponse open(Context context, String siteId, Uri url) {
-        String path = NappOptions.path(query(url, URL_PARAM));
-
-        if (NsiteSites.load(context, siteId) == null) {
-            return NsiteFileServer.Response.empty(404, "Not Found").toWebResource();
-        }
-
-        // Only in answer to something the user did. A worker that puts its
-        // site on screen off the back of a relay event is not answering
-        // anybody; see NappNotifications.
-        if (!NappNotifications.recentlyInteracted(siteId)) {
-            return NsiteFileServer.Response.empty(403, "Forbidden").toWebResource();
-        }
-
-        try {
-            context.startActivity(
-                NsiteAppActivity.notificationIntentFor(context, siteId, path, null)
-            );
-        } catch (RuntimeException e) {
-            // Background activity launch restrictions. A worker woken by a tap
-            // is inside the exemption window; one woken by a relay is not, and
-            // has no business opening a window unasked anyway.
-            Log.i(TAG, "Refused to open a window for " + siteId, e);
-            return NsiteFileServer.Response.empty(403, "Forbidden").toWebResource();
-        }
-
-        return NsiteFileServer.Response.empty(200, "OK").toWebResource();
     }
 
     // -----------------------------------------------------------------------
@@ -633,7 +346,9 @@ final class NsiteRequests {
      * And it carries the site's own token, which is why this is per site
      * rather than one shared string. The response it goes into is readable
      * only by the origin that asked for it, and only when the browser asked
-     * for it as a worker script — see {@link NappTokens}.
+     * for it as a worker script — see {@link NappTokens}. What the token proves
+     * is now one thing rather than every call: that the port a document carried
+     * over really reached the worker. See {@link NappPort}.
      */
     @Nullable
     static synchronized String shim(@NonNull Context context, @NonNull String siteId) {
@@ -643,6 +358,21 @@ final class NsiteRequests {
             SITE_TOKEN_PLACEHOLDER,
             JSONObject.quote(NappTokens.forSite(context, siteId))
         );
+    }
+
+    /**
+     * The script every window at a site's origin runs first, which exists to
+     * carry a port across to the site's worker.
+     *
+     * <p>Not the site's business and not the page's: a {@code MessagePort}
+     * arrives at a frame, and a frame is the only thing that can transfer one
+     * into a worker. See {@code napp_port.js}.
+     */
+    @Nullable
+    static synchronized String portScript(@NonNull Context context, @NonNull String hostObject) {
+        load(context);
+        if (portScript == null) return null;
+        return portScript.replace(HOST_OBJECT_PLACEHOLDER, JSONObject.quote(hostObject));
     }
 
     @Nullable
@@ -663,12 +393,19 @@ final class NsiteRequests {
 
         wakePage = readRaw(context, R.raw.napp_wake);
         sharePage = readRaw(context, R.raw.tenna_share);
+        portScript = readRaw(context, R.raw.napp_port);
+
         String source = readRaw(context, R.raw.napp_sw_shim);
         shim = source == null || wakePage == null
             ? null
             // A JS string literal; org.json's quoting is also valid JS, and
             // escapes the `</` that would otherwise end an inline script.
-            : source.replace(WAKE_PAGE_PLACEHOLDER, JSONObject.quote(wakePage));
+            : source.replace(WAKE_PAGE_PLACEHOLDER, JSONObject.quote(wakePage))
+                // Whether this WebView will carry an array buffer on a message.
+                // A fact about what happens to be installed rather than about
+                // the site, so the shim leaves a hole for it as it does for the
+                // token. See NappPort.
+                .replace(BINARY_PLACEHOLDER, NappPort.isBinary() ? "true" : "false");
     }
 
     @Nullable

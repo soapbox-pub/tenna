@@ -43,6 +43,13 @@ import java.util.Deque;
  * {@code notificationclick} the user just caused — and the shim's reply, once
  * every {@code waitUntil} has settled, comes back the same way. One delivery
  * at a time; a site with a burst of events gets them in order.
+ *
+ * <p>Each delivery carries a {@link NappPort} with it, transferred on by the
+ * page into the worker. That is how a woken worker comes to have a host at
+ * all: it needs one to show a notification, which is the only reason it was
+ * woken, and a port cannot be handed to a worker by anything but a frame. A
+ * fresh one per delivery, because Chromium may have stopped the worker between
+ * two of them and the new instance starts with an empty global.
  */
 final class NappWakeWebView {
 
@@ -172,6 +179,12 @@ final class NappWakeWebView {
             return;
         }
 
+        WebView view = webView;
+        if (view == null) {
+            finish();
+            return;
+        }
+
         inFlight = next;
         int id = nextId++;
         try {
@@ -180,7 +193,17 @@ final class NappWakeWebView {
             message.put("kind", next.kind);
             message.put("id", id);
             message.put("data", next.payload);
-            proxy.postMessage(message.toString());
+
+            // Posted to the frame rather than down the reply proxy, because a
+            // port can only travel on a message posted to a frame — and it has
+            // to travel with the event, so that a site's handler has somewhere
+            // to ask from its first line.
+            if (!NappPort.hand(context, view, siteId, NsiteOrigins.originFor(siteId), message)) {
+                Log.w(TAG, "No port for " + siteId + "; its worker has no host to ask");
+                finish();
+                return;
+            }
+
             main.postDelayed(timeout, DELIVERY_TIMEOUT_MS);
         } catch (JSONException e) {
             finish();
@@ -336,7 +359,7 @@ final class NappWakeWebView {
                 // A document, for all that there is no window around it: what
                 // this loads is a page, and the worker it exists to wake is
                 // served somewhere else entirely.
-                return NsiteRequests.serve(app, request, NsiteRequests.Asker.window());
+                return NsiteRequests.serve(app, request);
             }
 
             @Override

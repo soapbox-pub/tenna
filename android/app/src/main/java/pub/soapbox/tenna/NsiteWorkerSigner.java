@@ -1,10 +1,7 @@
 package pub.soapbox.tenna;
 
 import android.content.Context;
-import android.net.Uri;
-import android.util.Base64;
 import android.util.Log;
-import android.webkit.WebResourceResponse;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
@@ -12,13 +9,14 @@ import androidx.annotation.Nullable;
 import org.json.JSONException;
 import org.json.JSONObject;
 
-import java.io.ByteArrayInputStream;
-import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 
 /**
  * {@code self.nostr} inside an nsite's service worker.
@@ -30,11 +28,10 @@ import java.util.UUID;
  * wants to decrypt the message it was told about so it can say who it is from,
  * and the alternative is a notification reading "1 new message".
  *
- * <p>So the worker's provider is a {@code fetch} at its own origin, answered
- * here, and the same-origin request is what makes it safe to answer: the shim
- * carries the site's token, stamped into a worker script only that origin can
- * read, and {@link NappTokens} explains why a host in a URL is not proof on
- * its own.
+ * <p>So the worker's provider is a call over the {@link NappPort} its host
+ * handed it, and that is also what makes it safe to answer: a port is minted
+ * on one site's WebView and transferred into that site's own worker, so the
+ * thing holding it is the site, with nothing to prove on arrival.
  *
  * <p><b>Nothing is decided here.</b> Every question goes to
  * {@link TennaSigning}, which is the same code that answers a NIP-55 intent
@@ -43,69 +40,74 @@ import java.util.UUID;
  * revoking it in settings revokes both. That is only true because those grants
  * live natively; see {@code nsitePermissions.ts} for the move that made it so.
  *
- * <h2>Why a call that needs approval is polled and not waited on</h2>
+ * <h2>A call that needs approval simply waits</h2>
  *
  * <p>A request nobody has decided raises the signer notification, exactly as a
  * remote request does — see {@link NappBunker} — and then somebody has to walk
- * to their phone. The obvious shape is to block this thread until they do.
+ * to their phone.
  *
- * <p>It is the wrong shape. This runs inside {@code shouldInterceptRequest} on
- * a thread Chromium owns and shares: every service worker in the process is
- * served from it, and every notification any site is trying to show is a fetch
- * that lands here. Holding it for a minute to wait on a person stalls every
- * other site in the app, including whatever the user is actually looking at.
- * A signing prompt that freezes the notifications of three unrelated sites is
- * a worse bug than the one it was solving.
+ * <p>That used to be the awkward part. The call arrived as a {@code fetch} at
+ * the site's origin, answered inside {@code shouldInterceptRequest} on a thread
+ * Chromium owns and shares with every service worker in the process — so
+ * holding it for a minute to wait on a person would have stalled every other
+ * site in the app. The call was therefore parked, answered with
+ * {@code pending}, and the worker asked again every second until somebody had
+ * decided.
  *
- * <p>So the call is parked, answered with {@code pending}, and the shim asks
- * again every second. Each of those returns at once. The request carries its
- * own deadline so that nobody walking to their phone leaves an entry in the
- * map and a notification in the shade forever.
+ * <p>A port has no such thread. The question is asked, and the answer is sent
+ * when there is one; the worker's promise settles then and asks nothing in
+ * between. What is left of the old shape is the map — the sheet still resolves
+ * a call from somewhere else entirely — and the deadline, which is the backstop
+ * for a worker that was stopped mid-wait and will never collect anything.
  */
 final class NsiteWorkerSigner {
 
     private static final String TAG = "NsiteWorkerSigner";
 
-    /** Where a worker's {@code self.nostr} calls land. */
-    static final String PATH = "/.napp/nostr";
-
-    /** Query parameter naming the NIP-07 method, on a first call. */
-    static final String METHOD_PARAM = "m";
-
-    /** Query parameter carrying the base64url JSON arguments. */
-    static final String PAYLOAD_PARAM = "p";
-
-    /** Query parameter naming a parked call to ask about again. */
-    static final String WAIT_PARAM = "w";
-
-    /** Query parameter naming a parked call the worker has given up on. */
-    static final String ABANDON_PARAM = "x";
-
     /**
-     * How long a parked call is held.
+     * How long a call is held waiting on a person.
      *
-     * <p>Longer than the shim waits, on purpose: the worker gives up first and
-     * says so, which takes the notification down at the same time. This is the
-     * backstop for a worker that was killed mid-wait and will never say
-     * anything again.
+     * <p>Nothing outside is counting any more, so this is a judgement about
+     * what is worth keeping rather than a deadline imposed on us: past it the
+     * notification is taken down and the worker is told, so that a question
+     * nobody answered does not sit in the shade forever.
      */
     private static final long DEADLINE_MS = 150_000;
 
-    /** An argument JSON longer than this is not one any honest caller sends. */
-    private static final int MAX_PAYLOAD_BYTES = 512 * 1024;
+    /**
+     * The clock the deadline is kept by.
+     *
+     * <p>The old road swept lazily, on the next call, which worked because the
+     * worker was asking every second. Nothing asks now, so a call nobody
+     * answers needs something of its own to end it.
+     */
+    private static final ScheduledExecutorService CLOCK =
+        Executors.newSingleThreadScheduledExecutor(r -> {
+            Thread thread = new Thread(r, "napp-signer-clock");
+            thread.setDaemon(true);
+            return thread;
+        });
 
     private NsiteWorkerSigner() {}
+
+    /** Where the answer to one call goes. Called exactly once, on any thread. */
+    interface Answer {
+        /** A string, or the whole signed event as a {@link JSONObject}. */
+        void result(@NonNull Object value);
+
+        void failed(@NonNull String reason);
+    }
 
     // ── What is waiting on a person ──────────────────────────────────────────
 
     /**
-     * A worker's call, parked while the user is asked about it.
+     * A worker's call, held while the user is asked about it.
      *
-     * <p>It leaves the map three ways: the worker collects the answer, the
-     * worker gives up, or it goes stale. Whichever happens, everything else
-     * that reaches for it afterwards finds nothing and does nothing — which is
-     * the property that lets the sheet and the worker race without either of
-     * them having to know about the other.
+     * <p>It leaves the map three ways: the sheet answers it, it goes stale, or
+     * the site is forgotten. Whichever happens, everything else that reaches
+     * for it afterwards finds nothing and does nothing — which is the property
+     * that lets the sheet and the clock race without either of them having to
+     * know about the other.
      */
     static final class Pending {
         @NonNull final String requestId;
@@ -113,7 +115,12 @@ final class NsiteWorkerSigner {
         @NonNull final String siteName;
         @NonNull final String accountPubkey;
         @NonNull final TennaSigning.Request request;
-        final long expiresAt;
+
+        /** Where the answer goes when there is one. */
+        @NonNull final Answer answer;
+
+        /** The application context, for the bookkeeping an answer does. */
+        @NonNull final Context context;
 
         /**
          * Whether a sheet has taken this.
@@ -124,171 +131,187 @@ final class NsiteWorkerSigner {
          */
         boolean claimed;
 
-        @Nullable TennaSigning.Outcome outcome;
+        /** Whether it has been answered, by anybody, by any road. */
+        boolean settled;
 
         Pending(
+            @NonNull Context context,
             @NonNull String requestId,
             @NonNull String siteId,
             @NonNull String siteName,
             @NonNull String accountPubkey,
-            @NonNull TennaSigning.Request request
+            @NonNull TennaSigning.Request request,
+            @NonNull Answer answer
         ) {
+            this.context = context;
             this.requestId = requestId;
             this.siteId = siteId;
             this.siteName = siteName;
             this.accountPubkey = accountPubkey;
             this.request = request;
-            this.expiresAt = System.currentTimeMillis() + DEADLINE_MS;
+            this.answer = answer;
         }
     }
 
     private static final Map<String, Pending> waiting = new HashMap<>();
 
     /**
-     * Take a parked call for the sheet.
+     * Take a held call for the sheet.
      *
-     * <p>It stays in the map — the worker is still asking about it every
-     * second — but only the first caller gets it.
+     * <p>It stays in the map until it is answered — the thing waiting on it is
+     * a promise in a worker, not a poll — but only the first caller gets it.
      */
     @Nullable
     static Pending claim(@NonNull Context context, @NonNull String requestId) {
-        Pending pending;
-        List<String> stale;
-
         synchronized (waiting) {
-            stale = expire();
-            pending = waiting.get(requestId);
-            if (pending != null && !pending.claimed && pending.outcome == null) {
-                pending.claimed = true;
-            } else {
-                pending = null;
-            }
+            Pending pending = waiting.get(requestId);
+            if (pending == null || pending.claimed || pending.settled) return null;
+            pending.claimed = true;
+            return pending;
         }
-
-        cancelAll(context, stale);
-        return pending;
     }
 
     /**
-     * Hand a parked call its answer.
+     * Hand a held call its answer, and the worker with it.
      *
-     * <p>The worker collects it on its next ask. A call that has since expired
-     * or been given up on is written to and never read, which is the right
-     * outcome: the decision the user made is still recorded against the site,
-     * so the next call is answered without asking again.
+     * <p>A call that has since expired is written to and never read, which is
+     * the right outcome: the decision the user made is still recorded against
+     * the site, so the next call is answered without asking again.
      */
     static void resolve(@NonNull Pending pending, @NonNull TennaSigning.Outcome outcome) {
         synchronized (waiting) {
-            pending.outcome = outcome;
+            if (pending.settled) return;
+            pending.settled = true;
+            waiting.remove(pending.requestId);
         }
+
+        NappNotifications.cancelSignerRequest(pending.context, pending.requestId);
+        answered(pending.context, pending.siteId, pending.accountPubkey, outcome, pending.answer);
+    }
+
+    /** Give up on one nobody answered. */
+    private static void expire(@NonNull String requestId) {
+        Pending pending;
+        synchronized (waiting) {
+            pending = waiting.get(requestId);
+            if (pending == null || pending.settled) return;
+            pending.settled = true;
+            waiting.remove(requestId);
+        }
+
+        // A notification that opens a sheet with nothing in it is worse than
+        // no notification.
+        NappNotifications.cancelSignerRequest(pending.context, requestId);
+        pending.answer.failed("Timed out waiting for approval");
     }
 
     /**
-     * Drop parked calls nobody came back for, and say which they were.
+     * Give up on everything a site had out.
      *
-     * <p>Called holding the lock, and returns rather than cancelling so that
-     * the binder call into the notification manager happens outside it.
+     * <p>Its window is closing or it has been forgotten, so the worker that
+     * asked is going too. Each is answered rather than dropped, on the chance
+     * that something is still there to hear it.
      */
-    @NonNull
-    private static List<String> expire() {
-        long now = System.currentTimeMillis();
-        List<String> stale = new ArrayList<>();
-
-        for (Map.Entry<String, Pending> entry : waiting.entrySet()) {
-            if (now > entry.getValue().expiresAt) stale.add(entry.getKey());
+    static void forget(@NonNull String siteId) {
+        List<Pending> theirs = new ArrayList<>();
+        synchronized (waiting) {
+            for (Pending pending : waiting.values()) {
+                if (pending.siteId.equals(siteId)) theirs.add(pending);
+            }
+            for (Pending pending : theirs) {
+                pending.settled = true;
+                waiting.remove(pending.requestId);
+            }
         }
-        for (String requestId : stale) waiting.remove(requestId);
 
-        return stale;
-    }
-
-    /** Take down the notifications for calls nobody can answer any more. */
-    private static void cancelAll(@NonNull Context context, @NonNull List<String> stale) {
-        // A notification that opens a sheet with nothing in it is worse than
-        // no notification.
-        for (String requestId : stale) NappNotifications.cancelSignerRequest(context, requestId);
+        for (Pending pending : theirs) {
+            NappNotifications.cancelSignerRequest(pending.context, pending.requestId);
+            pending.answer.failed("The site went away");
+        }
     }
 
     // ── Answering a call ─────────────────────────────────────────────────────
 
     /**
-     * Answer one {@code self.nostr} request.
+     * Answer one {@code self.nostr} call, whenever there is an answer.
      *
-     * <p>Always 200 with a JSON body — {@code result}, {@code error}, or
-     * {@code pending} with an id to ask about again — so that the shim can
-     * hand the site a real message rather than "failed to fetch". The caller
-     * has already proved it is this site's own worker.
+     * <p>Returns at once either way. Most calls are decided on the spot, from
+     * a grant the site already has; one that is not raises a notification and
+     * is answered when somebody has pressed something, which may be two minutes
+     * from now. Nothing waits on a thread for it.
+     *
+     * <p>The caller has already established whose worker this is: it holds a
+     * port that was transferred into that site's own registration. See
+     * {@link NappPort}.
      */
-    @NonNull
-    static WebResourceResponse serve(
+    static void answer(
         @NonNull Context context,
         @NonNull String siteId,
-        @NonNull Uri url
+        @NonNull String methodName,
+        @Nullable JSONObject params,
+        @NonNull Answer answer
     ) {
-        String waitId = query(url, WAIT_PARAM);
-        if (waitId != null) return collect(context, siteId, waitId);
-
-        String abandonId = query(url, ABANDON_PARAM);
-        if (abandonId != null) return abandon(context, siteId, abandonId);
-
-        return begin(context, siteId, url);
-    }
-
-    /** A call the worker has not made before. */
-    @NonNull
-    private static WebResourceResponse begin(
-        @NonNull Context context,
-        @NonNull String siteId,
-        @NonNull Uri url
-    ) {
-        SignerTypes.Method method = methodOf(query(url, METHOD_PARAM));
-        if (method == null) return error("Unrecognized method");
-
-        JSONObject params = payload(query(url, PAYLOAD_PARAM));
-        if (params == null) return error("Malformed arguments");
+        SignerTypes.Method method = methodOf(methodName);
+        if (method == null) {
+            answer.failed("Unrecognized method");
+            return;
+        }
+        if (params == null) {
+            answer.failed("Malformed arguments");
+            return;
+        }
 
         String account = TennaAccounts.resolve(context, null);
-        if (account == null) return error("Not logged in");
+        if (account == null) {
+            answer.failed("Not logged in");
+            return;
+        }
 
         // Who this is does not need the key and is not a question about it —
         // the same reasoning that has `TennaSigning.run` answer it from the
         // account list, and that lets a site's window embed the pubkey in its
         // injected provider without asking anybody.
-        if (method == SignerTypes.Method.GET_PUBLIC_KEY) return result(account, null);
+        if (method == SignerTypes.Method.GET_PUBLIC_KEY) {
+            answer.result(account);
+            return;
+        }
 
         TennaSigning.Request request = requestFrom(method, params);
-        if (request == null) return error("Malformed arguments");
+        if (request == null) {
+            answer.failed("Malformed arguments");
+            return;
+        }
 
-        // Waiting is allowed: this is a service worker fetch with nothing
-        // drawn on it, and a signer app that answers in the background is what
-        // lets a worker be answered with no window. It is a call into another
-        // process rather than a wait on a person; see the class note on why
-        // the second one is not done here.
+        // Waiting is allowed: this is a thread of Tenna's, and a signer app
+        // that answers in the background is what lets a worker be answered
+        // with no window.
         TennaSigning.Outcome outcome =
             TennaSigning.answer(context, account, siteId, request, true);
 
         if (outcome.status == TennaSigning.Outcome.Status.NEEDS_APPROVAL
             || outcome.status == TennaSigning.Outcome.Status.NEEDS_ACTIVITY) {
-            return ask(context, siteId, account, request);
+            ask(context, siteId, account, request, answer);
+            return;
         }
 
-        return answered(context, siteId, account, outcome);
+        answered(context, siteId, account, outcome, answer);
     }
 
     /**
-     * Put the question in front of the user, and tell the worker to ask again.
+     * Put the question in front of the user, and hold the call until they
+     * answer it.
      *
      * <p>A notification, because there is no window to draw a sheet over — the
      * worker may be the only thing this app is running. The same notification
      * a remote request raises, opening the same sheet, because it is the same
      * question.
      */
-    @NonNull
-    private static WebResourceResponse ask(
+    private static void ask(
         @NonNull Context context,
         @NonNull String siteId,
         @NonNull String account,
-        @NonNull TennaSigning.Request request
+        @NonNull TennaSigning.Request request,
+        @NonNull Answer answer
     ) {
         // Only here, with a person about to be asked. A call the user has
         // already answered costs them nothing however often it arrives; what
@@ -298,19 +321,24 @@ final class NsiteWorkerSigner {
         String bucket = request.method.wire + (kind == null ? "" : ":" + kind);
         if (!SignerRateLimiter.allow(siteId, bucket)) {
             Log.i(TAG, "Refused a worker request that came too fast for " + siteId);
-            return error("Too many requests");
+            answer.failed("Too many requests");
+            return;
         }
 
         String requestId = UUID.randomUUID().toString();
-        Pending pending =
-            new Pending(requestId, siteId, nameOf(context, siteId, account), account, request);
+        Pending pending = new Pending(
+            context.getApplicationContext(),
+            requestId,
+            siteId,
+            nameOf(context, siteId, account),
+            account,
+            request,
+            answer
+        );
 
-        List<String> stale;
         synchronized (waiting) {
-            stale = expire();
             waiting.put(requestId, pending);
         }
-        cancelAll(context, stale);
 
         if (!NappNotifications.showSignerRequest(
                 context, requestId, pending.siteName, TennaSigning.describe(request),
@@ -319,83 +347,38 @@ final class NsiteWorkerSigner {
             // rather than left to time out: a worker told why can show
             // something, where a worker kept waiting can only stall.
             synchronized (waiting) {
+                pending.settled = true;
                 waiting.remove(requestId);
             }
-            return error("Notifications are turned off for Tenna");
+            answer.failed("Notifications are turned off for Tenna");
+            return;
         }
 
-        return pending(requestId);
+        CLOCK.schedule(() -> expire(requestId), DEADLINE_MS, TimeUnit.MILLISECONDS);
     }
 
-    /** The worker asking whether its parked call has been answered yet. */
-    @NonNull
-    private static WebResourceResponse collect(
-        @NonNull Context context,
-        @NonNull String siteId,
-        @NonNull String requestId
-    ) {
-        Pending pending;
-        TennaSigning.Outcome outcome;
-        List<String> stale;
-
-        synchronized (waiting) {
-            stale = expire();
-            pending = waiting.get(requestId);
-
-            // A site can only ask about its own. The token says which site is
-            // asking; without this check it would say nothing about which
-            // call, and one site could collect another's signature.
-            if (pending != null && !pending.siteId.equals(siteId)) pending = null;
-
-            outcome = pending == null ? null : pending.outcome;
-            if (outcome != null) waiting.remove(requestId);
-        }
-
-        cancelAll(context, stale);
-
-        if (pending == null) return error("That request is no longer waiting");
-        if (outcome == null) return pending(requestId);
-
-        NappNotifications.cancelSignerRequest(context, requestId);
-        return answered(context, siteId, pending.accountPubkey, outcome);
-    }
-
-    /** The worker saying it has waited long enough. */
-    @NonNull
-    private static WebResourceResponse abandon(
-        @NonNull Context context,
-        @NonNull String siteId,
-        @NonNull String requestId
-    ) {
-        synchronized (waiting) {
-            Pending pending = waiting.get(requestId);
-            if (pending != null && pending.siteId.equals(siteId)) waiting.remove(requestId);
-        }
-
-        // Down whether or not there was anything to remove: a notification
-        // whose worker has gone is one nobody can be answering.
-        NappNotifications.cancelSignerRequest(context, requestId);
-        return error("Timed out waiting for approval");
-    }
-
-    /** Turn an outcome into the answer the worker reads. */
-    @NonNull
-    private static WebResourceResponse answered(
+    /** Turn an outcome into the answer the worker gets. */
+    private static void answered(
         @NonNull Context context,
         @NonNull String siteId,
         @NonNull String account,
-        @NonNull TennaSigning.Outcome outcome
+        @NonNull TennaSigning.Outcome outcome,
+        @NonNull Answer answer
     ) {
         switch (outcome.status) {
             case RESULT:
                 SignerApps.touch(context, account, siteId);
-                return result(outcome.value == null ? "" : outcome.value, outcome.eventJson);
+                answer.result(result(outcome.value == null ? "" : outcome.value, outcome.eventJson));
+                break;
 
             case REJECTED:
-                return error("User rejected");
+                answer.failed("User rejected");
+                break;
 
             default:
-                return error(outcome.error == null ? "Could not answer the request" : outcome.error);
+                answer.failed(
+                    outcome.error == null ? "Could not answer the request" : outcome.error);
+                break;
         }
     }
 
@@ -449,19 +432,6 @@ final class NsiteWorkerSigner {
         }
     }
 
-    /** The call's arguments, or null if they were not a readable object. */
-    @Nullable
-    private static JSONObject payload(@Nullable String encoded) {
-        if (encoded == null) return null;
-        try {
-            byte[] bytes = Base64.decode(encoded, Base64.URL_SAFE | Base64.NO_PADDING | Base64.NO_WRAP);
-            if (bytes.length > MAX_PAYLOAD_BYTES) return null;
-            return new JSONObject(new String(bytes, StandardCharsets.UTF_8));
-        } catch (IllegalArgumentException | JSONException e) {
-            return null;
-        }
-    }
-
     /** The normalised question, or null if the arguments do not make one. */
     @Nullable
     private static TennaSigning.Request requestFrom(
@@ -483,68 +453,21 @@ final class NsiteWorkerSigner {
     // ── Writing the answer ───────────────────────────────────────────────────
 
     /**
-     * A result.
+     * A result, in the shape the worker's promise resolves to.
      *
      * <p>For {@code signEvent} that is the whole signed event, because that is
      * what NIP-07 returns and what a site is going to publish; for everything
      * else it is the string the signer produced.
      */
     @NonNull
-    private static WebResourceResponse result(@NonNull String value, @Nullable String eventJson) {
-        JSONObject body = new JSONObject();
+    private static Object result(@NonNull String value, @Nullable String eventJson) {
+        if (eventJson == null) return value;
         try {
-            if (eventJson != null) {
-                body.put("result", new JSONObject(eventJson));
-            } else {
-                body.put("result", value);
-            }
+            return new JSONObject(eventJson);
         } catch (JSONException e) {
-            return error("Could not answer the request");
-        }
-        return json(body.toString());
-    }
-
-    /** Not yet. Ask again with {@value #WAIT_PARAM}. */
-    @NonNull
-    private static WebResourceResponse pending(@NonNull String requestId) {
-        JSONObject body = new JSONObject();
-        try {
-            body.put("pending", requestId);
-        } catch (JSONException e) {
-            return error("Could not answer the request");
-        }
-        return json(body.toString());
-    }
-
-    @NonNull
-    private static WebResourceResponse error(@NonNull String message) {
-        JSONObject body = new JSONObject();
-        try {
-            body.put("error", message);
-        } catch (JSONException e) {
-            // A message that will not fit in a JSON string does not exist;
-            // every one of them is a literal in this file.
-        }
-        return json(body.toString());
-    }
-
-    @NonNull
-    private static WebResourceResponse json(@NonNull String source) {
-        byte[] bytes = source.getBytes(StandardCharsets.UTF_8);
-        Map<String, String> headers = new HashMap<>();
-        headers.put("Cache-Control", "no-store");
-        return new NsiteFileServer.Response(
-            200, "OK", "application/json", "UTF-8", headers,
-            new ByteArrayInputStream(bytes), bytes.length
-        ).toWebResource();
-    }
-
-    @Nullable
-    private static String query(@NonNull Uri url, @NonNull String name) {
-        try {
-            return url.getQueryParameter(name);
-        } catch (UnsupportedOperationException e) {
-            return null;
+            // A signed event this side built and could not read back. Handing
+            // over the text is better than handing over nothing.
+            return eventJson;
         }
     }
 }

@@ -306,7 +306,7 @@ public class SignerActivity extends BridgeActivity {
 
         // A notification about a call from an nsite's service worker. Judged
         // the same way and for the same reason: it arrived somewhere with no
-        // window, and the worker is holding its fetch open waiting on this.
+        // window, and a promise in that worker is waiting on this.
         String siteRequestId = siteRequestId(intent);
         if (siteRequestId != null) {
             NsiteWorkerSigner.Pending waiting = NsiteWorkerSigner.claim(this, siteRequestId);
@@ -684,8 +684,8 @@ public class SignerActivity extends BridgeActivity {
             // than asked to work it out again.
             NappPushService.resolveBunker(this, pending.bunker, outcome.isResult(), false, outcome);
         } else if (pending.site != null) {
-            // A service worker is sitting on a fetch. Releasing it is the
-            // answer; nothing has to be published or handed back.
+            // A service worker is waiting on a promise. The answer goes back
+            // down the port it asked over; nothing has to be published.
             NsiteWorkerSigner.resolve(pending.site, outcome);
         } else if (pending.parsed != null) {
             if (outcome.isResult() && pending.accountPubkey != null) {

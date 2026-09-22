@@ -116,6 +116,9 @@ public class NsiteWebViewPlugin extends Plugin {
 
     @Nullable private ViewGroup container;
     @Nullable private WebView webView;
+
+    /** What this window answers with when the site's worker rings for a port. */
+    @Nullable private NappPort.Source portSource;
     @Nullable private NsiteFileServer fileServer;
     @Nullable private JavaScriptReplyProxy replyProxy;
     @Nullable private String host;
@@ -452,6 +455,10 @@ public class NsiteWebViewPlugin extends Plugin {
             NsiteProfiles.attach(view, siteId);
             configure(view);
             installBridge(view, origin, providerScript);
+            // Who answers when this site's worker rings for a port. Its own
+            // window is the only thing that can carry one across.
+            portSource = this::handPort;
+            NappPort.source(siteId, portSource);
             installDownloads(view, siteHost, origin);
 
             // The frame the site's pixels travel in: it fades in with them,
@@ -899,8 +906,22 @@ public class NsiteWebViewPlugin extends Plugin {
         // Requests the site had out are cancelled with it. A staged one holds
         // a socket and a place in the site's in-flight count, and there is no
         // longer anyone who could collect it.
+        //
+        // Its worker's port is deliberately left open. A port outlives the
+        // document that carried it across, and the worker may well outlive the
+        // window too — one waiting on a signature is waiting on a person, and
+        // the user answering after swiping the site away should still reach it.
+        // What closes a port is the worker going, which nothing here can see,
+        // or the site being forgotten. See NsiteShortcutsPlugin.
         String closingSite = NsiteOrigins.siteIdFor(host);
-        if (closingSite != null) NappFetch.forget(closingSite);
+        if (closingSite != null) {
+            NappFetch.forget(closingSite);
+            // The port stays; what goes is this window's offer to mint another,
+            // so that a worker ringing for one is told there is nobody rather
+            // than waiting on a WebView that has been destroyed.
+            if (portSource != null) NappPort.unsource(closingSite, portSource);
+        }
+        portSource = null;
 
         WebView view = webView;
         ViewGroup frame = container;
@@ -1010,12 +1031,8 @@ public class NsiteWebViewPlugin extends Plugin {
                 // Everything the document itself asks for. Its worker's
                 // requests do not come through here — see NsiteProfiles and
                 // NsiteServiceWorkers — but both end up in the same router,
-                // which is told which of them this is.
-                return NsiteRequests.serve(
-                    getContext(),
-                    request,
-                    NsiteRequests.Asker.window()
-                );
+                // which answers them alike.
+                return NsiteRequests.serve(getContext(), request);
             }
 
             @Override
@@ -1180,9 +1197,33 @@ public class NsiteWebViewPlugin extends Plugin {
      * page's own, which is what {@code window.nostr} has to promise: a site
      * that checks for a provider at module scope has to find one. Both APIs
      * are scoped to the site's origin, so no other document can reach them.
+     *
+     * <p>The message listener and the port script go in whether or not there
+     * is a provider, because they are not the page's business: they are how
+     * this site's <em>worker</em> is given a channel to Tenna, and a window
+     * carries the port across on its behalf. See {@code napp_port.js}.
      */
     private void installBridge(WebView view, String origin, @Nullable String providerScript) {
         Set<String> allowed = Collections.singleton(origin);
+
+        if (!WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER)
+            || !WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {
+            // Without both, a provider would either arrive too late to be
+            // found or have no way to call home, and a port would have nothing
+            // to travel on. Better none than one that hangs.
+            return;
+        }
+
+        WebViewCompat.addWebMessageListener(view, HOST_OBJECT, allowed, (v, message, sourceOrigin, isMainFrame, proxy) -> {
+            if (!isMainFrame) return;
+            replyProxy = proxy;
+            onMessage(message);
+        });
+
+        String portScript = NsiteRequests.portScript(getContext(), HOST_OBJECT);
+        if (portScript != null) {
+            WebViewCompat.addDocumentStartJavaScript(view, portScript, allowed);
+        }
 
         if (providerScript == null) return;
 
@@ -1204,20 +1245,6 @@ public class NsiteWebViewPlugin extends Plugin {
             NOTIFY_DEVICE_PLACEHOLDER,
             notificationsPossible() ? "true" : "false"
         );
-
-        if (!WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER)
-            || !WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {
-            // Without both, the provider would either arrive too late to be
-            // found or have no way to call home. Better no `window.nostr` than
-            // one that hangs.
-            return;
-        }
-
-        WebViewCompat.addWebMessageListener(view, HOST_OBJECT, allowed, (v, message, sourceOrigin, isMainFrame, proxy) -> {
-            if (!isMainFrame) return;
-            replyProxy = proxy;
-            onMessage(message);
-        });
 
         WebViewCompat.addDocumentStartJavaScript(view, providerScript, allowed);
     }
@@ -1298,6 +1325,14 @@ public class NsiteWebViewPlugin extends Plugin {
             String method = request.optString("method");
             Object params = request.opt("params");
 
+            // A window asking for a port to carry to this site's worker. Not
+            // the page's own business at all — see `napp_port.js` — and
+            // answered here because minting one needs the WebView.
+            if (method.equals("napp.port")) {
+                handPort();
+                return;
+            }
+
             // napp.fetch is answered here rather than in the web layer, and is
             // the only thing that is. Everything else on this channel is a
             // question about the user's keys, which lives in React because
@@ -1324,6 +1359,32 @@ public class NsiteWebViewPlugin extends Plugin {
         } catch (JSONException ignored) {
             // A malformed message is the site's problem; it gets no reply.
         }
+    }
+
+    /**
+     * Mint a port for this site's service worker and post it to the window.
+     *
+     * <p>The window has no use for it; it is the only thing that can pass one
+     * to a worker, and does. Nothing is given away by a site asking for this
+     * as often as it likes — the port is for that site's worker alone, and the
+     * host answers nothing on one until the worker has shown the token only
+     * the worker has. See {@link NappPort}.
+     */
+    private void handPort() {
+        getActivity().runOnUiThread(() -> {
+            WebView view = webView;
+            String siteId = NsiteOrigins.siteIdFor(host);
+            if (view == null || siteId == null) return;
+
+            JSONObject message = new JSONObject();
+            try {
+                message.put("type", "napp.port");
+            } catch (JSONException e) {
+                return;
+            }
+
+            NappPort.hand(getContext(), view, siteId, NsiteOrigins.originFor(siteId), message);
+        });
     }
 
     /** Answer one {@code napp.fetch.*} call, without leaving this thread. */

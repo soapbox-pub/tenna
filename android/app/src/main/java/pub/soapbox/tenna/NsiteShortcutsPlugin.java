@@ -589,6 +589,14 @@ public class NsiteShortcutsPlugin extends Plugin {
             Collections.singletonList(NsiteSites.key(siteId))
         );
         NappNotifications.cancelAll(context, siteId);
+        // Its worker's channel to Tenna, and anything asked over one. Here
+        // rather than when the site's window closes: a port outlives the
+        // document that carried it, deliberately — a worker asked to sign
+        // something is waiting on a person, and the user answering after
+        // swiping the site away should still reach it. Nothing is left of the
+        // site now, so there is nothing left to answer.
+        NappPort.forget(siteId);
+        NsiteWorkerSigner.forget(siteId);
         // An answer about a site nothing is left of. Kept any longer it would
         // silence the site were it ever put back, months later, with nothing
         // on screen to say why.

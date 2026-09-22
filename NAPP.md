@@ -629,9 +629,9 @@ resolves.
   there is no upload progress. What crosses to the host *is* streamed, which is
   where the 16 MB stops being a memory cost, but a site cannot see that.
 - **A large body cannot survive a 307 or a 308.** Those ask for the same body a
-  second time, and above the size at which a worker's body is staged there is
-  no second time — the request fails rather than being replayed. A 301, 302 or
-  303 is fine: the standard turns those into a bodiless GET anyway.
+  second time, and a body handed over in chunks and written to the socket as it
+  arrives has no second time — the request fails rather than being replayed. A
+  301, 302 or 303 is fine: the standard turns those into a bodiless GET anyway.
 
 ### In the service worker
 
@@ -648,31 +648,34 @@ self.addEventListener('push', async (event) => {
 });
 ```
 
-**It has the same 16 MB ceiling a window has**, and gets there by a different
-road that is worth knowing about only if something goes wrong.
+**It has the same 16 MB ceiling a window has**, and now reaches it much the
+same way: one message describing the request, the body after it in chunks, and
+the response coming back the same way — headers first, then bytes, so the site
+reads them as they arrive rather than when they are all in.
 
-A window stages its request over the message channel it already has, and its
-body crosses as raw bytes. A worker has no such channel — the case this is
-worth having for is the one with no window open at all — so everything it says
-has to go through a URL. A URL is not a body, but a body does not have to be
-one URL: under half a megabyte the whole request rides in the URL of a single
-fetch, and above that the body is handed over a chunk at a time and written to
-the socket as it arrives. Neither side ever holds all of it.
+That channel is a `MessagePort` the host hands the worker, and it is worth
+knowing about for one reason only: **it arrives with the event.** A worker is
+handed a port by whatever document started it — the page Tenna opens to
+deliver a push, or the site's own window — so by the time a `push` handler
+runs there is already somewhere to ask. A worker that starts with no port asks
+for one and waits, which costs a few milliseconds the first time and is
+invisible after that.
 
-For a site this is invisible. `self.napp.fetch(url, { method: 'POST', body })`
-is the same call with the same signature whatever the body's size, and a
-`Blob` is the best thing to hand it — Tenna slices what it needs without the
-rest being in memory. Two consequences do leak out:
+For a site the shape of it does not show. `self.napp.fetch(url, { method:
+'POST', body })` is the same call whatever the body's size, and a `Blob` is
+still the best thing to hand it — Tenna slices what it needs without the rest
+being in memory, and neither side ever holds more than about a megabyte of a
+body however large it is. Measured on a Pixel 10a: 1.5 MB up and 9 MB back, in
+one request, in under two seconds, with no window open at all.
 
-- **A big upload is many round trips inside the phone**, though not on the
-  network — the request itself is one HTTP request, made once.
-- **A 307 or 308 redirect will fail** on a staged body. See
+One consequence does leak out:
+
+- **A 307 or 308 redirect will fail** on a large body. See
   [What it cannot make true](#what-it-cannot-make-true).
 
 There is still a clock. A worker woken by a push has sixty seconds on Android
 and twenty on iOS, and sixteen megabytes does not go over a mobile connection
-in either — see [The delivery deadline](#the-delivery-deadline). What the size
-limit stopped being is the thing in the way.
+in either — see [The delivery deadline](#the-delivery-deadline).
 
 Everything else is identical, including feature detection: `self.napp` is
 absent on the web and on iOS, and an installed worker does not get it until
@@ -741,12 +744,18 @@ a remote NIP-46 app raises, opening the same sheet, because it is the same
 question about the same key. There is no window to draw over, so that is the
 only place it can go.
 
-The call waits on the answer for **ninety seconds** and then rejects with
-`Timed out waiting for approval`. Tapping the notification and pressing Allow
-within that window answers the call that raised it; taking longer does not, and
-the site's first notification for that permission is the one that goes out
-without it. The decision is still written down, so every call after it is
-answered with nothing on screen.
+The call waits on the answer for **two and a half minutes** and then rejects
+with `Timed out waiting for approval`. It really waits: the promise settles when
+the user presses something, and asks nothing in between. Tapping the
+notification and pressing Allow within that window answers the call that raised
+it; taking longer does not, and the site's first notification for that
+permission is the one that goes out without it. The decision is still written
+down, so every call after it is answered with nothing on screen.
+
+Closing the site's window does not cancel it. The channel a worker asks over
+outlives the document that handed it over, so a question raised from a worker
+is still answerable after the user has swiped the site away — which is the
+ordinary way of answering one, since the notification is usually read later.
 
 Two things reject without ever asking:
 
@@ -953,6 +962,25 @@ fetches do not belong to any one WebView:
   for, including the fetch of the worker's own script. That is where the shim
   is appended, and it works with no window open at all — which is what lets a
   notification arrive for a site the user closed.
+
+**What a worker asks Tenna for does not go through either.** It goes over a
+`MessagePort`, handed to the worker by whichever document started it and kept
+for as long as that worker instance lives. Interception was the only road
+before, and it is a poor one: `shouldInterceptRequest` is never given a request
+body — the body is not in the data structure Chromium builds, so there is
+nothing to reach for — which meant everything a worker wanted to *say* had to
+be written out as base64 in a query string, inside Chromium's two-megabyte URL
+ceiling, and a large one cut into as many URLs as it took. It is also one-way,
+so a signature waiting on a person could not be waited for, and it runs on a
+thread every worker in the process shares, so nothing on it could block. A port
+carries bytes, speaks in both directions, and lands on a thread of Tenna's own.
+See `NappPort`.
+
+A port has to arrive by way of a document, because nothing native can reach
+into a worker and only a frame can transfer one. So the wake page sends it with
+the push event, a site's own window carries one over at document start, and a
+worker that finds itself without one asks for it over the single reserved path
+that is left — a bodiless GET, which is the one thing interception is good at.
 
 **If you are working on this app:** that client is a single slot per profile,
 and Capacitor claims the default profile's from `Bridge` unless

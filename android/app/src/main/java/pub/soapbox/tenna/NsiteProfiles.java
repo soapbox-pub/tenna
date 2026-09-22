@@ -195,12 +195,9 @@ final class NsiteProfiles {
      * NsiteServiceWorkers} takes reaches only the default profile, and a site
      * moved off it would have no worker at all. Same router either way.
      *
-     * <p>One difference, and it is the reason a profile is worth having here
-     * beyond the storage: this client belongs to one site. Nothing but that
-     * site's workers can reach it, so it can name the site it is answering for
-     * — which a request cannot, since a host in a URL is only a claim. The
-     * default profile's client has no such answer to give. See {@link
-     * NsiteRequests.Asker} and {@link NappTokens}.
+     * <p>Without one, a site moved to its own profile would have no worker at
+     * all: its {@code sw.js} would be looked up in DNS, and nothing resolves
+     * {@code *.nsite.localhost}.
      */
     private static void serve(@NonNull Context app, @NonNull String siteId, @NonNull Profile profile) {
         if (!served.add(profile.getName())) return;
@@ -211,7 +208,7 @@ final class NsiteProfiles {
                 @Override
                 @Nullable
                 public WebResourceResponse shouldInterceptRequest(@NonNull WebResourceRequest request) {
-                    return NsiteRequests.serve(app, request, NsiteRequests.Asker.worker(siteId));
+                    return NsiteRequests.serve(app, request);
                 }
             });
         } catch (RuntimeException e) {

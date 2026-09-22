@@ -68,11 +68,7 @@ final class NsiteServiceWorkers {
                     @Override
                     @Nullable
                     public WebResourceResponse shouldInterceptRequest(@NonNull WebResourceRequest request) {
-                        // A worker, and that is the whole of what this can
-                        // say: every site left on the default profile shares
-                        // this one client, so which site's worker it is has to
-                        // come from the token. See NsiteRequests.Asker.
-                        return NsiteRequests.serve(app, request, NsiteRequests.Asker.worker());
+                        return NsiteRequests.serve(app, request);
                     }
                 }
             );

@@ -87,6 +87,32 @@ public class NappFetchPolicyTest {
     }
 
     @Test
+    public void refusesAnAddressWrittenOutRatherThanNamed() {
+        // The hole the resolver cannot close: with nothing to resolve, OkHttp
+        // builds the socket address itself and GuardedDns is never asked. So
+        // a site refused `https://router.local/` could reach the same box by
+        // number until the host check learned to read one.
+        assertNotNull(NappFetchPolicy.refuseUrl("https://127.0.0.1/"));
+        assertNotNull(NappFetchPolicy.refuseUrl("https://192.168.1.1/admin"));
+        assertNotNull(NappFetchPolicy.refuseUrl("https://10.0.0.1/"));
+        assertNotNull(NappFetchPolicy.refuseUrl("https://169.254.169.254/latest/meta-data/"));
+        assertNotNull(NappFetchPolicy.refuseUrl("https://[::1]/"));
+        assertNotNull(NappFetchPolicy.refuseUrl("https://[fd00::1]/"));
+
+        // The older spellings of the same address, which InetAddress reads
+        // and a site could hide one in.
+        assertNotNull(NappFetchPolicy.refuseHost("2130706433"));
+        assertNotNull(NappFetchPolicy.refuseHost("127.1"));
+    }
+
+    @Test
+    public void allowsAPublicAddress() {
+        // Numbers are not the problem; where they point is.
+        assertNull(NappFetchPolicy.refuseUrl("https://1.1.1.1/"));
+        assertNull(NappFetchPolicy.refuseHost("93.184.216.34"));
+    }
+
+    @Test
     public void allowsNamesThatMerelyLookLocal() {
         // A public name is a public name. `local.example.com` resolves in DNS
         // like anything else, and refusing it on the strength of a substring

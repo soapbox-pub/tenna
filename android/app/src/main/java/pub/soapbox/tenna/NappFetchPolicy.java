@@ -66,75 +66,40 @@ final class NappFetchPolicy {
     /**
      * The largest body a site's <b>worker</b> may send.
      *
-     * <p>The same number, reached by a longer road. A worker has no message
-     * channel to stage anything over, so a body has to arrive as a URL — but
-     * it does not have to arrive as <em>one</em> URL. Above
-     * {@link #MAX_WORKER_INLINE_BODY_BYTES} it is staged a chunk at a time and
-     * written straight to the socket as it comes, so what bounds it is this
-     * policy rather than anything about the transport. See {@link NappFetch}.
+     * <p>The same number, and now for the same reason. A worker's body crosses
+     * its {@link NappPort} in chunks, each written to the socket as it arrives,
+     * so nothing about the transport bounds it — this is policy, and the memory
+     * cost of raising it would be nothing. What stops it going further is the
+     * clock: a worker woken by a push has sixty seconds, and sixteen megabytes
+     * does not go over a mobile connection inside that.
      */
     static final int MAX_WORKER_BODY_BYTES = 16 * 1024 * 1024;
 
-    /**
-     * The largest body a worker may send in the request URL itself.
-     *
-     * <p>Worth having as a fast path: below this a request is one interception
-     * and no staging at all, which for the JSON API call that is most of what
-     * {@code napp.fetch} is for is the whole story.
-     *
-     * <p>The ceiling above it is Chromium's. Measured rather than assumed: a
-     * URL of 2,000,033 characters reaches {@code shouldInterceptRequest}
-     * intact, and one of 2 MiB fails the {@code fetch} outright, which is
-     * {@code url::kMaxURLChars} doing exactly what it says. A body expands by
-     * about nine tenths on the way into a URL — base64 into JSON, then the
-     * JSON base64 again — so half a megabyte arrives as about 932,300
-     * characters, comfortably inside it.
-     */
-    static final int MAX_WORKER_INLINE_BODY_BYTES = 512 * 1024;
-
-    /**
-     * The largest self-describing request, as the base64 arrives in the URL.
-     *
-     * <p>Not a policy so much as a refusal to allocate a decode buffer for
-     * something that cannot be honest: this is Chromium's own ceiling, so
-     * anything longer did not arrive. The real limit on an inline request is
-     * the shim's, which is checked before the URL is built.
-     */
-    static final int MAX_WORKER_REQUEST_BYTES = 2 * 1024 * 1024;
-
-    /** The largest single staged chunk, before base64. */
+    /** The largest single chunk of a body, in either direction. */
     static final int MAX_CHUNK_BYTES = 512 * 1024;
 
     /**
-     * How many chunks are held between the worker and the socket.
+     * How many chunks either end may have unacknowledged.
      *
-     * <p>This is the whole memory cost of a staged body, whatever its size:
-     * two chunks in the queue and one being written. It is also what the
-     * collecting fetch may still be waiting on when it arrives, so it is kept
-     * small enough that flushing it fits inside {@link #HEADERS_TIMEOUT_MS} on
-     * a connection worth uploading over at all.
+     * <p>A message port has no backpressure of its own — {@code postMessage}
+     * always succeeds and the far end's queue grows — so this is it, in both
+     * directions. It is also the whole memory cost of a body of any size: two
+     * chunks outstanding and one being dealt with, about a megabyte and a half,
+     * whether the body is one kilobyte or sixteen megabytes.
      */
     static final int MAX_STAGED_CHUNKS = 2;
 
     /**
-     * How long a staging request waits for room before telling the worker to
-     * ask again.
+     * How long either end waits for the next chunk, or for an acknowledgement,
+     * before giving up.
      *
-     * <p>Short, and that is the point. {@link NsiteWorkerSigner} explains at
-     * length why blocking in {@code shouldInterceptRequest} is a hazard — the
-     * thread is Chromium's and every service worker in the process shares it —
-     * so this parks for a quarter of a second at most and then answers
-     * {@code 202}, leaving the worker to retry the same chunk. Backpressure
-     * without a held thread.
-     */
-    static final long CHUNK_PARK_MS = 250;
-
-    /**
-     * How long the body stream waits for the next chunk before giving up.
-     *
-     * <p>The backstop for a worker that was killed halfway through an upload.
-     * Without it {@code writeTo} would block on a queue nobody is ever going
-     * to add to, holding a socket open for as long as the process lives.
+     * <p>The backstop for a worker that went away halfway through. Chromium
+     * stops an idle service worker without telling anybody, a
+     * {@code postMessage} to one that has gone throws nothing, and a port has
+     * no close callback — so a silence is the only symptom there is, and this
+     * is how long one is given the benefit of the doubt. Without it a
+     * {@code writeTo} would block on a queue nobody will ever add to, holding
+     * a socket for as long as the process lives.
      */
     static final long CHUNK_STALL_MS = 30_000;
 
@@ -227,7 +192,52 @@ final class NappFetchPolicy {
             return "That host is not reachable";
         }
 
+        // An address written out rather than named, which is the one shape
+        // {@link #refuseAddress} would otherwise never see: there is nothing
+        // to resolve, so OkHttp builds the socket address itself and
+        // {@code GuardedDns} is never asked. A site asking for
+        // {@code https://192.168.1.1/} by name is refused by the resolver and
+        // by number was not refused at all.
+        InetAddress literal = addressIn(lower);
+        if (literal != null && refuseAddress(literal) != null) {
+            return "That host is not reachable";
+        }
+
         return null;
+    }
+
+    /**
+     * The address a host is, if it is written as one rather than named.
+     *
+     * <p>Parsed without asking anybody: a hostname is returned as null rather
+     * than resolved, because resolving here would both be a lookup the caller
+     * did not ask for and defeat the point of doing the address check at the
+     * resolver. {@code InetAddress.getByName} does no lookup for a literal,
+     * and the shape test in front of it is what keeps a name from reaching it.
+     */
+    @Nullable
+    private static InetAddress addressIn(@NonNull String host) {
+        boolean numeric = host.indexOf(':') >= 0;
+        if (!numeric) {
+            // IPv4, or one of the older spellings of it — a bare number, or
+            // fewer than four parts — all of which InetAddress understands and
+            // a site could hide an address in.
+            numeric = !host.isEmpty();
+            for (int i = 0; i < host.length(); i++) {
+                char c = host.charAt(i);
+                if (c != '.' && (c < '0' || c > '9')) {
+                    numeric = false;
+                    break;
+                }
+            }
+        }
+        if (!numeric) return null;
+
+        try {
+            return InetAddress.getByName(host);
+        } catch (java.net.UnknownHostException e) {
+            return null;
+        }
     }
 
     /**

@@ -13,8 +13,16 @@
  * can, by posting to it. This page relays in both directions: an event from
  * the host goes to the worker as the message the shim turns into a real one —
  * a `push`, or a `notificationclick` the user just caused — and the shim's
- * reply, once every waitUntil has settled, comes back the same way. The host
- * object `nappHost` exists only in the WebView the push service made;
+ * reply, once every waitUntil has settled, comes back the same way.
+ *
+ * The message from the host carries a MessagePort, and carrying it is the
+ * other half of what this page is for: a port arrives at a frame and only a
+ * frame can transfer it into a worker. It goes across with the event, so a
+ * site's handler has somewhere to ask from its first line — and the page can
+ * be torn down immediately afterwards, because the port outlives the document
+ * that handed it over.
+ *
+ * The host object `nappHost` exists only in the WebView the push service made;
  * anywhere else this page does nothing.
  */
 (function () {
@@ -43,18 +51,21 @@
     });
   }
 
-  host.onmessage = function (e) {
+  window.addEventListener('message', function (e) {
     var m;
     try { m = JSON.parse(e.data); } catch (err) { return; }
     if (!m || m.type !== 'deliver') return;
+
+    var ports = e.ports && e.ports.length ? [e.ports[0]] : [];
+
     worker().then(function (w) {
       if (!w) { send({ type: 'done', id: m.id, delivered: false }); return; }
       // `__napp` names the event. A worker still running an older shim knows
       // only 'push' and ignores the rest, which costs it a tap and nothing
       // more; the host's own timeout is what moves that one along.
-      w.postMessage({ __napp: m.kind, id: m.id, data: m.data });
+      w.postMessage({ __napp: m.kind, id: m.id, data: m.data }, ports);
     });
-  };
+  });
 
   send({ type: 'ready' });
 })();

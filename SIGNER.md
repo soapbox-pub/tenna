@@ -144,8 +144,16 @@ kept natively rather than in the browser storage that a worker cannot see.
 So a site allowed to decrypt in its window is allowed to decrypt in its
 worker, one switch in Settings turns off both, and a call nobody has decided
 raises the same notification a remote app's does. The one difference is that a
-worker will not wait forever: after ninety seconds the call is refused, the
-notification comes down, and the site is told why.
+worker will not wait forever: after two and a half minutes the call is refused,
+the notification comes down, and the site is told why.
+
+Until then it simply waits, which is newer than it sounds. A worker's calls used
+to arrive as requests Tenna intercepted, on a thread Chromium shares with every
+worker in the app — so waiting there for somebody to walk to their phone would
+have stalled every other site, and the call was instead parked and asked about
+once a second until it had an answer. It now arrives over a channel of its own,
+answered on a thread of Tenna's, and the answer is sent when there is one. See
+`NappPort`.
 
 ## Being asked
 

@@ -1,5 +1,41 @@
 # Changelog
 
+## [0.10.2] - 2026-09-22
+
+Allowing a site something and asking Tenna to remember it now sticks. The
+answer was being written somewhere the next launch could not read, so the site
+asked again every time it was opened and Settings → Apps listed nothing. The
+part of a site that runs while the site is closed also has a proper channel to
+Tenna now: it is quicker, and a question about signing waits for the answer
+rather than giving up while the phone is still in somebody's pocket.
+
+### Changed
+
+- How the part of a site that runs while the site is closed asks Tenna for
+  things. It used to make a request of itself for every question, with
+  everything it wanted to say written out inside the address, which is a poor
+  way to carry anything and no way at all to wait for a reply. It has a channel
+  of its own now — quicker for a short question, and streaming both ways for a
+  large one, so a site uploading a picture in the background never has the
+  whole of it in hand. A site calls exactly what it called before.
+- A question about signing, raised by a site while it is closed, waits two and
+  a half minutes for an answer rather than ninety seconds — and really waits,
+  settling the moment the user presses something rather than checking once a
+  second until they do. Swiping the site away no longer cancels it, which
+  matters because the notification asking is usually read later.
+
+### Fixed
+
+- Allowing a site something and ticking "Remember for this site" is remembered
+  across a relaunch. The answer was written where nothing else looks — not the
+  settings screen, not the site itself the next time it opened — so the
+  question came back on every launch and Settings → Apps → Authorized apps said
+  "Nothing yet". An answer that cannot be written down now says so instead of
+  looking like one nobody gave.
+- A site refused a machine on the same network — a router, a printer, whatever
+  else is on it — could reach the same machine by writing its address out in
+  numbers rather than naming it.
+
 ## [0.10.1] - 2026-09-21
 
 Nothing changes on the wall. The part of a site that runs while the site is

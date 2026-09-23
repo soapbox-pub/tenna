@@ -73,6 +73,28 @@ public class NsiteWebViewPlugin: CAPPlugin, CAPBridgedPlugin {
         }
 
         let frame = rect(from: call.getObject("frame"))
+        let name = call.getString("name") ?? siteId
+
+        // What the site is made of, written where the notification extension
+        // can read it. A push arrives with no app running and no relay dialled,
+        // so the manifest has to already be on disk for the site's worker to be
+        // served at all. See `NsiteStore`.
+        NsiteStore.update(siteId) { record in
+            if !files.isEmpty { record.files = files }
+            if !servers.isEmpty { record.servers = servers }
+            record.label = name
+        }
+
+        // The device's half of `Notification.permission`, which the web layer
+        // cannot know and the site reads synchronously. See the placeholder.
+        let couldNotify = NappNotifications.enabled && !(NsiteStore.load(siteId)?.muted ?? false)
+        let script = call.getString("providerScript").map { source in
+            source
+                // No `napp.fetch` here, so nothing ever hands this WebView bytes.
+                .replacingOccurrences(of: "%%NAPP_BINARY%%", with: "false")
+                .replacingOccurrences(of: "%%NAPP_NOTIFY_DEVICE%%",
+                                      with: couldNotify ? "true" : "false")
+        }
 
         DispatchQueue.main.async { [weak self] in
             guard let self, let container = self.bridge?.webView?.superview else {
@@ -84,9 +106,19 @@ public class NsiteWebViewPlugin: CAPPlugin, CAPBridgedPlugin {
 
             let session = NsiteSession(
                 siteId: siteId,
+                name: name,
                 files: files,
                 servers: servers,
-                onLoad: { [weak self] in self?.notifyListeners("nsiteLoad", data: [:]) }
+                providerScript: script,
+                onLoad: { [weak self] in self?.notifyListeners("nsiteLoad", data: [:]) },
+                onRpc: { [weak self] id, method, params in
+                    self?.notifyListeners("nsiteRpc", data: [
+                        "id": id, "method": method, "params": params,
+                    ])
+                },
+                onCapability: { [weak self] id, kinds in
+                    self?.notifyListeners("nsiteCapability", data: ["id": id, "kinds": kinds])
+                }
             )
             self.site = session
 
@@ -206,14 +238,38 @@ public class NsiteWebViewPlugin: CAPPlugin, CAPBridgedPlugin {
         }
     }
 
-    // MARK: - RPC (wired in the next step)
+    // MARK: - RPC
 
+    /// Deliver a JSON-RPC response for a call previously raised as `nsiteRpc`.
+    ///
+    /// Either it went or the site has gone and there was nobody to tell.
+    /// Neither is the caller's fault and neither is recoverable, so this
+    /// resolves regardless.
     @objc func respond(_ call: CAPPluginCall) {
-        call.resolve()
+        guard let id = call.getInt("id") else {
+            call.resolve()
+            return
+        }
+        let result = call.getString("result")
+        let error = call.getString("error")
+
+        DispatchQueue.main.async { [weak self] in
+            self?.site?.respond(id: id, result: result, error: error)
+            call.resolve()
+        }
     }
 
     @objc func respondCapability(_ call: CAPPluginCall) {
-        call.resolve()
+        guard let id = call.getInt("id") else {
+            call.resolve()
+            return
+        }
+        let granted = call.getBool("granted") ?? false
+
+        DispatchQueue.main.async { [weak self] in
+            self?.site?.respondCapability(id: id, granted: granted)
+            call.resolve()
+        }
     }
 
     // MARK: -

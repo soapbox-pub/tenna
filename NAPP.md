@@ -3,15 +3,18 @@
 Four things a site cannot get from a plain browser tab: notifications while it
 is closed, a signer inside its service worker, a place in the operating
 system's share menu, and an HTTP request that CORS does not stand in front of.
-All four are the Android app only, and each is declared the way the web
-already declares them where the web has a way — a site written for Tenna is a
-site that still works anywhere else.
+Each is declared the way the web already declares them where the web has a way
+— a site written for Tenna is a site that still works anywhere else.
+
+Notifications are the app, on both platforms. The other three are Android
+only. What differs per platform is set out under
+[On iOS](#on-ios); the short version is that a site writes the same code.
 
 ## `window.napp` — notifications
 
 Tenna injects `window.napp` into an nsite when it can deliver notifications
-for it. Today that is the Android app only. On the web and on iOS the object
-is absent, so feature-detect it:
+for it: the Android app and the iOS app. On the web the object is absent, so
+feature-detect it:
 
 ```ts
 if (window.napp?.push) {
@@ -19,8 +22,10 @@ if (window.napp?.push) {
 }
 ```
 
-There is nothing new on the Nostr wire. A subscription is an ordinary `REQ`
-that Tenna keeps open on the site's behalf while the site is closed.
+There is nothing new on the Nostr wire. A subscription is an ordinary `REQ` —
+one Tenna keeps open on the site's behalf on Android, and one it hands to a
+push service on iOS, where nothing may hold a socket open in the background.
+See [On iOS](#on-ios).
 
 ### `window.napp.push`
 
@@ -48,8 +53,7 @@ interface NappSubscription {
 }
 ```
 
-`window.napp` is defined before any of the site's own scripts run, and only
-while a user is logged in to Tenna. Both methods are asynchronous and reject
+`window.napp` is defined before any of the site's own scripts run. Both methods are asynchronous and reject
 with an `Error` whose message says why.
 
 #### Consent
@@ -85,6 +89,8 @@ duplicates removed.
 
 #### What Tenna does with them
 
+On Android, where the app may hold sockets open:
+
 - Every relay named by any site gets one connection, held open by a
   foreground service with a standing "Background listener" notification.
 - Each subscription becomes one `REQ` on each of its relays. Relays do the
@@ -95,6 +101,10 @@ duplicates removed.
 - Events are deduplicated by id per site.
 - The service reconnects with backoff and again as soon as the network
   returns, and restarts after a reboot while any site has subscriptions.
+
+On iOS none of that is possible and the arrangement is
+[a different one](#on-ios): the filters go to a push service, which watches its
+own relays and wakes the phone through APNs.
 
 Tenna does not verify event signatures before delivery. Verify in the worker
 if it matters to what you show.
@@ -439,8 +449,9 @@ Android and twenty on iOS — see [The delivery deadline](#the-delivery-deadline
 - **NIP-42.** The service holds no keys, so it cannot answer an `AUTH`
   challenge. A relay that requires authentication to serve a filter, as many
   do for gift wraps addressed to a user, will not deliver it.
-- **Web push on the web.** The iframe path used on the web and on iOS does
-  not define `window.napp`.
+- **Web push on the web.** The iframe path used on the web does not define
+  `window.napp`.
+- **Several notifications from one push, on iOS.** See [On iOS](#on-ios).
 
 ### Notifications from the page
 
@@ -536,8 +547,9 @@ const res = await http('https://api.example.com/thing', {
 const data = await res.json();
 ```
 
-On the web and on iOS `window.napp` is absent, `http` is the ordinary `fetch`,
-and the call is subject to CORS exactly as it was before. Nothing is branched
+On the web `window.napp` is absent and on iOS it carries no `fetch`, so `http`
+is the ordinary `fetch` and the call is subject to CORS exactly as it was
+before. Nothing is branched
 and nothing breaks; a site simply gets more of what it asked for on Android.
 
 **Not a patched `window.fetch`, and not an option on one.** A site's own code
@@ -678,16 +690,18 @@ and twenty on iOS, and sixteen megabytes does not go over a mobile connection
 in either — see [The delivery deadline](#the-delivery-deadline).
 
 Everything else is identical, including feature detection: `self.napp` is
-absent on the web and on iOS, and an installed worker does not get it until
-Chromium re-fetches its script — the same caveat as
+absent on the web and on iOS, and on Android an installed worker does not get
+it until Chromium re-fetches its script — the same caveat as
 [`self.nostr`](#an-installed-worker-does-not-have-it-yet), for the same
 reason, since it arrives in the same shim.
 
 ### Elsewhere
 
 Not on the web, where there is no host around the page to make the request,
-and not on iOS. `window.napp.fetch` and `self.napp.fetch` are both simply
-absent, which is what the `?? fetch` is for.
+and not on iOS, where `WKURLSchemeHandler` cannot intercept `https` and is
+never handed a request body anyway. `window.napp.fetch` and `self.napp.fetch`
+are both simply absent there, which is what the `?? fetch` is for. See
+[On iOS](#on-ios).
 
 ## `self.nostr` — the signer, inside the worker
 
@@ -936,6 +950,98 @@ same bargain a PWA makes.
 
 Not on the web and not on iOS. Neither offers a third-party app any way to
 put an arbitrary site in the OS share menu, so the member is read and ignored.
+
+## On iOS
+
+Everything under [`window.napp` — notifications](#windownapp--notifications)
+works here, and a site writes the same code for it. What is different is
+underneath, and two of the differences reach the site.
+
+**A site's service worker is not a service worker.** WebKit exposes
+`navigator.serviceWorker` only to documents whose scheme is literally http or
+https, and a `WKWebView` reserves both and will not let an app answer for
+either — so an nsite, served from a scheme of Tenna's, has none. Tenna stands
+one in:
+
+```js
+const registration = await navigator.serviceWorker.register('/sw.js');
+```
+
+That call is the point. It is the only place the path of the site's worker is
+ever said, and Tenna writes it down: when a push arrives, **that file is
+fetched out of the site's own manifest and run**, with `registration`,
+`clients` and the push events shimmed around it, exactly as the same file runs
+on Android. A site that never calls `register()` gets nothing, which is what
+happens in a browser too.
+
+What the stand-in registration is honest about: `showNotification` and
+`getNotifications` are real and reach the same tray as everything else, and
+`active` reports a worker, because one will run. Everything to do with
+*talking* to it is not — no `postMessage`, no `controller`, no `message`
+event — because the worker does not exist until a push arrives and the page is
+long gone by then. `update()` and `unregister()` resolve without doing
+anything.
+
+**Tenna does not hold the relays.** iOS will not let an app keep a socket open
+in the background, so the subscriptions a site sets are handed to a **push
+service**, which watches relays of its own and wakes the phone through APNs
+when something matches. Three things follow from that:
+
+- **`search` is ignored.** The service has no index for it. A filter carrying
+  one registers as far as the site can tell and will never fire.
+- **`relays` is recorded and not honoured.** The service matches against its
+  own relays. Name yours anyway — it is what a worker fetches a large event
+  with, and what a later service could use.
+- **The service sees the filters.** It is told what this device wants to hear
+  about; it is not told whose device it is. Requests are signed with a key
+  generated once per install and never with the reader's own.
+
+### What is smaller here
+
+| | Android | iOS |
+| --- | --- | --- |
+| deadline for `waitUntil` | 60 seconds | 20 seconds |
+| payload | the whole event, always | about 4 KB; a long event arrives as `event_id` and `relays` |
+| notifications per push | as many as the worker asks for | the first |
+| `notificationclick` | raised in the worker | not raised; a tap routes by `data.url` |
+| `icon`, `badge`, `image`, `actions` | drawn | accepted and ignored |
+| the row | a conversation, led by the site's icon | a thread, led by Tenna's |
+| `self.nostr`, `self.napp.fetch` | in the worker | absent |
+| `napp.fetch`, `share_target` | yes | no |
+
+Two of those are worth writing for rather than around:
+
+**Write for twenty seconds.** A handler that needs longer works on Android and
+loses its tail here, which for a notification is the difference between the
+real message and "New message". See
+[The delivery deadline](#the-delivery-deadline).
+
+**Handle a missing `event`.** A push is four kilobytes and a long note does not
+fit, so `payload.event` may be absent and `payload.event_id` and
+`payload.relays` are what to fetch it with. See [The payload](#the-payload).
+
+And one to know about rather than handle: a worker that calls
+`showNotification` more than once for a single push gets the first shown and
+the rest dropped. An extension is handed one piece of content to replace, and
+that is all there is.
+
+### Taps
+
+A tap reaches the app rather than the worker — running one takes a notification
+service extension, and iOS starts one of those only to mutate an arriving
+push, so there is nothing alive to raise `notificationclick` in. So **`data.url`
+is the whole of the routing on iOS**:
+
+```js
+await registration.showNotification('Alice', {
+  body: 'see you there',
+  data: { url: `/dm/${npub}` },
+});
+```
+
+which is the same line Android reads before it opens the window, and the same
+one every push service worker on Nostr already writes. A notification without
+it opens the site's front page.
 
 ## How a site is served on Android
 

@@ -26,5 +26,6 @@ class TennaBridgeViewController: CAPBridgeViewController {
     override open func capacitorDidLoad() {
         super.capacitorDidLoad()
         bridge?.registerPluginInstance(NsiteWebViewPlugin())
+        bridge?.registerPluginInstance(NappPushPlugin())
     }
 }

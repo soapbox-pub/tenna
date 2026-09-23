@@ -29,13 +29,27 @@
 		AA00000000000000000000B4 /* NsiteWorkerHost.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA00000000000000000000A4 /* NsiteWorkerHost.swift */; };
 		AA00000000000000000000B5 /* NsiteWorkerShim.js in Resources */ = {isa = PBXBuildFile; fileRef = AA00000000000000000000A5 /* NsiteWorkerShim.js */; };
 		AA00000000000000000000B6 /* NsiteWorkerHostPage.html in Resources */ = {isa = PBXBuildFile; fileRef = AA00000000000000000000A6 /* NsiteWorkerHostPage.html */; };
-		AA00000000000000000000B7 /* TestWorker.js in Resources */ = {isa = PBXBuildFile; fileRef = AA00000000000000000000A7 /* TestWorker.js */; };
 		AA00000000000000000000B9 /* NsiteOrigins.swift in Sources */ = {isa = PBXBuildFile; fileRef = D90D7749E224E01D0EBDC1FB /* NsiteOrigins.swift */; };
 		AA00000000000000000000F1 /* NsiteWorkerHost.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA00000000000000000000A4 /* NsiteWorkerHost.swift */; };
 		AA00000000000000000000F2 /* NsiteWorkerShim.js in Resources */ = {isa = PBXBuildFile; fileRef = AA00000000000000000000A5 /* NsiteWorkerShim.js */; };
 		AA00000000000000000000F3 /* NsiteWorkerHostPage.html in Resources */ = {isa = PBXBuildFile; fileRef = AA00000000000000000000A6 /* NsiteWorkerHostPage.html */; };
-		AA00000000000000000000F4 /* TestWorker.js in Resources */ = {isa = PBXBuildFile; fileRef = AA00000000000000000000A7 /* TestWorker.js */; };
 		AA00000000000000000000C9 /* NsiteNotify.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = AA00000000000000000000A2 /* NsiteNotify.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		BC0000000000000000000001 /* NsiteGroup.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB0000000000000000000001 /* NsiteGroup.swift */; };
+		BC0000000000000000000002 /* NsiteStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB0000000000000000000002 /* NsiteStore.swift */; };
+		BC0000000000000000000003 /* NsiteFilter.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB0000000000000000000003 /* NsiteFilter.swift */; };
+		BC0000000000000000000005 /* NappSubscriptions.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB0000000000000000000005 /* NappSubscriptions.swift */; };
+		BC0000000000000000000006 /* NappNotifications.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB0000000000000000000006 /* NappNotifications.swift */; };
+		BC0000000000000000000007 /* NappPushPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB0000000000000000000007 /* NappPushPlugin.swift */; };
+		BD0000000000000000000001 /* NsiteGroup.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB0000000000000000000001 /* NsiteGroup.swift */; };
+		BD0000000000000000000002 /* NsiteStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB0000000000000000000002 /* NsiteStore.swift */; };
+		BD0000000000000000000003 /* NsiteFilter.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB0000000000000000000003 /* NsiteFilter.swift */; };
+		BD0000000000000000000004 /* NsiteRelayFetch.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB0000000000000000000004 /* NsiteRelayFetch.swift */; };
+		BD0000000000000000000005 /* NappSubscriptions.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB0000000000000000000005 /* NappSubscriptions.swift */; };
+		BD0000000000000000000006 /* NappNotifications.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB0000000000000000000006 /* NappNotifications.swift */; };
+		BD0000000000000000000032 /* NsiteBlobs.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6D415199B4BB638B05E52046 /* NsiteBlobs.swift */; };
+		BD0000000000000000000033 /* NsiteMimeTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 84218BC38CAD61FB7C8159AB /* NsiteMimeTypes.swift */; };
+		BD0000000000000000000034 /* NsiteSiteChrome.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6711A877D923FE3FD94BFDA /* NsiteSiteChrome.swift */; };
+		BD0000000000000000000035 /* NsiteFileServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5056FC16164516614F89A2D4 /* NsiteFileServer.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -65,8 +79,15 @@
 		AA00000000000000000000A4 /* NsiteWorkerHost.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NsiteWorkerHost.swift; sourceTree = "<group>"; };
 		AA00000000000000000000A5 /* NsiteWorkerShim.js */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.javascript; path = NsiteWorkerShim.js; sourceTree = "<group>"; };
 		AA00000000000000000000A6 /* NsiteWorkerHostPage.html */ = {isa = PBXFileReference; lastKnownFileType = text.html; path = NsiteWorkerHostPage.html; sourceTree = "<group>"; };
-		AA00000000000000000000A7 /* TestWorker.js */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.javascript; path = TestWorker.js; sourceTree = "<group>"; };
 		AA00000000000000000000A8 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		BB0000000000000000000001 /* NsiteGroup.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NsiteGroup.swift; sourceTree = "<group>"; };
+		BB0000000000000000000002 /* NsiteStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NsiteStore.swift; sourceTree = "<group>"; };
+		BB0000000000000000000003 /* NsiteFilter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NsiteFilter.swift; sourceTree = "<group>"; };
+		BB0000000000000000000004 /* NsiteRelayFetch.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NsiteRelayFetch.swift; sourceTree = "<group>"; };
+		BB0000000000000000000005 /* NappSubscriptions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NappSubscriptions.swift; sourceTree = "<group>"; };
+		BB0000000000000000000006 /* NappNotifications.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NappNotifications.swift; sourceTree = "<group>"; };
+		BB0000000000000000000007 /* NappPushPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NappPushPlugin.swift; sourceTree = "<group>"; };
+		BB000000000000000000005A /* NsiteNotify.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = NsiteNotify.entitlements; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -128,7 +149,7 @@
 				AA00000000000000000000A4 /* NsiteWorkerHost.swift */,
 				AA00000000000000000000A6 /* NsiteWorkerHostPage.html */,
 				AA00000000000000000000A5 /* NsiteWorkerShim.js */,
-				AA00000000000000000000A7 /* TestWorker.js */,
+				BB000000000000000000005A /* NsiteNotify.entitlements */,
 				AA00000000000000000000A8 /* Info.plist */,
 			);
 			path = NsiteNotify;
@@ -148,6 +169,13 @@
 				F6711A877D923FE3FD94BFDA /* NsiteSiteChrome.swift */,
 				84218BC38CAD61FB7C8159AB /* NsiteMimeTypes.swift */,
 				D90D7749E224E01D0EBDC1FB /* NsiteOrigins.swift */,
+				BB0000000000000000000001 /* NsiteGroup.swift */,
+				BB0000000000000000000002 /* NsiteStore.swift */,
+				BB0000000000000000000003 /* NsiteFilter.swift */,
+				BB0000000000000000000004 /* NsiteRelayFetch.swift */,
+				BB0000000000000000000005 /* NappSubscriptions.swift */,
+				BB0000000000000000000006 /* NappNotifications.swift */,
+				BB0000000000000000000007 /* NappPushPlugin.swift */,
 				AA00000000000000000000E1 /* App.entitlements */,
 				6D415199B4BB638B05E52046 /* NsiteBlobs.swift */,
 				504EC30B1FED79650016851F /* Main.storyboard */,
@@ -275,7 +303,6 @@
 				2FAD9763203C412B000D30F8 /* config.xml in Resources */,
 				AA00000000000000000000F3 /* NsiteWorkerHostPage.html in Resources */,
 				AA00000000000000000000F2 /* NsiteWorkerShim.js in Resources */,
-				AA00000000000000000000F4 /* TestWorker.js in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -285,7 +312,6 @@
 			files = (
 				AA00000000000000000000B6 /* NsiteWorkerHostPage.html in Resources */,
 				AA00000000000000000000B5 /* NsiteWorkerShim.js in Resources */,
-				AA00000000000000000000B7 /* TestWorker.js in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -308,6 +334,12 @@
 				26081D0B72868ABF4539D67A /* NsiteBlobs.swift in Sources */,
 				9582B6832FE993A70072D4E8 /* SceneDelegate.swift in Sources */,
 				AA00000000000000000000F1 /* NsiteWorkerHost.swift in Sources */,
+				BC0000000000000000000001 /* NsiteGroup.swift in Sources */,
+				BC0000000000000000000002 /* NsiteStore.swift in Sources */,
+				BC0000000000000000000003 /* NsiteFilter.swift in Sources */,
+				BC0000000000000000000005 /* NappSubscriptions.swift in Sources */,
+				BC0000000000000000000006 /* NappNotifications.swift in Sources */,
+				BC0000000000000000000007 /* NappPushPlugin.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -318,6 +350,16 @@
 				AA00000000000000000000B3 /* NotificationService.swift in Sources */,
 				AA00000000000000000000B4 /* NsiteWorkerHost.swift in Sources */,
 				AA00000000000000000000B9 /* NsiteOrigins.swift in Sources */,
+				BD0000000000000000000001 /* NsiteGroup.swift in Sources */,
+				BD0000000000000000000002 /* NsiteStore.swift in Sources */,
+				BD0000000000000000000003 /* NsiteFilter.swift in Sources */,
+				BD0000000000000000000004 /* NsiteRelayFetch.swift in Sources */,
+				BD0000000000000000000005 /* NappSubscriptions.swift in Sources */,
+				BD0000000000000000000006 /* NappNotifications.swift in Sources */,
+				BD0000000000000000000032 /* NsiteBlobs.swift in Sources */,
+				BD0000000000000000000033 /* NsiteMimeTypes.swift in Sources */,
+				BD0000000000000000000034 /* NsiteSiteChrome.swift in Sources */,
+				BD0000000000000000000035 /* NsiteFileServer.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -503,6 +545,7 @@
 		AA00000000000000000000C5 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = NsiteNotify/NsiteNotify.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = GZLTTH5DLM;
@@ -528,6 +571,7 @@
 		AA00000000000000000000C6 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = NsiteNotify/NsiteNotify.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = GZLTTH5DLM;

@@ -3,7 +3,7 @@ import { Capacitor, type PluginListenerHandle } from '@capacitor/core';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import type { NsiteFrameProps } from '@/components/nsite/types';
-import { supportsNappPush } from '@/lib/nappPushPlugin';
+import { supportsNappPush, supportsNappWorkerShim } from '@/lib/nappPushPlugin';
 import { getNsiteBrowserPermission } from '@/lib/nsiteBrowserPermissions';
 import { buildManifest, resolveServers } from '@/lib/nsiteFiles';
 import {
@@ -52,8 +52,11 @@ function nsiteProviderScript(
   // service already owns. Named apart from `push` because they are two
   // different things a site asks for, and only one of them involves a relay.
   const notify = push;
+  // iOS only, where WebKit gives a custom-scheme document no service workers
+  // and `register()` is the only place the worker's path is ever said.
+  const serviceWorker = supportsNappWorkerShim();
 
-  if (!pubkey && !push && !fetch && !notify) return undefined;
+  if (!pubkey && !push && !fetch && !notify && !serviceWorker) return undefined;
 
   // Read here, synchronously, because `Notification.permission` is a getter
   // and a site reads it before it does anything else. See `notifyGrant`.
@@ -63,6 +66,7 @@ function nsiteProviderScript(
     push,
     fetch,
     notify,
+    serviceWorker,
     notifyGrant: stored === 'allow' ? 'granted' : stored === 'deny' ? 'denied' : 'default',
   });
 }

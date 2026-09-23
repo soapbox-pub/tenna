@@ -78,6 +78,43 @@ export interface NappPushPlugin {
   getMuted(options: { siteId: string }): Promise<{ muted: boolean }>;
 
   /**
+   * Every listening site's subscriptions, merged into one list, as JSON text.
+   *
+   * What the push service is told. **iOS only**, where there is a push service
+   * at all: a host running several sites behind one device token registers as
+   * one client with one list, because the service pushes an event to a client
+   * at most once — so an event two sites both want costs one push and one
+   * wake-up rather than two. Muted sites are left out, which is what makes
+   * muting stop the traffic rather than only hide it.
+   *
+   * See `src/hooks/useNostrPushSync.ts`, and `NsiteStore.merged` for the merge.
+   */
+  subscriptions(): Promise<{ subscriptions: string }>;
+
+  /**
+   * The APNs device token, and which host minted it.
+   *
+   * **iOS only.** Resolves without a `token` when the user has refused
+   * notifications, or when registration failed — never by hanging, so the
+   * caller can simply await it. `environment` is read off the provisioning
+   * profile: a token is minted against one APNs host and rejected by the
+   * other, and the push service is told which at registration.
+   */
+  deviceToken(): Promise<{ token?: string; environment: 'sandbox' | 'production' }>;
+
+  /**
+   * Remember which of a site's files is its service worker.
+   *
+   * **iOS only**, and the whole reason `navigator.serviceWorker` is shimmed
+   * there: WebKit will not register a real worker for a document under a custom
+   * scheme, so the path the site passed to `register()` is the only record of
+   * which script the notification extension should run. The file is fetched
+   * into the shared blob cache at the same time, because an extension woken by
+   * a push should not have to reach the network to find out what to say.
+   */
+  registerWorker(options: { siteId: string; label: string; path: string }): Promise<void>;
+
+  /**
    * Ask the OS for permission to post notifications.
    *
    * Resolves at once where none is needed or it was already given. `granted`
@@ -114,6 +151,35 @@ export interface NappPushPlugin {
     eventName: 'nappNotificationsChanged',
     listener: (event: { siteId: string }) => void,
   ): Promise<PluginListenerHandle>;
+
+  /**
+   * The merged list would now be different: a site subscribed, cleared, or was
+   * muted.
+   *
+   * **iOS only.** A nudge rather than a diff — the list is read back whole,
+   * for the same reason `nappNotificationsChanged` is.
+   */
+  addListener(
+    eventName: 'nappSubscriptionsChanged',
+    listener: () => void,
+  ): Promise<PluginListenerHandle>;
+
+  /**
+   * The user tapped one of a site's notifications.
+   *
+   * **iOS only**, where a tap reaches the app rather than the site's worker:
+   * running one takes a notification service extension, and iOS starts one of
+   * those only to mutate an arriving push. So `data.url` is what routes, and
+   * `path` is it. Android opens the window natively and raises
+   * `notificationclick` in the worker besides.
+   *
+   * Retained until something is listening, because a cold launch out of a tap
+   * gets here before React exists.
+   */
+  addListener(
+    eventName: 'nappNotificationOpen',
+    listener: (event: { siteId: string; path?: string }) => void,
+  ): Promise<PluginListenerHandle>;
 }
 
 export const NappPush = registerPlugin<NappPushPlugin>('NappPush');
@@ -121,10 +187,43 @@ export const NappPush = registerPlugin<NappPushPlugin>('NappPush');
 /**
  * Whether sites here can subscribe to events and be woken for them.
  *
- * Android only, in the app: it needs a foreground service to hold relays
- * open and a service worker to deliver to, and only the native nsite frame
- * can offer the second.
+ * The app, on both platforms, by quite different means. Android holds the
+ * relays itself in a foreground service and wakes the site's real service
+ * worker. iOS cannot hold a socket in the background at all, so the
+ * subscriptions go to a push service — see `src/lib/nostrPush.ts` — which wakes
+ * the phone through APNs and hands the event to a notification extension that
+ * runs the site's worker there. Either way a site calls `napp.push.set` and is
+ * told about events while it is closed, which is the whole of what it asked.
+ *
+ * Not on the web, where the iframe path has no host around the page to do
+ * either.
  */
 export function supportsNappPush(): boolean {
-  return Capacitor.getPlatform() === 'android' && Capacitor.isPluginAvailable('NappPush');
+  const platform = Capacitor.getPlatform();
+  return (platform === 'android' || platform === 'ios')
+    && Capacitor.isPluginAvailable('NappPush');
+}
+
+/**
+ * Whether a site's `navigator.serviceWorker` is Tenna's rather than the
+ * engine's.
+ *
+ * iOS only. It decides two things that travel together: that the provider
+ * script installs the stand-in container, and that `register()` has to be
+ * recorded natively — see `registerWorker`. On Android the worker is real and
+ * neither applies.
+ */
+export function supportsNappWorkerShim(): boolean {
+  return Capacitor.getPlatform() === 'ios' && Capacitor.isPluginAvailable('NappPush');
+}
+
+/**
+ * Whether Tenna registers with a push service for this device.
+ *
+ * iOS only, and the same condition as the worker shim for the same reason: the
+ * two are one arrangement. Kept apart because they are read in different
+ * places and mean different things.
+ */
+export function supportsNostrPush(): boolean {
+  return Capacitor.getPlatform() === 'ios' && Capacitor.isPluginAvailable('NappPush');
 }

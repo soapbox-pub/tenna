@@ -22,8 +22,9 @@ const NONE: ReadonlySet<string> = new Set<string>();
  * `setAutoCancel`, with nothing of Tenna's running to be told, so read-ness
  * written down anywhere would outlive the thing it described.
  *
- * Android only, where notifications are. Everywhere else this is the empty
- * set and costs a comparison.
+ * The app only, where notifications are — Android out of the shade, iOS out of
+ * `UNUserNotificationCenter`'s delivered list, which is the same fact asked of
+ * a different system. On the web this is the empty set and costs a comparison.
  */
 export function useNappUnread(siteIds: string[]): ReadonlySet<string> {
   const [unread, setUnread] = useState<ReadonlySet<string>>(NONE);

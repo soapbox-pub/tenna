@@ -1,7 +1,10 @@
+import type { PluginListenerHandle } from '@capacitor/core';
 import type { NostrEvent } from '@nostrify/nostrify';
 import { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
 
 import { useNsiteAddress } from '@/hooks/useNsiteAddress';
+import { NappPush, supportsNappPush } from '@/lib/nappPushPlugin';
+import { nsiteUrl } from '@/lib/nsiteUrl';
 import { useNsiteOpener } from '@/hooks/useNsiteWindow';
 import { useToast } from '@/hooks/useToast';
 import {
@@ -87,6 +90,52 @@ export function useNsiteLinkListener(): void {
       if (disposed) void listener.remove();
     })().catch(() => {
       // An older build than this event; a link out goes to the OS instead.
+    });
+
+    return () => {
+      disposed = true;
+      void listener?.remove();
+    };
+  }, []);
+}
+
+/**
+ * Take the taps on a site's notifications.
+ *
+ * iOS only. A tap there reaches the *app*: running a site's worker takes a
+ * notification service extension, and iOS starts one of those only to mutate an
+ * arriving push, so there is nothing alive to raise `notificationclick` in. What
+ * routes is `data.url`, which is the convention every push service worker on
+ * Nostr already writes and the same thing Android reads before it raises the
+ * event. See NAPP.md.
+ *
+ * The tap becomes an ordinary `nsite://` open, which is exactly what it is —
+ * "put this site on screen, at this path" — and goes down the road a pasted
+ * address or a link from another site already takes. Nothing here has to know
+ * how a site is resolved or where a window comes from.
+ *
+ * Android does its own opening natively, before the worker is even told, so
+ * that a tap lands at once rather than waiting on a worker that may not be
+ * running. There is no equivalent to do here.
+ */
+export function useNappNotificationListener(): void {
+  useEffect(() => {
+    if (!supportsNappPush()) return;
+
+    let disposed = false;
+    let listener: PluginListenerHandle | undefined;
+
+    void (async () => {
+      const handle = await NappPush.addListener('nappNotificationOpen', ({ siteId, path }) => {
+        // Built from the site id rather than from anything in the
+        // notification, so a site cannot name one site and be opened as
+        // another. The path is the site's own and is checked natively.
+        requestNsiteOpen(nsiteUrl(siteId, path ?? '/'));
+      });
+      if (disposed) void handle.remove();
+      else listener = handle;
+    })().catch(() => {
+      // Android, or a build with no such event. Nothing to listen to.
     });
 
     return () => {

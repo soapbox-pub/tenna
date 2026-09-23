@@ -81,3 +81,20 @@ export const DEFAULT_NSITES: DefaultNsite[] = [
 
 /** Relay where the catalog's nsite manifests live. */
 export const NSITE_RELAY = 'wss://relay.ditto.pub/';
+
+/**
+ * The push service Tenna registers with, where it cannot hold relays open
+ * itself.
+ *
+ * A pubkey rather than a URL: the service is addressed over relays, as
+ * NIP-44-encrypted kind 25742, and has no HTTP endpoint at all. See
+ * `src/lib/nostrPush.ts`.
+ *
+ * iOS only so far. Android holds its own sockets in a foreground service and
+ * needs nobody's help; the web could use this and does not yet.
+ */
+export const NOSTR_PUSH_PUBKEY =
+  '4c812266b5b8039b4bd98cf2e6c77dcbcae5ea9d9f7d591933c7e4e9b6e174c7';
+
+/** Where requests to the push service are published, and its answers read. */
+export const NOSTR_PUSH_RELAY = 'wss://relay.ditto.pub/';

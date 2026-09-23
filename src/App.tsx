@@ -8,6 +8,7 @@ import { Suspense } from 'react';
 import NostrProvider from '@/components/NostrProvider';
 import { NativeAccounts } from '@/components/NativeAccounts';
 import { NativeKeys } from '@/components/NativeKeys';
+import { NostrPushSync } from '@/components/NostrPushSync';
 import { NostrSync } from '@/components/NostrSync';
 import { NsiteGrants } from '@/components/NsiteGrants';
 import { Toaster } from "@/components/ui/toaster";
@@ -116,6 +117,12 @@ export function App() {
                 carried across on sight. See `NsiteGrants`.
               */}
               <NsiteGrants />
+              {/*
+                And where the app cannot hold a relay open in the background,
+                the sites' subscriptions are carried to somebody who can. iOS
+                only; see `NostrPushSync`.
+              */}
+              <NostrPushSync />
               <TooltipProvider>
                 <Toaster />
                 <Suspense>

@@ -29,7 +29,7 @@ import type { NostrEvent } from '@nostrify/nostrify';
 import { useCallback, useRef, useState } from 'react';
 
 import { useCurrentUser } from '@/hooks/useCurrentUser';
-import { NappPush, supportsNappPush } from '@/lib/nappPushPlugin';
+import { NappPush, supportsNappPush, supportsNappWorkerShim } from '@/lib/nappPushPlugin';
 import { normalizeNappSubscriptions } from '@/lib/nappSubscriptions';
 import {
   getNsiteBrowserPermission,
@@ -441,6 +441,24 @@ export function useNsiteSignerRpc({
 
         case 'notification.request':
           return await requestNotifyPermission();
+
+        // Not the site asking for anything — it called
+        // `navigator.serviceWorker.register` and this is where the path is
+        // written down. There is no permission attached and nothing to
+        // prompt for: registering a worker is not a capability, it is the
+        // page saying which of its own files is one. See
+        // `SERVICE_WORKER_SOURCE` and `NappPushPlugin.registerWorker`.
+        case 'napp.sw.register': {
+          if (!supportsNappWorkerShim()) {
+            throw new Error('Service workers are not available on this platform');
+          }
+          const path = typeof p.path === 'string' ? p.path : '';
+          if (!path.startsWith('/') || path.startsWith('//')) {
+            throw new Error('The worker must be a file inside the site');
+          }
+          await NappPush.registerWorker({ siteId, label: siteName, path });
+          return undefined;
+        }
 
         case 'napp.push.get': {
           if (!supportsNappPush()) throw new Error('Push is not available on this platform');

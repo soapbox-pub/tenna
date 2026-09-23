@@ -11,7 +11,7 @@ import { NsiteViewer } from '@/components/NsiteViewer';
 import { WallSearch } from '@/components/WallSearch';
 import { useActiveTheme } from '@/hooks/useActiveTheme';
 import { useNappUnread } from '@/hooks/useNappUnread';
-import { useNsiteOpenLink } from '@/hooks/useNsiteOpenRequest';
+import { useNappNotificationListener, useNsiteOpenLink } from '@/hooks/useNsiteOpenRequest';
 import { usePendingShare } from '@/hooks/useNsiteShare';
 import { useWall } from '@/hooks/useWall';
 import { useWallDrag } from '@/hooks/useWallDrag';
@@ -72,6 +72,12 @@ const Index = () => {
     [],
   );
   const { opening } = useNsiteOpenLink(tuneIn);
+
+  // And a tap on one of a site's notifications, which is the same request
+  // wearing a different hat: put this site on screen, at this path. iOS only —
+  // Android opens the window natively before the worker is told. See
+  // `useNappNotificationListener`.
+  useNappNotificationListener();
 
   // Which tile is showing its menu. One at a time, and held here rather than
   // in the tile, because the hold that opens a menu is the first half of the

@@ -88,10 +88,13 @@ actor NsiteFileServer {
      Versioned in the name for the same reason as Android's, and named the same
      thing — the two caches never meet, but the guarantee they make is one
      guarantee and it is worth being able to say so.
+
+     In the App Group container rather than this process's caches, because the
+     notification extension is the other process that reads it and a site's
+     worker has to already be on disk when a push arrives. See `NsiteGroup`.
      */
     static func cacheDirectory() -> URL {
-        let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
-        return caches.appendingPathComponent("nsite-v2", isDirectory: true)
+        NsiteGroup.container.appendingPathComponent("nsite-v2", isDirectory: true)
     }
 
     // -----------------------------------------------------------------------
@@ -147,6 +150,27 @@ actor NsiteFileServer {
             ],
             body: bytes
         )
+    }
+
+    /**
+     One named file, or nothing.
+
+     `serve` falls back to `/index.html` for anything the manifest does not
+     have, because a site's client-side routes are the ordinary case for a
+     document. Nothing else wants that: a worker asked for at a path the site
+     never published must come back missing rather than as a page of HTML with
+     a JavaScript content type on it. So the extension asks through here.
+     */
+    func file(_ path: String) async -> (Data, String)? {
+        guard let sha256 = files[path], let bytes = try? await blob(sha256) else { return nil }
+        return (bytes, NsiteMimeTypes.contentType(for: path))
+    }
+
+    /// Put a file in the cache now, so a push that needs it later does not have
+    /// to reach the network from inside an extension. Answers whether it is there.
+    @discardableResult
+    func warm(_ path: String) async -> Bool {
+        await file(path) != nil
     }
 
     // -----------------------------------------------------------------------

@@ -95,6 +95,16 @@ export interface NsiteBridgeOptions {
    * substituted natively; see {@link NSITE_NOTIFY_DEVICE_PLACEHOLDER}.
    */
   notifyGrant?: 'granted' | 'denied' | 'default';
+  /**
+   * Stand in for `navigator.serviceWorker`, which this WebView has not got.
+   *
+   * iOS only: WebKit withholds service workers from any document whose scheme
+   * is not http or https, and a `WKWebView` cannot answer for either. The
+   * stand-in exists so that `register()` still has somewhere to go — it is how
+   * the host learns which script to run when a push arrives, and there is no
+   * other record of it. See {@link SERVICE_WORKER_SOURCE}.
+   */
+  serviceWorker?: boolean;
 }
 
 /**
@@ -407,11 +417,16 @@ function notificationSource(grant: 'granted' | 'denied' | 'default'): string {
   });
   window.Notification = Notification;
 
-  var swRegistration = window.ServiceWorkerRegistration
-    && window.ServiceWorkerRegistration.prototype;
-
-  if (swRegistration) {
-    swRegistration.showNotification = function(title, options) {
+  /**
+   * The two methods a registration answers, defined once.
+   *
+   * Put on \`ServiceWorkerRegistration.prototype\` where there is one — Android,
+   * where the worker is real and only the Notifications API is missing — and
+   * hung on the stand-in registration where there is not. See
+   * {@link SERVICE_WORKER_SOURCE}.
+   */
+  var notifyMethods = {
+    showNotification: function(title, options) {
       var payload;
       try {
         payload = { title: String(title), options: options || {} };
@@ -434,9 +449,9 @@ function notificationSource(grant: 'granted' | 'denied' | 'default'): string {
         }
         throw err;
       });
-    };
+    },
 
-    swRegistration.getNotifications = function(filter) {
+    getNotifications: function(filter) {
       var tag = filter && filter.tag ? String(filter.tag) : undefined;
       // Outside the queue, as \`close\` is, and for the same reason.
       return call('notification.list', { tag: tag }).then(function(records) {
@@ -445,10 +460,128 @@ function notificationSource(grant: 'granted' | 'denied' | 'default'): string {
       }, function() {
         return [];
       });
-    };
+    }
+  };
+
+  var swRegistration = window.ServiceWorkerRegistration
+    && window.ServiceWorkerRegistration.prototype;
+
+  if (swRegistration) {
+    swRegistration.showNotification = notifyMethods.showNotification;
+    swRegistration.getNotifications = notifyMethods.getNotifications;
   }
 `;
 }
+
+/**
+ * `navigator.serviceWorker`, for a WebView that hasn't got one.
+ *
+ * WebKit exposes service workers only to documents whose scheme is literally
+ * http or https, and `WKWebView` reserves both and refuses a
+ * `WKURLSchemeHandler` for either — so an nsite on iOS cannot have a real one,
+ * and it is not a preference but the platform. See `NsiteOrigins.swift`.
+ *
+ * What it can have is a worker run **inside the notification extension** when a
+ * push arrives, which is where the site's script actually matters: it is the
+ * only thing that knows what an event means. But nothing native can find out
+ * which script that is. A real registration is the browser's record, and there
+ * is no browser keeping one here.
+ *
+ * So `register()` is the record. A site calls it exactly as it does on the web,
+ * the path is written down next to the site's manifest, and the extension runs
+ * that file. Nothing is declared, nothing is Tenna-specific, and a site written
+ * for a browser is written for this.
+ *
+ * ## What the stand-in is honest about
+ *
+ * `showNotification` and `getNotifications` are real and reach the same tray as
+ * everything else. `active` reports a worker, because from the page's point of
+ * view one will run. Everything to do with **talking** to it is not: there is no
+ * `postMessage`, no `controller`, no `message` event, because the worker does not
+ * exist until a push arrives and the page is gone by then. `update` and
+ * `unregister` resolve without doing anything, there being no registration to
+ * update or throw away.
+ */
+const SERVICE_WORKER_SOURCE = `
+  if (!('serviceWorker' in navigator)) {
+    var swRegistrations = [];
+    var swReadyResolve;
+    var swReady = new Promise(function(resolve) { swReadyResolve = resolve; });
+
+    function makeRegistration(url, options) {
+      var registration = {
+        scope: new URL((options && options.scope) || './', url.href).href,
+        updateViaCache: (options && options.updateViaCache) || 'imports',
+        installing: null,
+        waiting: null,
+        // A worker that will run, when there is something to run it for.
+        // Reported as active because that is what the page is asking: may I
+        // expect my worker to handle things? It may.
+        active: {
+          scriptURL: url.href,
+          state: 'activated',
+          onstatechange: null,
+          postMessage: function() {},
+          addEventListener: function() {},
+          removeEventListener: function() {},
+          dispatchEvent: function() { return true; }
+        },
+        update: function() { return Promise.resolve(registration); },
+        unregister: function() { return Promise.resolve(true); },
+        addEventListener: function() {},
+        removeEventListener: function() {},
+        dispatchEvent: function() { return true; }
+      };
+
+      if (typeof notifyMethods !== 'undefined') {
+        registration.showNotification = notifyMethods.showNotification;
+        registration.getNotifications = notifyMethods.getNotifications;
+      }
+      return registration;
+    }
+
+    Object.defineProperty(navigator, 'serviceWorker', {
+      configurable: true,
+      value: {
+        controller: null,
+        ready: swReady,
+        oncontrollerchange: null,
+        onmessage: null,
+
+        register: function(script, options) {
+          var url;
+          try {
+            url = new URL(String(script), location.href);
+          } catch (e) {
+            return Promise.reject(new TypeError(
+              'Failed to register a ServiceWorker: the script URL is invalid.'));
+          }
+          if (url.protocol !== location.protocol || url.host !== location.host) {
+            return Promise.reject(new TypeError(
+              'Failed to register a ServiceWorker: the origin of the provided ' +
+              "scriptURL does not match the current page's origin."));
+          }
+
+          // The path only. A query string is the browser's cache-buster and
+          // means nothing to a manifest, which files a script under its path.
+          return rpc('napp.sw.register', { path: url.pathname }).then(function() {
+            var registration = makeRegistration(url, options);
+            swRegistrations = [registration];
+            swReadyResolve(registration);
+            return registration;
+          });
+        },
+
+        getRegistration: function() { return Promise.resolve(swRegistrations[0]); },
+        getRegistrations: function() { return Promise.resolve(swRegistrations.slice()); },
+        startMessages: function() {},
+        addEventListener: function() {},
+        removeEventListener: function() {},
+        dispatchEvent: function() { return true; }
+      }
+    });
+  }
+`;
 
 export function getNsiteNostrProviderScript(
   pubkey: string | null,
@@ -464,6 +597,11 @@ export function getNsiteNostrProviderScript(
   const notifications = options.notify
     ? notificationSource(options.notifyGrant ?? 'default')
     : '';
+
+  // After the notifications, which is where `notifyMethods` is defined: the
+  // stand-in registration hangs them on itself, there being no
+  // `ServiceWorkerRegistration.prototype` here to put them on.
+  const serviceWorker = options.serviceWorker ? SERVICE_WORKER_SOURCE : '';
 
   return `(function() {
   'use strict';
@@ -548,7 +686,7 @@ ${receive}
       return call(method, params);
     });
   }
-${options.fetch ? nappFetchImplementation() : ''}${notifications}
+${options.fetch ? nappFetchImplementation() : ''}${notifications}${serviceWorker}
   // ------------------------------------------------------------------
   // NIP-07 provider
   // ------------------------------------------------------------------

@@ -628,17 +628,21 @@ export function NsiteAppInfo({
                 ) : (
                   <Switch
                     id="nsite-notifications"
+                    // The size a settings row wants, which only the component
+                    // can give: a `h-7 w-12` here would be outranked and the
+                    // thumb would sit outside the track. See `Switch`.
+                    size="lg"
                     checked={!muted}
                     onCheckedChange={handleNotifications}
                     className={cn(
-                      'h-7 w-12 shrink-0',
+                      'shrink-0',
                       'data-[state=checked]:bg-primary data-[state=unchecked]:bg-foreground/20',
                       'focus-visible:border-transparent focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-card',
                       // The thumb is whatever reads on the accent it sits in,
                       // which the theme already had to decide — white on
                       // Tenna's yellow would not read, and neither would the
                       // page's own colour on somebody's pale primary.
-                      '[&_[data-slot=switch-thumb]]:size-6! [&_[data-slot=switch-thumb]]:bg-primary-foreground!',
+                      '[&_[data-slot=switch-thumb]]:bg-primary-foreground!',
                     )}
                   />
                 )}

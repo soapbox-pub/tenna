@@ -44,14 +44,17 @@ const GROUP = 'rounded-2xl bg-foreground/[0.06] px-5 py-4';
 /** The heading on a group. Tall enough that a button beside it sits level. */
 const GROUP_TITLE = 'flex min-h-9 items-center text-lg font-medium text-foreground';
 
-/** A switch, at the size a thumb expects on a settings row. */
+/**
+ * A switch's colours on a settings row. Its size comes from `size="lg"` on the
+ * component, which is the only place a switch can be sized from — see `Switch`.
+ */
 const SWITCH = cn(
-  'h-7 w-12 shrink-0',
+  'shrink-0',
   'data-[state=checked]:bg-primary data-[state=unchecked]:bg-foreground/20',
   'focus-visible:border-transparent focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-card',
   // Whatever reads on the accent the thumb sits in, which the theme has
   // already had to decide — white on Tenna's yellow would not read.
-  '[&_[data-slot=switch-thumb]]:size-6! [&_[data-slot=switch-thumb]]:bg-primary-foreground!',
+  '[&_[data-slot=switch-thumb]]:bg-primary-foreground!',
 );
 
 /** A relay as the config holds one. */
@@ -243,6 +246,7 @@ function RelayDialog({
               </Label>
               <Switch
                 id="relay-read"
+                size="lg"
                 checked={relay.read}
                 // The list has no way to say "neither", and NIP-65 has no tag
                 // for it, so the last one on cannot be turned off. Removing
@@ -259,6 +263,7 @@ function RelayDialog({
               </Label>
               <Switch
                 id="relay-write"
+                size="lg"
                 checked={relay.write}
                 disabled={relay.write && !relay.read}
                 onCheckedChange={(value) => onToggle('write', value)}

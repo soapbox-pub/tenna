@@ -29,9 +29,13 @@ import { supportsSignerApps } from '@/lib/signerAppsPlugin';
 const GROUP = 'rounded-2xl bg-foreground/[0.06] px-5 py-4';
 const GROUP_TITLE = 'flex min-h-9 items-center text-lg font-medium text-foreground';
 
-/** Matching the relay switches: large enough to hit, quiet enough to scan. */
+/**
+ * Matching the relay switches: quiet enough to scan. The size that makes one
+ * large enough to hit is `size="lg"` on the component, which is the only place
+ * a switch can be sized from — see `Switch`.
+ */
 const SWITCH =
-  'h-7 w-12 data-[state=unchecked]:bg-foreground/20 [&>span]:size-6 [&>span]:data-[state=checked]:translate-x-5';
+  'shrink-0 data-[state=unchecked]:bg-foreground/20 [&_[data-slot=switch-thumb]]:bg-primary-foreground!';
 
 /** How long ago, in the shortest true form. */
 function ago(at: number): string {
@@ -113,6 +117,7 @@ function AppDialog({
                       grant is given in the moment it is asked for, where the
                       user can see what is being asked. */}
                   <Switch
+                    size="lg"
                     checked={permission.allowed}
                     onCheckedChange={() => onRevoke(app, permission)}
                     className={SWITCH}

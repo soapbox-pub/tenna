@@ -122,7 +122,8 @@ final class NsiteSites {
     // -----------------------------------------------------------------------
 
     /**
-     * Write a site's manifest and icon, replacing anything already there.
+     * Write a site's manifest and icon, replacing anything already there —
+     * except a newer manifest, which is kept.
      *
      * Called when a site is opened, when it is pinned, and when it is
      * refreshed from the relay — so a site follows its publisher rather than
@@ -151,6 +152,18 @@ final class NsiteSites {
         String share = shareTarget == null
             ? shareTarget(context, siteId)
             : (shareTarget.isEmpty() ? null : shareTarget);
+
+        // Never backwards. Every caller hands over the manifest it happens to
+        // hold, and the wall holds whatever it fetched when the process
+        // started — so without this, opening a site from its tile put back
+        // the version from days ago over the one the site's own refresh had
+        // just found, and the window, and every push to its worker, stayed on
+        // it for good. A site id is one replaceable address, so the newer
+        // event is simply the right one.
+        Record stored = load(context, siteId);
+        if (stored != null && createdAt(stored.event) > createdAt(event)) {
+            event = stored.event;
+        }
 
         JSONObject json = new JSONObject();
         try {
@@ -200,6 +213,15 @@ final class NsiteSites {
         if (load(context, siteId) == null) return false;
         save(context, siteId, label, event, null, null, null);
         return true;
+    }
+
+    /** A manifest event's {@code created_at}, or zero if it has none to read. */
+    private static long createdAt(@NonNull String event) {
+        try {
+            return new JSONObject(event).optLong("created_at", 0);
+        } catch (JSONException e) {
+            return 0;
+        }
     }
 
     @Nullable

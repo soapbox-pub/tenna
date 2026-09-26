@@ -1,3 +1,4 @@
+import { App } from '@capacitor/app';
 import type { NostrEvent } from '@nostrify/nostrify';
 import { useNostr } from '@nostrify/react';
 import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -215,6 +216,28 @@ export function useWall() {
     },
     staleTime: 60_000,
   });
+
+  // Asked again whenever Tenna comes back. The wall stays mounted for the life
+  // of the process and nothing else would make it look, so a site updated
+  // since would open from its tile as the version the wall first saw.
+  useEffect(() => {
+    let disposed = false;
+    let listener: { remove: () => Promise<void> } | undefined;
+
+    void (async () => {
+      listener = await App.addListener('appStateChange', ({ isActive }) => {
+        if (!disposed && isActive) void queryClient.invalidateQueries({ queryKey });
+      });
+      if (disposed) void listener.remove();
+    })().catch(() => {
+      // Nothing to listen to on this build.
+    });
+
+    return () => {
+      disposed = true;
+      void listener?.remove();
+    };
+  }, [queryClient, queryKey]);
 
   const events = useMemo(
     () => new Map((manifests.data ?? []).map((event) => [getNsiteSubdomain(event), event])),

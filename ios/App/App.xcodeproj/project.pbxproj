@@ -23,6 +23,8 @@
 		02B186B5DF02F26C38AB7FEF /* NsiteFileServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5056FC16164516614F89A2D4 /* NsiteFileServer.swift */; };
 		F807767E6C9C12ED86606C3A /* NsiteSchemeHandler.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9DFF9F0B933BFB683C98977A /* NsiteSchemeHandler.swift */; };
 		00FB53B074CB8EA02A6C995D /* NsiteSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD2B2CC2D5F98E0EEFB58BD3 /* NsiteSession.swift */; };
+		A1B2C3D4E5F60718293A4B03 /* NsiteDownloads.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60718293A4B04 /* NsiteDownloads.swift */; };
+		A1B2C3D4E5F60718293A4B01 /* NsiteLocation.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60718293A4B02 /* NsiteLocation.swift */; };
 		C4E64CFCB3DD051776028A28 /* NsiteWebViewPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = 321F28F125BEFA8F1B8466C9 /* NsiteWebViewPlugin.swift */; };
 		4D0AAC9DA39D65F84B5AD870 /* TennaBridgeViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 91457C98973717B6C5995D86 /* TennaBridgeViewController.swift */; };
 		AA00000000000000000000B3 /* NotificationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA00000000000000000000A3 /* NotificationService.swift */; };
@@ -72,6 +74,8 @@
 		F6711A877D923FE3FD94BFDA /* NsiteSiteChrome.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NsiteSiteChrome.swift; sourceTree = "<group>"; };
 		5056FC16164516614F89A2D4 /* NsiteFileServer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NsiteFileServer.swift; sourceTree = "<group>"; };
 		9DFF9F0B933BFB683C98977A /* NsiteSchemeHandler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NsiteSchemeHandler.swift; sourceTree = "<group>"; };
+		A1B2C3D4E5F60718293A4B02 /* NsiteLocation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NsiteLocation.swift; sourceTree = "<group>"; };
+		A1B2C3D4E5F60718293A4B04 /* NsiteDownloads.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NsiteDownloads.swift; sourceTree = "<group>"; };
 		CD2B2CC2D5F98E0EEFB58BD3 /* NsiteSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NsiteSession.swift; sourceTree = "<group>"; };
 		321F28F125BEFA8F1B8466C9 /* NsiteWebViewPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NsiteWebViewPlugin.swift; sourceTree = "<group>"; };
 		91457C98973717B6C5995D86 /* TennaBridgeViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TennaBridgeViewController.swift; sourceTree = "<group>"; };
@@ -166,6 +170,8 @@
 				91457C98973717B6C5995D86 /* TennaBridgeViewController.swift */,
 				321F28F125BEFA8F1B8466C9 /* NsiteWebViewPlugin.swift */,
 				CD2B2CC2D5F98E0EEFB58BD3 /* NsiteSession.swift */,
+				A1B2C3D4E5F60718293A4B04 /* NsiteDownloads.swift */,
+				A1B2C3D4E5F60718293A4B02 /* NsiteLocation.swift */,
 				9DFF9F0B933BFB683C98977A /* NsiteSchemeHandler.swift */,
 				5056FC16164516614F89A2D4 /* NsiteFileServer.swift */,
 				F6711A877D923FE3FD94BFDA /* NsiteSiteChrome.swift */,
@@ -329,6 +335,8 @@
 				4D0AAC9DA39D65F84B5AD870 /* TennaBridgeViewController.swift in Sources */,
 				C4E64CFCB3DD051776028A28 /* NsiteWebViewPlugin.swift in Sources */,
 				00FB53B074CB8EA02A6C995D /* NsiteSession.swift in Sources */,
+				A1B2C3D4E5F60718293A4B03 /* NsiteDownloads.swift in Sources */,
+				A1B2C3D4E5F60718293A4B01 /* NsiteLocation.swift in Sources */,
 				F807767E6C9C12ED86606C3A /* NsiteSchemeHandler.swift in Sources */,
 				02B186B5DF02F26C38AB7FEF /* NsiteFileServer.swift in Sources */,
 				449416282265DAF7D5ABCD02 /* NsiteSiteChrome.swift in Sources */,

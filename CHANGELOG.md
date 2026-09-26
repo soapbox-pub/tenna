@@ -11,6 +11,28 @@
   you have also let it send notifications. On Android it runs about when the
   site asked, at most every fifteen minutes. On iPhone the system decides when,
   and it can be a good while later.
+- On iPhone, a site can now ask where you are. Tenna asks you first, the same
+  way it does for the camera, and then iPhone asks whether Tenna may know.
+- On iPhone, a site can now save a file: you pick where it goes.
+- On iPhone, a site's `alert`, `confirm` and `prompt` boxes now appear, titled
+  with the site's name.
+
+### Fixed
+
+- On iPhone, a site asking for the camera or microphone no longer closes
+  Tenna. Neither does choosing **Take Photo** when a site asks for a file.
+- On iPhone, links out of a site now work. A web link opens in your
+  browser, other kinds open the app they belong to, and a link to another
+  site opens that site in Tenna. As on Android, a site can only do this when
+  you tap something.
+- On iPhone, a site that doesn't draw around the home indicator is framed in
+  its own colour, rather than running under it.
+
+### Security
+
+- On iPhone, only a site's own page can ask for your signature. A frame
+  embedded in the site from somewhere else could reach the same channel
+  before.
 
 ## [0.11.0] - 2026-09-26
 

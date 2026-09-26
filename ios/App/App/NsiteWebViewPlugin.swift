@@ -118,6 +118,9 @@ public class NsiteWebViewPlugin: CAPPlugin, CAPBridgedPlugin {
                 },
                 onCapability: { [weak self] id, kinds in
                     self?.notifyListeners("nsiteCapability", data: ["id": id, "kinds": kinds])
+                },
+                onLink: { [weak self] url in
+                    self?.notifyListeners("nsiteLink", data: ["url": url])
                 }
             )
             self.site = session

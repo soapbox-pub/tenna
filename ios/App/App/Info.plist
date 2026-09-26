@@ -62,6 +62,16 @@
 	<array>
 		<string>fetch</string>
 	</array>
+	<!-- What iOS shows when a site Tenna opened reaches for these. Each is
+	     asked only after the site itself has been allowed it — see
+	     NsiteSession. Without the strings iOS terminates the app on the
+	     first request, including the camera row of a file picker. -->
+	<key>NSCameraUsageDescription</key>
+	<string>A site you open in Tenna wants to use the camera.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>A site you open in Tenna wants to use the microphone.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>A site you open in Tenna wants to know where you are.</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>UIApplicationSceneManifest</key>

@@ -18,15 +18,27 @@ final class NsiteSession: NSObject, WKNavigationDelegate, WKUIDelegate {
     private let handler: NsiteSchemeHandler
     private let webView: WKWebView
     /// Draws behind the site, and is all that is visible until it paints.
-    private let container: UIView
+    private let container: Letterbox
     private let onLoad: () -> Void
     /// A JSON-RPC call from the site's provider: id, method, params as text.
     private let onRpc: (Int, String, String) -> Void
     /// The site reached for something of the device's: id, and what it asked for.
     private let onCapability: (Int, [String]) -> Void
+    /// The site followed a link to another site, spelled as `nsite://`.
+    private let onLink: (String) -> Void
     private var reportedLoad = false
     private var nextCapabilityId = 1
     private var capabilities: [Int: (Bool) -> Void] = [:]
+
+    /// When the user last tapped the site. See `TouchWitness`.
+    private let witness = TouchWitness()
+    private var location: NsiteLocation?
+    private lazy var downloads = NsiteDownloads(presenter: { [weak self] in self?.presenter() })
+
+    /// The JavaScript dialog on screen, if any, and what the page is told if
+    /// it goes away unanswered.
+    private var dialog: UIAlertController?
+    private var refusal: (() -> Void)?
 
     init(
         siteId: String,
@@ -36,15 +48,30 @@ final class NsiteSession: NSObject, WKNavigationDelegate, WKUIDelegate {
         providerScript: String?,
         onLoad: @escaping () -> Void,
         onRpc: @escaping (Int, String, String) -> Void,
-        onCapability: @escaping (Int, [String]) -> Void
+        onCapability: @escaping (Int, [String]) -> Void,
+        onLink: @escaping (String) -> Void
     ) {
         self.siteId = siteId
         self.name = name
         self.onLoad = onLoad
         self.onRpc = onRpc
         self.onCapability = onCapability
+        self.onLink = onLink
 
-        let server = NsiteFileServer(files: files, servers: servers)
+        // Black rather than clear: the site is what is meant to be on screen,
+        // and anything showing through from the Capacitor layer beneath would
+        // be Tenna's own wall sliding around behind a site's transparent
+        // background. The site's `theme-color`, once it is known, replaces it.
+        let container = Letterbox()
+        self.container = container
+
+        // The file server is an actor and reads the document off its own
+        // queue; the letterbox is main-thread UI. The hop is queued ahead of
+        // the response the document is carried in, so the site's first paint
+        // already has its frame.
+        let server = NsiteFileServer(files: files, servers: servers, onChrome: { chrome in
+            Task { @MainActor in container.chrome = chrome }
+        })
         self.handler = NsiteSchemeHandler(
             server: server,
             host: NsiteOrigins.hostFor(siteId) ?? ""
@@ -54,6 +81,9 @@ final class NsiteSession: NSObject, WKNavigationDelegate, WKUIDelegate {
         config.setURLSchemeHandler(handler, forURLScheme: NsiteOrigins.scheme)
         config.allowsInlineMediaPlayback = true
         config.mediaTypesRequiringUserActionForPlayback = []
+        // `requestFullscreen()` on an element. A `<video>` already goes
+        // fullscreen through the system player without this.
+        config.preferences.isElementFullscreenEnabled = true
 
         // A store per site, which is what closes the gap `NsiteProfiles.java`
         // describes: `nsite.localhost` is not a public suffix, so without this
@@ -65,19 +95,11 @@ final class NsiteSession: NSObject, WKNavigationDelegate, WKUIDelegate {
         config.websiteDataStore = WKWebsiteDataStore(
             forIdentifier: Self.storeIdentifier(for: siteId))
 
-        // Black rather than clear: the site is what is meant to be on screen,
-        // and anything showing through from the Capacitor layer beneath would
-        // be Tenna's own wall sliding around behind a site's transparent
-        // background.
-        self.container = UIView()
-        container.backgroundColor = .black
-        container.clipsToBounds = true
-
         // The bridge, installed before the site's own code can run. Two user
         // scripts: the shim that gives the provider something to call — see
         // `Host` below — and then the provider itself.
+        let controller = config.userContentController
         if let providerScript {
-            let controller = config.userContentController
             controller.addUserScript(WKUserScript(
                 source: Self.hostShim,
                 injectionTime: .atDocumentStart,
@@ -89,26 +111,58 @@ final class NsiteSession: NSObject, WKNavigationDelegate, WKUIDelegate {
                 forMainFrameOnly: true
             ))
         }
+        // Whether or not there is a provider: where the user is has nothing
+        // to do with who they are.
+        controller.addUserScript(WKUserScript(
+            source: NsiteLocation.script,
+            injectionTime: .atDocumentStart,
+            forMainFrameOnly: true
+        ))
 
         self.webView = WKWebView(frame: .zero, configuration: config)
 
         super.init()
 
+        // Added after `super.init()` because the handlers are given `self`,
+        // and through `webView.configuration` rather than `config` because a
+        // `WKWebView` copies the configuration it is made with.
+        let host = Host(session: self)
         if providerScript != nil {
-            // Added after `super.init()` because the handler is given `self`,
-            // and through `webView.configuration` rather than `config` because
-            // a `WKWebView` copies the configuration it is made with.
-            webView.configuration.userContentController
-                .add(Host(session: self), name: Self.hostObject)
+            webView.configuration.userContentController.add(host, name: Self.hostObject)
         }
+        webView.configuration.userContentController.add(host, name: NsiteLocation.handlerName)
+
+        location = NsiteLocation(
+            askSite: { [weak self] decide in
+                guard let self else { return decide(false) }
+                self.ask(["location"], decide)
+            },
+            deliver: { [weak self] text in
+                self?.webView.evaluateJavaScript(
+                    "window.__tennaLocationReceive(\(text))", completionHandler: nil)
+            }
+        )
+
+        container.content = webView
+        container.clipsToBounds = true
 
         webView.isOpaque = false
         webView.backgroundColor = .clear
         webView.scrollView.backgroundColor = .clear
         // The site handles its own insets through `env(safe-area-inset-*)`,
-        // exactly as it does on Android. WebKit must not also inset it.
+        // exactly as it does on Android. WebKit must not also inset it. A site
+        // that did not ask to is letterboxed instead — see `Letterbox`.
         webView.scrollView.contentInsetAdjustmentBehavior = .never
         webView.allowsBackForwardNavigationGestures = false
+        // A preview is a browser's affordance, and its "Open" would follow the
+        // link a second time, long after the tap `TouchWitness` saw.
+        webView.allowsLinkPreview = false
+        webView.addGestureRecognizer(witness)
+        #if DEBUG
+        // What Android's `setWebContentsDebuggingEnabled` does for a debug
+        // build: the site can be reached from Web Inspector.
+        webView.isInspectable = true
+        #endif
         webView.navigationDelegate = self
         webView.uiDelegate = self
     }
@@ -173,9 +227,34 @@ final class NsiteSession: NSObject, WKNavigationDelegate, WKUIDelegate {
             didReceive message: WKScriptMessage
         ) {
             MainActor.assumeIsolated {
-                guard let text = message.body as? String else { return }
-                session?.receive(text)
+                session?.receive(message)
             }
+        }
+    }
+
+    /**
+     A message off one of the site's handlers.
+
+     The scripts are injected into the main frame only, but a handler is
+     reachable from every frame through `window.webkit.messageHandlers` — so a
+     third-party iframe inside the site could otherwise ask for a signature in
+     the site's name. Only the site's own top-level document is listened to,
+     which is what Android's `isMainFrame` check and origin allowlist say.
+     */
+    private func receive(_ message: WKScriptMessage) {
+        let frame = message.frameInfo
+        guard frame.isMainFrame,
+              frame.securityOrigin.protocol == NsiteOrigins.scheme,
+              frame.securityOrigin.host == NsiteOrigins.hostFor(siteId) else { return }
+
+        switch message.name {
+        case Self.hostObject:
+            guard let text = message.body as? String else { return }
+            receive(text)
+        case NsiteLocation.handlerName:
+            location?.receive(message.body)
+        default:
+            return
         }
     }
 
@@ -240,6 +319,14 @@ final class NsiteSession: NSObject, WKNavigationDelegate, WKUIDelegate {
         decide(granted)
     }
 
+    /// Ask the web layer whether the site may have something of the device's.
+    private func ask(_ kinds: [String], _ decide: @escaping (Bool) -> Void) {
+        let id = nextCapabilityId
+        nextCapabilityId += 1
+        capabilities[id] = decide
+        onCapability(id, kinds)
+    }
+
     /// A stable store identity per site, so a site's storage survives closing
     /// and reopening it the way its cache does.
     private static func storeIdentifier(for siteId: String) -> UUID {
@@ -263,9 +350,6 @@ final class NsiteSession: NSObject, WKNavigationDelegate, WKUIDelegate {
     func attach(to parent: UIView, frame: CGRect) {
         container.frame = frame
         parent.addSubview(container)
-
-        webView.frame = container.bounds
-        webView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         container.addSubview(webView)
 
         // The site fades up when it has something to show. Until then React is
@@ -315,8 +399,14 @@ final class NsiteSession: NSObject, WKNavigationDelegate, WKUIDelegate {
         // forever; WebKit wants every decision handler called exactly once.
         for (_, decide) in capabilities { decide(false) }
         capabilities.removeAll()
-        webView.configuration.userContentController
-            .removeScriptMessageHandler(forName: Self.hostObject)
+        location?.tearDown()
+        location = nil
+        downloads.tearDown()
+        // The same rule for a dialog: its page is answered on the way out.
+        dismissDialog()
+        let controller = webView.configuration.userContentController
+        controller.removeScriptMessageHandler(forName: Self.hostObject)
+        controller.removeScriptMessageHandler(forName: NsiteLocation.handlerName)
         webView.navigationDelegate = nil
         webView.uiDelegate = nil
         webView.stopLoading()
@@ -333,9 +423,11 @@ final class NsiteSession: NSObject, WKNavigationDelegate, WKUIDelegate {
      Raised to the web layer as an `nsiteCapability`, which is where the grants
      and the prompt live — the same sheet a signing request opens, and the same
      store Android writes to. Whether *Tenna* may reach the camera is a separate
-     question the system asks afterwards, and only if the site was allowed
-     first: there is no point putting the OS prompt in front of someone who has
-     not yet said the site can have it.
+     question, and here it comes first: WebKit settles the app's own camera and
+     microphone access with the system before it asks this delegate anything,
+     so the order Android keeps is not Tenna's to choose. The usage strings in
+     Info.plist are what make that question askable at all; without them iOS
+     ends the app instead.
      */
     func webView(
         _ webView: WKWebView,
@@ -359,10 +451,142 @@ final class NsiteSession: NSObject, WKNavigationDelegate, WKUIDelegate {
             return
         }
 
-        let id = nextCapabilityId
-        nextCapabilityId += 1
-        capabilities[id] = { granted in decisionHandler(granted ? .grant : .deny) }
-        onCapability(id, kinds)
+        ask(kinds) { granted in decisionHandler(granted ? .grant : .deny) }
+    }
+
+    /**
+     `window.open`, and a link with a `target` of its own.
+
+     There is no second window to put it in — Android turns multiple windows
+     off for the same reason — so it goes where the same link would have gone
+     without a target: into this one if it is the site's own, out to the device
+     if not. WebKit only asks this for a page the user is interacting with,
+     since `javaScriptCanOpenWindowsAutomatically` is off.
+     */
+    func webView(
+        _ webView: WKWebView,
+        createWebViewWith configuration: WKWebViewConfiguration,
+        for navigationAction: WKNavigationAction,
+        windowFeatures: WKWindowFeatures
+    ) -> WKWebView? {
+        if let url = navigationAction.request.url {
+            if isOwn(url) {
+                webView.load(navigationAction.request)
+            } else {
+                handOff(url)
+            }
+        }
+        return nil
+    }
+
+    // MARK: JavaScript dialogs
+
+    func webView(
+        _ webView: WKWebView,
+        runJavaScriptAlertPanelWithMessage message: String,
+        initiatedByFrame frame: WKFrameInfo,
+        completionHandler: @escaping () -> Void
+    ) {
+        // An alert has nothing to disagree with, so dismissing it and pressing
+        // its one button mean the same thing.
+        let alert = makeDialog(message)
+        alert.addAction(answering(.default, "OK", completionHandler))
+        show(alert, refusal: completionHandler)
+    }
+
+    func webView(
+        _ webView: WKWebView,
+        runJavaScriptConfirmPanelWithMessage message: String,
+        initiatedByFrame frame: WKFrameInfo,
+        completionHandler: @escaping (Bool) -> Void
+    ) {
+        let alert = makeDialog(message)
+        alert.addAction(answering(.cancel, "Cancel") { completionHandler(false) })
+        alert.addAction(answering(.default, "OK") { completionHandler(true) })
+        show(alert) { completionHandler(false) }
+    }
+
+    func webView(
+        _ webView: WKWebView,
+        runJavaScriptTextInputPanelWithPrompt prompt: String,
+        defaultText: String?,
+        initiatedByFrame frame: WKFrameInfo,
+        completionHandler: @escaping (String?) -> Void
+    ) {
+        let alert = makeDialog(prompt)
+        alert.addTextField { field in field.text = defaultText }
+        alert.addAction(answering(.cancel, "Cancel") { completionHandler(nil) })
+        alert.addAction(answering(.default, "OK") { [weak alert] in
+            completionHandler(alert?.textFields?.first?.text ?? "")
+        })
+        show(alert) { completionHandler(nil) }
+    }
+
+    /**
+     The shape every dialog a site opens takes.
+
+     Titled with the site's name, because a box drawn over a window with no
+     address bar has nothing else to say whose words these are. A site that
+     could put an unattributed box on screen could put Tenna's words in it. The
+     message is set as text, never as anything read as markup.
+     */
+    private func makeDialog(_ message: String) -> UIAlertController {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let title = trimmed.isEmpty ? "This site says" : "\(trimmed) says"
+        return UIAlertController(title: title, message: message, preferredStyle: .alert)
+    }
+
+    /// A button: the end of the refusal, and then the answer it gives.
+    private func answering(
+        _ style: UIAlertAction.Style,
+        _ title: String,
+        _ answer: @escaping () -> Void
+    ) -> UIAlertAction {
+        UIAlertAction(title: title, style: style) { [weak self] _ in
+            self?.dialog = nil
+            self?.refusal = nil
+            answer()
+        }
+    }
+
+    /**
+     Put a site's dialog on screen, and hold the page to a single answer.
+
+     WebKit blocks the page on a JavaScript dialog until its handler is called,
+     and wants it called exactly once. So a dialog that cannot be shown is
+     refused on the spot, and one still up when the site closes is refused
+     then — see `tearDown`.
+     */
+    private func show(_ alert: UIAlertController, refusal: @escaping () -> Void) {
+        dismissDialog()
+
+        guard let presenter = presenter() else {
+            refusal()
+            return
+        }
+
+        dialog = alert
+        self.refusal = refusal
+        presenter.present(alert, animated: true)
+    }
+
+    /// Take down whatever dialog is up, telling the page no.
+    private func dismissDialog() {
+        let pending = refusal
+        refusal = nil
+        dialog?.dismiss(animated: false)
+        dialog = nil
+        pending?()
+    }
+
+    /// The controller on top of the window the site is in, or nil if the site
+    /// is not in one.
+    private func presenter() -> UIViewController? {
+        var top = container.window?.rootViewController
+        while let presented = top?.presentedViewController, !presented.isBeingDismissed {
+            top = presented
+        }
+        return top
     }
 
     // MARK: - WKNavigationDelegate
@@ -395,20 +619,268 @@ final class NsiteSession: NSObject, WKNavigationDelegate, WKUIDelegate {
     /**
      Where the site is allowed to take itself.
 
-     Its own host is its own business. Anything else is refused outright for
-     now: Android hands a main-frame navigation off to the OS, but it can
-     require `hasGesture()` before doing so, and `WKNavigationAction` has no
-     equivalent — so the nearest approximation would let a site throw the user
-     into another app on load. Refusing is the conservative half of that
-     trade, and a link that goes nowhere is a smaller bug than a site that
-     hijacks the device.
+     Its own host is its own business, and so is a file it offers: bytes it
+     serves or made itself, which become a download rather than a page.
+
+     A frame inside the site may load what it likes over the web. A
+     third-party subframe reaching for its own origin is the page loading
+     itself, not somebody asking to leave, and an embedded video has no
+     business throwing the user into a browser — so it stays where it is.
+
+     The top of the window going anywhere else is a link out, which this
+     window cannot follow: it is one site's window, not a browser. It is
+     cancelled here and handed to the device — see `handOff`. A navigation
+     WebKit would open in a new window arrives here with no target frame, and
+     is treated as the top of this one.
      */
     func webView(
         _ webView: WKWebView,
         decidePolicyFor navigationAction: WKNavigationAction,
         decisionHandler: @escaping (WKNavigationActionPolicy) -> Void
     ) {
-        let host = navigationAction.request.url?.host
-        decisionHandler(host == NsiteOrigins.hostFor(siteId) ? .allow : .cancel)
+        guard let url = navigationAction.request.url else {
+            decisionHandler(.cancel)
+            return
+        }
+        let scheme = url.scheme?.lowercased() ?? ""
+        let own = isOwn(url)
+
+        if navigationAction.shouldPerformDownload, own || scheme == "data" {
+            decisionHandler(.download)
+            return
+        }
+
+        guard let target = navigationAction.targetFrame else {
+            decisionHandler(.cancel)
+            if own { webView.load(navigationAction.request) } else { handOff(url) }
+            return
+        }
+
+        if !target.isMainFrame {
+            let embeddable = own || Self.frameSchemes.contains(scheme)
+            decisionHandler(embeddable ? .allow : .cancel)
+            return
+        }
+
+        if own {
+            decisionHandler(.allow)
+        } else {
+            decisionHandler(.cancel)
+            handOff(url)
+        }
+    }
+
+    /// What a frame inside the site may load.
+    private static let frameSchemes: Set<String> = ["https", "http", "about", "data", "blob"]
+
+    /// A response the WebView cannot show is a file, and files are saved.
+    func webView(
+        _ webView: WKWebView,
+        decidePolicyFor navigationResponse: WKNavigationResponse,
+        decisionHandler: @escaping (WKNavigationResponsePolicy) -> Void
+    ) {
+        let isFile = navigationResponse.isForMainFrame && !navigationResponse.canShowMIMEType
+        decisionHandler(isFile ? .download : .allow)
+    }
+
+    func webView(_ webView: WKWebView, navigationAction: WKNavigationAction, didBecome download: WKDownload) {
+        downloads.adopt(download)
+    }
+
+    func webView(_ webView: WKWebView, navigationResponse: WKNavigationResponse, didBecome download: WKDownload) {
+        downloads.adopt(download)
+    }
+
+    // MARK: - Links out
+
+    /**
+     Whether a URL is the site's own: its origin, or a blob it made there.
+
+     A blob URL carries the origin that minted it, so one of the site's own is
+     as much the site's as its files are.
+     */
+    private func isOwn(_ url: URL) -> Bool {
+        var url = url
+        if url.scheme?.lowercased() == "blob",
+           let inner = URL(string: String(url.absoluteString.dropFirst("blob:".count))) {
+            url = inner
+        }
+        return url.scheme?.lowercased() == NsiteOrigins.scheme
+            && url.host == NsiteOrigins.hostFor(siteId)
+    }
+
+    /**
+     Hand a link out of the site to whatever on the device answers for it.
+
+     An http link goes to the browser, a `mailto:` to the mail app, a
+     `lightning:` to a wallet. Two things are asked of it first, as on
+     Android. Its scheme must not be one of `refusedSchemes`. And it must be
+     one the user pressed, because a page that reaches for another app on load
+     is not following anybody. `WKNavigationAction` has no `hasGesture()`, so
+     the tap is witnessed directly — see `TouchWitness` — and spent by the
+     first link it lets out, so one tap cannot open two apps.
+
+     A link to another site is not a link out of Tenna at all, so it does not
+     go to the OS: Tenna registers `nsite:` itself, and the round trip would
+     come straight back in through the wall. It is raised to the web layer as
+     `nsiteLink` instead, which resolves and opens it.
+     */
+    private func handOff(_ url: URL) {
+        let scheme = url.scheme?.lowercased() ?? ""
+
+        guard !scheme.isEmpty, !Self.refusedSchemes.contains(scheme) else {
+            NSLog("[Nsite] refused to hand the device a \(scheme): link")
+            return
+        }
+
+        guard witness.spend() else {
+            NSLog("[Nsite] refused an unasked-for navigation to \(url.absoluteString)")
+            return
+        }
+
+        if scheme == NsiteOrigins.scheme {
+            onLink(Self.publicLink(url))
+            return
+        }
+
+        UIApplication.shared.open(url) { opened in
+            if !opened { NSLog("[Nsite] nothing on the device answers for \(url.absoluteString)") }
+        }
+    }
+
+    /**
+     Schemes a site never gets to hand the device.
+
+     `file:` names the device's own storage, which is not the site's to point
+     a viewer at. The rest never reach a URL handler anyway, and are refused
+     here so that stays true.
+     */
+    private static let refusedSchemes: Set<String> = [
+        "file", "javascript", "data", "about", "blob",
+    ]
+
+    /**
+     A link to another site, in the grammar the web layer reads.
+
+     A public `nsite://` link passes through as it is. One written against
+     another site's origin here — `nsite://<id>.nsite.localhost/path`, which
+     only exists inside this app — is turned back into the canonical spelling
+     of the same site, `nsite://<id>/path`. See `src/lib/nsiteUrl.ts`.
+     */
+    private static func publicLink(_ url: URL) -> String {
+        guard let id = NsiteOrigins.siteIdFor(host: url.host),
+              var parts = URLComponents(url: url, resolvingAgainstBaseURL: false) else {
+            return url.absoluteString
+        }
+        parts.host = id
+        return parts.string ?? url.absoluteString
+    }
+}
+
+/**
+ Witnesses the user tapping the site.
+
+ Stands in for Android's `WebResourceRequest.hasGesture()`, which WebKit has
+ no public equivalent of. It never recognizes anything, never delays or
+ cancels a touch, and runs alongside WebKit's own recognizers; all it does is
+ note when a finger lifted without having moved, which is a tap and not a
+ scroll. A link out is let through only within a few seconds of one — the
+ same window a browser's transient user activation gives — and spends it.
+ */
+private final class TouchWitness: UIGestureRecognizer, UIGestureRecognizerDelegate {
+
+    private static let window: TimeInterval = 5
+    private static let slop: CGFloat = 10
+
+    private var start: CGPoint?
+    private var lastTap: TimeInterval = -.infinity
+
+    init() {
+        super.init(target: nil, action: nil)
+        cancelsTouchesInView = false
+        delaysTouchesBegan = false
+        delaysTouchesEnded = false
+        delegate = self
+    }
+
+    /// Whether there was a recent tap, forgetting it either way.
+    func spend() -> Bool {
+        let fresh = ProcessInfo.processInfo.systemUptime - lastTap <= Self.window
+        lastTap = -.infinity
+        return fresh
+    }
+
+    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
+        start = touches.first?.location(in: view)
+    }
+
+    override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent) {
+        if let start, let end = touches.first?.location(in: view),
+           hypot(end.x - start.x, end.y - start.y) <= Self.slop {
+            lastTap = ProcessInfo.processInfo.systemUptime
+        }
+        start = nil
+        state = .failed
+    }
+
+    override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent) {
+        start = nil
+        state = .failed
+    }
+
+    override func reset() {
+        start = nil
+    }
+
+    func gestureRecognizer(
+        _ gestureRecognizer: UIGestureRecognizer,
+        shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer
+    ) -> Bool {
+        true
+    }
+}
+
+/**
+ The frame around the site: its colour, and its margins if it wants them.
+
+ A site that says `viewport-fit=cover` draws under the home indicator and the
+ sensor housing and handles them through `env(safe-area-inset-*)`. One that
+ does not is letterboxed out of them, as it would be in Safari and as Android
+ does, and the letterbox is the site's `theme-color` — which is also what
+ shows in the overscroll behind a transparent page. See `NsiteSiteChrome`.
+ */
+private final class Letterbox: UIView {
+
+    /// What the site's document said. Nil until its first byte is served.
+    var chrome: NsiteSiteChrome? {
+        didSet {
+            let chrome = chrome
+            backgroundColor = UIColor { traits in
+                chrome?.themeColor(prefersDark: traits.userInterfaceStyle == .dark) ?? .black
+            }
+            setNeedsLayout()
+        }
+    }
+
+    weak var content: UIView?
+
+    init() {
+        super.init(frame: .zero)
+        backgroundColor = .black
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) is not used")
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        let margins = (chrome?.edgeToEdge ?? true) ? .zero : safeAreaInsets
+        content?.frame = bounds.inset(by: margins)
+    }
+
+    override func safeAreaInsetsDidChange() {
+        super.safeAreaInsetsDidChange()
+        setNeedsLayout()
     }
 }

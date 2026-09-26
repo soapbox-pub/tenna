@@ -1,11 +1,17 @@
 # Changelog
 
-## [Unreleased]
+## [0.12.0] - 2026-09-26
+
+Sites can now refresh in the background: with your permission, a closed site
+wakes up every so often to fetch what is new. On iPhone, sites catch up with
+Android — they can ask where you are, save files, show their alert boxes, and
+open links. Asking for the camera no longer closes Tenna on iPhone. The
+Android app no longer contains Google Play Services.
 
 ### Added
 
-- Sites can ask to wake up every so often while closed, to fetch what is new,
-  using the standard `registration.periodicSync`. Tenna asks you first, with a
+- Sites can ask to wake up every so often while closed, to fetch what is new.
+  Tenna asks you first, with a
   new **Refresh in the background** permission, and taking it back stops the
   site straight away. A site woken this way can only put up a notification if
   you have also let it send notifications. On Android it runs about when the

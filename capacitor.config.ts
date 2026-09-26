@@ -47,6 +47,15 @@ const config: CapacitorConfig = {
     // the generated project's only scheme is `App`, so naming anything else
     // breaks that command. The deep-link schemes are declared where they
     // actually belong, in `CFBundleURLTypes` in `ios/App/App/Info.plist`.
+    //
+    // Leave the notification center's delegate alone. By default the bridge
+    // makes its own `NotificationRouter` the delegate when it is built — after
+    // `AppDelegate` has set itself — and with no Capacitor push plugin behind
+    // it the router answers `willPresent` with no options and swallows
+    // `didReceive`. So a push arrived, ran its site's worker, and went into
+    // Notification Center without a banner, and a tap on it never reached the
+    // `data.url` routing. `AppDelegate` is the delegate; nothing else is.
+    handleApplicationNotifications: false,
   },
   plugins: {
     SystemBars: {

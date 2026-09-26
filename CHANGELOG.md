@@ -17,6 +17,12 @@
 - On iPhone, a site's `alert`, `confirm` and `prompt` boxes now appear, titled
   with the site's name.
 
+### Removed
+
+- A site can no longer sign or decrypt while it is closed, on Android. No site
+  used it. A site can still sign and decrypt in its own window, with the same
+  permissions as before.
+
 ### Fixed
 
 - On iPhone, a site asking for the camera or microphone no longer closes

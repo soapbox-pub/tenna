@@ -899,11 +899,10 @@ final class NappNotifications {
     /**
      * Something is asking to use the key, and nobody has said yes or no.
      *
-     * <p>There is no window to put this in. Either the request arrived on a
-     * relay socket held by a service with the app closed, or it came from an
-     * nsite's service worker, which can be the only thing this app is running
-     * — so a notification is the only way it reaches anybody. Tapping it opens
-     * the sheet, at whatever {@code open} says.
+     * <p>There is no window to put this in. The request arrived on a relay
+     * socket held by a service with the app closed, so a notification is the
+     * only way it reaches anybody. Tapping it opens the sheet, at whatever
+     * {@code open} says.
      *
      * <p>It says what was asked and never what was in it. A lock screen is
      * read by whoever is holding the phone.

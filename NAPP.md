@@ -180,6 +180,32 @@ it arrive, the relays it is expected to be on. It is never empty on Android.
 the next event for the site, with a timeout of five minutes on Android and
 twenty seconds on iOS — see [The delivery deadline](#the-delivery-deadline).
 
+#### The delivery deadline
+
+`event.waitUntil()` inside a `push`, `notificationclick` or
+`notificationclose` handler is waited on for a bounded time, after which Tenna
+moves on to the next event for the site. **How long depends on the platform,
+and there is no way to ask:**
+
+| Platform | Deadline   | Set by                                           |
+| -------- | ---------- | ------------------------------------------------ |
+| Android  | 5 minutes  | Chromium, as it is for any service worker event  |
+| iOS      | 20 seconds | the system, near enough                          |
+
+They differ because they are not the same kind of number. On Android delivery
+runs inside a foreground service that Android puts no clock on, so the only
+limit is Chromium's own: `waitUntil` keeps the worker alive exactly as it would
+on the web, and Chromium stops a worker whose event has run for five minutes.
+Tenna waits as long as that and no longer. A site's hung worker holds up its
+own next event for that long, and no other site's. On iOS a worker runs
+inside a `UNNotificationServiceExtension`, which the system kills at around
+thirty seconds; twenty leaves room to hand over a fallback notification
+deliberately rather than be cut off mid-sentence.
+
+**Write for twenty and you are correct everywhere.** A handler that needs
+longer will work on Android and lose its tail on iOS, which for a notification
+means the difference between the real message and "New message".
+
 #### `showNotification(title, options)`
 
 Every option the Notifications API defines, honoured as far as Android takes
@@ -509,9 +535,8 @@ self.addEventListener('notificationclick', (event) => {
 The permission is the same one `napp.push.set` asks for. A site granted one
 has been granted the other; there is no second question, because to the person
 answering it there is no second thing being asked. It is a decision about this
-site on this phone, so it survives signing out, and — unlike everything in
-[`self.nostr`](#selfnostr--the-signer-inside-the-worker) — a site can notify a
-reader who is not signed in at all.
+site on this phone, so it survives signing out, and — unlike anything that
+needs the key — a site can notify a reader who is not signed in at all.
 
 ## `napp.fetch` — a request without CORS
 
@@ -647,10 +672,9 @@ resolves.
 
 ### In the service worker
 
-`self.napp.fetch` is the same function with the same signature, and it is
-worth having for the same reason `self.nostr` is: a worker woken by a push is
-often the only thing running, and what it needs to say may be behind an API
-call.
+`self.napp.fetch` is the same function with the same signature. A worker woken
+by a push is often the only thing running, and what it needs to say may be
+behind an API call.
 
 ```js
 self.addEventListener('push', async (event) => {
@@ -689,10 +713,12 @@ There is still a clock. A worker woken by a push has five minutes on Android
 and twenty seconds on iOS — see [The delivery deadline](#the-delivery-deadline).
 
 Everything else is identical, including feature detection: `self.napp` is
-absent on the web and on iOS, and on Android an installed worker does not get
-it until Chromium re-fetches its script — the same caveat as
-[`self.nostr`](#an-installed-worker-does-not-have-it-yet), for the same
-reason, since it arrives in the same shim.
+absent on the web and on iOS. On Android it arrives in the shim Tenna appends
+when the worker's script is **fetched**, and the browser keeps that script for
+the life of the registration — so a worker installed before an older Tenna had
+it gets it the next time Chromium re-checks the script, on the next navigation
+to the site or within a day. Nothing the site can do hurries it, and nothing
+breaks in the meantime; the feature detection simply says no.
 
 ### Elsewhere
 
@@ -701,149 +727,6 @@ and not on iOS, where `WKURLSchemeHandler` cannot intercept `https` and is
 never handed a request body anyway. `window.napp.fetch` and `self.napp.fetch`
 are both simply absent there, which is what the `?? fetch` is for. See
 [On iOS](#on-ios).
-
-## `self.nostr` — the signer, inside the worker
-
-A site's window gets `window.nostr`, the ordinary NIP-07 provider. Its
-**service worker** gets `self.nostr`, the same interface, and that is the
-interesting one: a push about a message is not much of a notification until
-somebody decrypts it, and the worker is the only thing running.
-
-```js
-self.addEventListener('push', async (event) => {
-  const { event: dm } = event.data.json();
-
-  let body = 'New message';
-  if (self.nostr) {
-    try {
-      body = await self.nostr.nip44.decrypt(dm.pubkey, dm.content);
-    } catch {
-      // Nobody signed in, the user said no, or nobody answered. The
-      // notification still goes out; it just says less.
-    }
-  }
-
-  event.waitUntil(registration.showNotification('Alice', { body, tag: dm.id }));
-});
-```
-
-**Feature-detect it and expect it to fail.** `self.nostr` is absent on the web
-and on iOS, so the `if` is not optional. And where it is present, being present
-only says Tenna can answer — not that it will. The object is baked into the
-script when the worker is installed and who is signed in changes long
-afterwards, so "nobody is signed in" is a rejected promise rather than a
-missing object.
-
-### What is on it
-
-`getPublicKey`, `signEvent`, `nip04.encrypt`, `nip04.decrypt`,
-`nip44.encrypt`, `nip44.decrypt`, and `getRelays`, which returns `{}` as it
-does in the window. Everything returns a promise and rejects with an `Error`
-whose message says why. `signEvent` returns the whole signed event, as NIP-07
-does.
-
-`nip07.signSchnorr` and `decrypt_zap_event` are not there. Neither is in
-NIP-07.
-
-### Permission
-
-**The same grants the window has.** A site allowed to sign a kind 1 in its
-window is allowed to sign one in its worker, and revoking it from the shield
-menu or from Settings → Apps revokes both. They are one record; there is no
-second list of worker permissions to manage, and nothing to grant in advance.
-
-A call nobody has decided yet raises a **signing notification** — the same one
-a remote NIP-46 app raises, opening the same sheet, because it is the same
-question about the same key. There is no window to draw over, so that is the
-only place it can go.
-
-The call waits on the answer for **two and a half minutes** and then rejects
-with `Timed out waiting for approval`. It really waits: the promise settles when
-the user presses something, and asks nothing in between. Tapping the
-notification and pressing Allow within that window answers the call that raised
-it; taking longer does not, and the site's first notification for that
-permission is the one that goes out without it. The decision is still written
-down, so every call after it is answered with nothing on screen.
-
-Closing the site's window does not cancel it. The channel a worker asks over
-outlives the document that handed it over, so a question raised from a worker
-is still answerable after the user has swiped the site away — which is the
-ordinary way of answering one, since the notification is usually read later.
-
-Two things reject without ever asking:
-
-- **Notifications turned off for Tenna**, which is also the only way the
-  notification could have been shown. Rejected out loud rather than left to
-  time out.
-- **Too many questions.** A worker gets a small budget of *unanswered* calls
-  per half minute, per kind of call. A call the user has already granted is not
-  a question and is not counted, however often it arrives. The ceiling exists
-  because a worker that can raise notifications in a loop can make the phone
-  unusable.
-
-### The delivery deadline
-
-`event.waitUntil()` inside a `push`, `notificationclick` or
-`notificationclose` handler is waited on for a bounded time, after which Tenna
-moves on to the next event for the site. **How long depends on the platform,
-and there is no way to ask:**
-
-| Platform | Deadline   | Set by                                           |
-| -------- | ---------- | ------------------------------------------------ |
-| Android  | 5 minutes  | Chromium, as it is for any service worker event  |
-| iOS      | 20 seconds | the system, near enough                          |
-
-They differ because they are not the same kind of number. On Android delivery
-runs inside a foreground service that Android puts no clock on, so the only
-limit is Chromium's own: `waitUntil` keeps the worker alive exactly as it would
-on the web, and Chromium stops a worker whose event has run for five minutes.
-Tenna waits as long as that and no longer. A site's hung worker holds up its
-own next event for that long, and no other site's. On iOS a worker runs
-inside a `UNNotificationServiceExtension`, which the system kills at around
-thirty seconds; twenty leaves room to hand over a fallback notification
-deliberately rather than be cut off mid-sentence.
-
-**Write for twenty and you are correct everywhere.** A handler that needs
-longer will work on Android and lose its tail on iOS, which for a notification
-means the difference between the real message and "New message".
-
-A permission prompt can outlast either. So the **first** call for a given
-permission will often miss its own notification even when the user says yes
-promptly: Tenna moves on, and the `showNotification` that was waiting on the
-decrypt lands late or not at all.
-
-That is worth knowing and not worth designing around. Decrypt if you can,
-notify with what you have if you cannot, and the second push onwards has the
-grant already:
-
-```js
-const body = await decryptOrNull(dm);
-event.waitUntil(registration.showNotification(title, { body: body ?? 'New message' }));
-```
-
-### An installed worker does not have it yet
-
-The shim is appended when the worker's script is **fetched**, and the browser
-keeps that script for the life of the registration. A site whose worker was
-installed before this existed gets `self.nostr` the next time Chromium
-re-checks the script — on the next navigation to the site, or within a day.
-Nothing the site can do hurries it, and nothing breaks in the meantime; the
-feature detection simply says no.
-
-### Which account
-
-Whoever is signed in to Tenna, and the current one where several are. The same
-answer the window gets, and it can change under a long-lived worker: a site
-that signed as one account last week may be answered as another today, so read
-`getPublicKey()` rather than remembering what it said.
-
-### Elsewhere
-
-Not on the web, where there is no Tenna around the worker to ask. Not on iOS
-either: a worker there runs inside a notification service extension with about
-thirty seconds, a hard memory ceiling and no way to put anything in front of
-the user, so there is nothing that could answer a prompt. `self.nostr` is
-absent in both.
 
 ## `registration.periodicSync` — waking up on a schedule
 
@@ -1067,7 +950,7 @@ when something matches. Three things follow from that:
 | `notificationclick` | raised in the worker | not raised; a tap routes by `data.url` |
 | `icon`, `badge`, `image`, `actions` | drawn | accepted and ignored |
 | the row | a conversation, led by the site's icon | a thread, led by Tenna's |
-| `self.nostr`, `self.napp.fetch` | in the worker | absent |
+| `self.napp.fetch` | in the worker | absent |
 | `napp.fetch`, `share_target` | yes | no |
 
 Two of those are worth writing for rather than around:

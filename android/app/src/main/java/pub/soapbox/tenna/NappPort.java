@@ -31,7 +31,7 @@ import java.util.concurrent.Executors;
  * The host end of a message channel to one nsite's service worker.
  *
  * <p>Everything a worker can ask Tenna for arrives here: a notification, the
- * tray read back, a window opened, a signature, an HTTP request. It used to
+ * tray read back, a window opened, a schedule, an HTTP request. It used to
  * arrive as a URL — a {@code fetch} at the site's own origin, answered from
  * {@code shouldInterceptRequest} — and that road had three costs that were not
  * incidental.
@@ -44,9 +44,8 @@ import java.util.concurrent.Executors;
  *       the bytes it stood for, inside Chromium's two-megabyte URL ceiling, and
  *       a large one had to be cut into as many URLs as it took.
  *   <li><b>It is one-way.</b> A URL is a question; there was no way for the
- *       host to speak first. A signature that needed the user's approval could
- *       therefore not be waited for — it was parked, and the worker asked again
- *       every second until somebody had walked to their phone.
+ *       host to speak first, so nothing could be said to a worker that it had
+ *       not just asked for.
  *   <li><b>The thread is Chromium's.</b> Interception runs on a thread shared
  *       by every service worker in the process, so nothing there could block
  *       without stalling every other site.
@@ -54,7 +53,7 @@ import java.util.concurrent.Executors;
  *
  * <p>A port has none of those. It carries an {@code ArrayBuffer} as bytes,
  * both ends may speak whenever they have something to say, and the callbacks
- * land on a thread of Tenna's own — so a call that has to wait for a person
+ * land on a thread of Tenna's own — so a call that has to wait on the network
  * simply waits, and the reply arrives when it arrives.
  *
  * <h2>Who a port belongs to</h2>
@@ -142,8 +141,8 @@ final class NappPort {
      * One thread for every port in the app.
      *
      * <p>Callbacks land here, and nothing on it is allowed to block: it is
-     * shared, so a call that waited on a person or a socket would stall every
-     * other site's worker — the very hazard interception had, reproduced. What
+     * shared, so a call that waited on a socket would stall every other site's
+     * worker — the very hazard interception had, reproduced. What
      * runs here is framing, dispatch and the acknowledgements, all of which are
      * bookkeeping. Everything that can wait goes to {@link #CALLS}.
      */
@@ -153,10 +152,10 @@ final class NappPort {
     /**
      * Where a call is actually answered.
      *
-     * <p>Unbounded and cached, because what is waiting is a person or a
-     * network: a signature nobody has approved holds one of these for as long
-     * as {@link NsiteWorkerSigner} allows, and a site is entitled to
-     * {@link NappFetchPolicy#MAX_IN_FLIGHT_PER_SITE} requests at once.
+     * <p>Unbounded and cached. Nothing answered here waits for long — a
+     * {@code fetch} never comes here at all, see {@link #onText} — but posting
+     * a notification or starting an activity is still not the port thread's
+     * business.
      */
     private static final ExecutorService CALLS = Executors.newCachedThreadPool(r -> {
         Thread worker = new Thread(r, "napp-port-call");
@@ -593,9 +592,6 @@ final class NappPort {
                 case "open":
                     open(id, params);
                     break;
-                case "nostr":
-                    nostr(id, params);
-                    break;
                 case "periodicsync":
                     periodicSync(id, params);
                     break;
@@ -746,35 +742,6 @@ final class NappPort {
         }
 
         result(id, JSONObject.NULL);
-    }
-
-    /**
-     * {@code self.nostr}.
-     *
-     * <p>This is the call the port was worth having for. On the old road a
-     * signature nobody had approved could not be waited for — the thread was
-     * Chromium's — so it was parked and the worker asked again every second.
-     * Here the reply simply arrives when the user has decided, and the worker's
-     * promise settles then. See {@link NsiteWorkerSigner}.
-     */
-    private void nostr(int id, @NonNull JSONObject params) {
-        NsiteWorkerSigner.answer(
-            context,
-            siteId,
-            params.optString("method", ""),
-            params.optJSONObject("params"),
-            new NsiteWorkerSigner.Answer() {
-                @Override
-                public void result(@NonNull Object value) {
-                    NappPort.this.result(id, value);
-                }
-
-                @Override
-                public void failed(@NonNull String reason) {
-                    fail(id, reason);
-                }
-            }
-        );
     }
 
     /**

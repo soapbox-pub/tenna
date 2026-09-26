@@ -11,20 +11,19 @@
  * `event.notification.close()` and `event.reply` all work.
  *
  * Everything that reaches outside the worker — showing a notification, reading
- * the tray back, signing something, making an HTTP request — is a message on a
- * `MessagePort` the host handed over. That port arrives with the very same
- * `message` the event does, so by the time a site's `push` handler runs there
- * is already somewhere to ask.
+ * the tray back, making an HTTP request — is a message on a `MessagePort` the
+ * host handed over. That port arrives with the very same `message` the event
+ * does, so by the time a site's `push` handler runs there is already somewhere
+ * to ask.
  *
  * It used to be a same-origin `fetch` instead, answered from
  * `shouldInterceptRequest`, with the payload written out as base64 in the
  * query string. That road is worth remembering because every awkward thing
  * about it came from one fact: interception is never given a request body. So
  * a worker could only ever ask, never say; anything it wanted to hand over had
- * to fit in a URL or be cut into several; and a call that needed the user's
- * approval could not be waited for, because the thread belonged to Chromium
- * and was shared by every worker in the app — so it was answered with "not
- * yet" and asked again every second. A port has none of that. See NappPort.
+ * to fit in a URL or be cut into several; and nothing it asked could be waited
+ * on for long, because the thread belonged to Chromium and was shared by every
+ * worker in the app. A port has none of that. See NappPort.
  *
  * Appended rather than prepended so that a `'use strict'` prologue at the top
  * of the site's own script keeps meaning what it says.
@@ -464,89 +463,6 @@
       Object.defineProperty(self.Notification, 'permission', { get: function () { return 'granted'; } });
     } catch (err) {}
   }
-
-  // -------------------------------------------------------------------------
-  // self.nostr
-  // -------------------------------------------------------------------------
-
-  /*
-   * The NIP-07 provider, for a worker.
-   *
-   * A site's window gets this injected as `window.nostr`; a worker has no
-   * window to inject into, and is often the only thing running — which is
-   * exactly when it is worth having, since a push about a message is not much
-   * of a notification until somebody decrypts it.
-   *
-   * The host decides nothing new: the grants are the ones the site's window
-   * was given, read out of the store they were written to. See
-   * NsiteWorkerSigner.
-   *
-   * A call the user has to approve simply takes as long as it takes — the
-   * promise settles when they have pressed something. On the old road it could
-   * not: the answer had to come back on a thread Chromium shared with every
-   * worker in the app, so the call was parked and asked about once a second
-   * until somebody had decided.
-   *
-   * `self.nostr` being here says Tenna can answer, not that it will. Nobody
-   * signed in, and a permission refused, both come back as a rejected promise
-   * rather than as a missing object — the object is baked into this script
-   * when the worker is installed, and who is signed in changes long
-   * afterwards.
-   */
-
-  /*
-   * One call at a time.
-   *
-   * A call nobody has answered before puts a notification in front of the
-   * user, and a worker looping over a conversation would otherwise put one
-   * there per message. The window's provider serialises for the same reason;
-   * see `nsiteNostrProvider.ts`.
-   */
-  var nostrQueue = Promise.resolve();
-
-  function sign(method, params) {
-    var run = function () { return call('nostr', { method: method, params: params || {} }); };
-
-    // Chained off the tail whatever happened to the one in front: a refusal
-    // is an answer, and the next call is still owed its turn.
-    var next = nostrQueue.then(run, run);
-    nostrQueue = next.then(function () {}, function () {});
-    return next;
-  }
-
-  self.nostr = {
-    getPublicKey: function () {
-      return sign('getPublicKey', {});
-    },
-
-    signEvent: function (event) {
-      return sign('signEvent', { event: event });
-    },
-
-    // As in the window: Tenna publishes on the relays the user configured, and
-    // a site asking which those are is asking the app rather than the key.
-    getRelays: function () {
-      return Promise.resolve({});
-    },
-
-    nip04: {
-      encrypt: function (pubkey, plaintext) {
-        return sign('nip04.encrypt', { pubkey: pubkey, text: plaintext });
-      },
-      decrypt: function (pubkey, ciphertext) {
-        return sign('nip04.decrypt', { pubkey: pubkey, text: ciphertext });
-      },
-    },
-
-    nip44: {
-      encrypt: function (pubkey, plaintext) {
-        return sign('nip44.encrypt', { pubkey: pubkey, text: plaintext });
-      },
-      decrypt: function (pubkey, ciphertext) {
-        return sign('nip44.decrypt', { pubkey: pubkey, text: ciphertext });
-      },
-    },
-  };
 
   // -------------------------------------------------------------------------
   // self.napp.fetch

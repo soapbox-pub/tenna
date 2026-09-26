@@ -19,11 +19,10 @@
  * to the person being asked they are one thing.
  *
  * This is the path for a site with a window. The same site's **service
- * worker** asks for the same things over a reserved path answered in native
- * code — see `NsiteWorkerSigner.java` and `NsiteRequests.java` — because a
- * worker woken by a push has no window and no bridge to reach this hook with.
- * Both roads reach one store and one tray, so a grant made here is honoured
- * there and a notification posted here is the worker's to replace.
+ * worker** posts notifications over a channel answered in native code — see
+ * `NappPort.java` — because a worker woken by a push has no window and no
+ * bridge to reach this hook with. Both roads reach one tray, so a notification
+ * posted here is the worker's to replace. A worker cannot sign.
  */
 import type { NostrEvent } from '@nostrify/nostrify';
 import { useCallback, useRef, useState } from 'react';

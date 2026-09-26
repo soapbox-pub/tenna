@@ -131,29 +131,10 @@ anything else is refused out loud rather than left to time out.
 
 ## A site inside Tenna
 
-An nsite asks over `window.nostr`, injected into its window — and, since its
-service worker has no window to inject into, over `self.nostr` there too.
+An nsite asks over `window.nostr`, injected into its window, and is answered by
+the web layer. Its service worker has no signer: a site woken by a push can
+notify, but it cannot sign or decrypt until the user opens it.
 [NAPP.md](NAPP.md) is the whole of what a site sees.
-
-The worker is the case worth stating here, because it is the one that reaches
-this code rather than the web layer. A site woken by a push has no window, no
-bridge and nothing on screen, so its calls are answered by the same class that
-answers an intent and a relay — against the same grants, which is why they are
-kept natively rather than in the browser storage that a worker cannot see.
-
-So a site allowed to decrypt in its window is allowed to decrypt in its
-worker, one switch in Settings turns off both, and a call nobody has decided
-raises the same notification a remote app's does. The one difference is that a
-worker will not wait forever: after two and a half minutes the call is refused,
-the notification comes down, and the site is told why.
-
-Until then it simply waits, which is newer than it sounds. A worker's calls used
-to arrive as requests Tenna intercepted, on a thread Chromium shares with every
-worker in the app — so waiting there for somebody to walk to their phone would
-have stalled every other site, and the call was instead parked and asked about
-once a second until it had an answer. It now arrives over a channel of its own,
-answered on a thread of Tenna's, and the answer is sent when there is one. See
-`NappPort`.
 
 ## Being asked
 

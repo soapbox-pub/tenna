@@ -71,12 +71,11 @@ function sourceSubtitle(source: AuthorizedSource, requesterId: string): string {
  * Everything that has been given this account's key, in one list.
  *
  * Sites, apps on the phone and remote clients all keep their grants in the
- * same native store on Android, because every path that answers one of them
- * can run with no WebView: a content resolver query, a relay socket, and —
- * since a site's service worker learned to sign — a worker fetch for a site
- * with no window open. Off Android a site's grants are still the web layer's
- * localStorage, which is why they are read through `nsitePermissions` rather
- * than picked out of the native list here.
+ * same native store on Android, because the paths that answer apps and
+ * clients can run with no WebView — a content resolver query, a relay socket —
+ * and a site's grants live beside them. Off Android a site's grants are still
+ * the web layer's localStorage, which is why they are read through
+ * `nsitePermissions` rather than picked out of the native list here.
  *
  * This is a read. The one write is revocation, below.
  */

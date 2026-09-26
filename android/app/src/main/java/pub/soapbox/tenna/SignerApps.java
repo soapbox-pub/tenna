@@ -40,13 +40,12 @@ import java.util.List;
  * app that was let near the first has not been let near the second.
  *
  * <p><b>This store is the original and never a mirror.</b> The content
- * resolver, the relay path and an nsite's service worker all answer with no
- * WebView anywhere, so the only copy that can be consulted at the moment of
- * the question is this one. {@code nsitePermissions.ts} held the site half of
- * it in the web layer's storage until a worker needed to read it, and now
- * delegates here on Android — the sheet over a site and the sheet a
- * notification opens write the same record, which is the point. The settings
- * screen reads it all back over the bridge.
+ * resolver and the relay path both answer with no WebView anywhere, so the
+ * only copy that can be consulted at the moment of the question is this one.
+ * {@code nsitePermissions.ts} held the site half of it in the web layer's
+ * storage until a site's service worker needed to read it, and still delegates
+ * here on Android, so every grant is in one place. The settings screen reads
+ * it all back over the bridge.
  *
  * <p>Grants carry no expiry. Tenna's answer to a site is {@code allow},
  * {@code deny} or {@code ask} and nothing else, and an app is not a harder

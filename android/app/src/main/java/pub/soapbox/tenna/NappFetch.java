@@ -1140,10 +1140,9 @@ final class NappFetch {
     /**
      * Drop tickets nobody came back for.
      *
-     * <p>Lazily, on the next staging or collection, which is how
-     * {@link NsiteWorkerSigner} does it too: there is no clock worth running
-     * for this, and anything stale is by definition something no one is
-     * waiting on. Called holding {@link #staged}.
+     * <p>Lazily, on the next staging or collection: there is no clock worth
+     * running for this, and anything stale is by definition something no one
+     * is waiting on. Called holding {@link #staged}.
      */
     private static void sweep() {
         long now = System.currentTimeMillis();

@@ -110,8 +110,7 @@ public class SignerAppsPlugin extends Plugin {
      *
      * <p>The one write here that is not a revocation, and it exists because
      * the sheet over an nsite is drawn in React while the record it produces
-     * has to be readable from a service worker fetch with no WebView in front
-     * of it. See {@code nsitePermissions.ts}.
+     * lives here, beside every other grant. See {@code nsitePermissions.ts}.
      */
     @PluginMethod
     public void grant(PluginCall call) {

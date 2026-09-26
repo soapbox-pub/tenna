@@ -1,5 +1,41 @@
 # Changelog
 
+## [0.11.0] - 2026-09-26
+
+Sites can reach you on iPhone while they are closed. A site that asks to be
+told about something — a message, a reply — now wakes the phone and puts a
+notification up, and tapping it opens the site where the notification said.
+Sites opened on iPhone can also use your account for the first time. On
+Android, a site has five minutes rather than one to finish what a notification
+needed, and every switch in the app is drawn the right size again.
+
+### Added
+
+- Notifications from a closed site, on iPhone. A site asks for them exactly as
+  it does on Android and runs the same code when one arrives. iOS will not let
+  an app keep watching in the background, so what a site wants to hear about is
+  handed to a push service that watches for it and wakes the phone — it is told
+  what this phone wants, never whose phone it is. A tap opens the site at the
+  page the notification names, or its front page if it names none. A site has
+  twenty seconds to decide what to say, and one notification per arrival.
+- Notifications from a site's own window, on iPhone, onto the same tray.
+
+### Changed
+
+- A site gets five minutes on Android to finish what it was doing about a
+  notification, where it had sixty seconds — as long as the same site would
+  get in a browser. One site taking its time holds up only its own next
+  notification, never another site's.
+
+### Fixed
+
+- A site opened on iPhone can ask Tenna to sign, and can ask for
+  notifications. Neither request ever reached Tenna there, so a site that
+  wanted your account behaved as if nobody was logged in.
+- Every switch in the app is drawn inside its own track. The knob was too big
+  for it and hung off the right-hand end, past the edge everything else on the
+  screen lines up with.
+
 ## [0.10.2] - 2026-09-22
 
 Allowing a site something and asking Tenna to remember it now sticks. The

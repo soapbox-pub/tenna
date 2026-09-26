@@ -4,9 +4,11 @@
 # version from the git tag and prepends both to a temp copy of this file, so a
 # release can never disagree with the tag it was cut from.
 #
-# `icon` is build output (scripts/generate-icons.mjs rasterises it from
-# public/logo.svg, and `npm run build` runs it), which is why the publish step
-# comes after the build in that workflow.
+# `icon` and `release_notes` are made absolute by that job, since zsp reads
+# them relative to the temp copy. `icon` is also build output
+# (scripts/generate-icons.mjs rasterises it from public/logo.svg, and
+# `npm run build` runs it), which is why the publish step comes after the
+# build in that workflow.
 
 repository: https://nostrhub.io/npub1q3sle0kvfsehgsuexttt3ugjd8xdklxfwwkh559wxckmzddywnws6cd26p/tenna
 
@@ -47,6 +49,12 @@ tags:
 license: AGPL-3.0-or-later
 
 icon: ./public/icons/icon-512.png
+
+# zsp takes the `## [X.Y.Z]` section matching the version being published and
+# uses it as the release event's content, which is what Zapstore shows as
+# "What's new". The release skill has already turned [Unreleased] into that
+# heading by the time the tag is pushed.
+release_notes: ./CHANGELOG.md
 
 supported_nips:
   - "01"  # Basic protocol: events, filters, subscriptions

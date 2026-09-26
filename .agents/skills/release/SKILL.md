@@ -15,7 +15,7 @@ This skill guides you through publishing a new release of Tenna: choosing the ve
   - `versionCode` = `major * 1_000_000 + minor * 1_000 + patch`
 
   So **do not edit `package.json` or `android/app/build.gradle`** during a release. `package.json`'s `version` is inert template leftover; changing it changes nothing and misleads the next person.
-- **Changelog**: `CHANGELOG.md` in the repo root, [Keep a Changelog](https://keepachangelog.com/) format. Nothing in CI reads it — it is the human record of the release and the source of the announcement text. Create it on the first release if it does not exist.
+- **Changelog**: `CHANGELOG.md` in the repo root, [Keep a Changelog](https://keepachangelog.com/) format. It is the human record of the release, the source of the announcement text, and what Zapstore shows as the release notes: `zapstore.yaml` points zsp at it, and zsp publishes the `## [X.Y.Z]` section matching the tag's version. So the heading must be exactly `## [X.Y.Z] - YYYY-MM-DD`, or Zapstore gets the whole file. Create it on the first release if it does not exist.
 - **Version bumping**:
   - **Patch (Z)**: Most releases. Bug fixes, tweaks, internal improvements — anything a user wouldn't specifically notice or seek out.
   - **Minor (Y)**: Releases with a headline feature — something worth announcing. A user should look at the bump and think "oh, something new happened."

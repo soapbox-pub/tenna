@@ -14,12 +14,16 @@ import { downloadTextFile } from '@/lib/downloadFile';
  * log in; `getNsecCredential` exists so the login screen can offer to fill the
  * field, which is a convenience rather than a mechanism.
  *
- * - **Android**: `@capgo/capacitor-autofill-save-password` calls AndroidX
+ * - **Android 14+**: `@capgo/capacitor-autofill-save-password` calls AndroidX
  *   Credential Manager, which is provider-agnostic — Google's manager on a
  *   stock device, Bitwarden or 1Password or KeePass where one of those is
- *   registered instead. A de-Googled phone with nothing registered has no
- *   provider at all and the call rejects; see {@link saveNsec} for what
- *   happens then.
+ *   registered instead. A phone with nothing registered has no provider at
+ *   all and the call rejects; see {@link saveNsec} for what happens then.
+ * - **Android 13 and below**: always rejects, by choice. AndroidX reaches the
+ *   platform service only from API 34; below that it needs Google's
+ *   `credentials-play-services-auth` bridge, which android/build.gradle
+ *   excludes because it bundles Play Services into the APK. The key goes to a
+ *   file instead, same as above.
  * - **iOS**: the same plugin calls `SecAddSharedWebCredential`, which needs the
  *   `webcredentials:` Associated Domains entitlement and a matching
  *   `apple-app-site-association` at {@link CREDENTIAL_DOMAIN}. Tenna has no
@@ -149,9 +153,10 @@ function nsecFilename(npub: string): string {
  * the file it wrote is somewhere the user would not otherwise think to look.
  *
  * - **Android**: Credential Manager, and where there is no provider to answer
- *   — a de-Googled device with nothing registered, which is a common enough
- *   case to have been the one this was first tested on — the key is written to
- *   the shared Documents folder instead, so that there is always *some* copy.
+ *   — any device below Android 14, or one with nothing registered, which is a
+ *   common enough case to have been the one this was first tested on — the key
+ *   is written to the shared Documents folder instead, so that there is always
+ *   *some* copy.
  *   That folder is not private: it is the one the Files app opens on, which is
  *   the point, and it is equally readable by anything the user has granted
  *   storage access to. It is a plaintext key on disk, and it is only reached

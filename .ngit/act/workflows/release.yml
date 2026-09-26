@@ -186,6 +186,33 @@ jobs:
           # emulator can still run one.
           ./gradlew assembleRelease --no-daemon -PapkAbis=armeabi-v7a,arm64-v8a
 
+      # The APK is FOSS-only, and a Capacitor plugin can quietly break that by
+      # depending on something that pulls in Play Services — that is exactly how
+      # @capgo/capacitor-autofill-save-password shipped GMS in v0.6.0–v0.11.0.
+      # android/build.gradle excludes the known roots; this catches the next
+      # one before it is signed and published. The dex is read raw rather than
+      # through dexdump because build-tools may not be on the PATH, and a
+      # class's type descriptor appears verbatim in the dex string table.
+      - name: Refuse an APK that contains Google Play Services
+        run: |
+          set -eu
+          apk=android/app/build/outputs/apk/release/app-release.apk
+          found=0
+          if unzip -Z1 "$apk" | grep -E '^(play-services-|googleid|firebase-).*\.properties$'; then
+            found=1
+          fi
+          if unzip -p "$apk" 'classes*.dex' | grep -aqE 'Lcom/google/(android/gms|firebase)/'; then
+            unzip -p "$apk" 'classes*.dex' | grep -aoE 'Lcom/google/(android/gms|firebase)/[a-z]+' | sort | uniq -c
+            found=1
+          fi
+          if [ "$found" -ne 0 ]; then
+            echo "The APK contains Google Play Services or Firebase. Find the dependency" >&2
+            echo "that brought it in (./gradlew :app:dependencies) and exclude it in" >&2
+            echo "android/build.gradle." >&2
+            exit 1
+          fi
+          echo "no Google Play Services or Firebase in the APK"
+
       - name: Collect and name the artifact
         id: artifacts
         env:

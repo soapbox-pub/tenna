@@ -8,7 +8,11 @@ buildscript {
     }
     dependencies {
         classpath 'com.android.tools.build:gradle:8.13.0'
-        classpath 'com.google.gms:google-services:4.4.4'
+        // NOTE: no com.google.gms:google-services here. Capacitor's template
+        // carries it for FCM; Tenna has no google-services.json, and the app
+        // module's matching `apply plugin` probe is gone too. Notifications are
+        // NappPushService's own relay WebSocket, not FCM. (`google()` stays —
+        // it is the Maven repo AndroidX and AGP are published to, not code.)
 
         // NOTE: Do not place your application dependencies here; they belong
         // in the individual module build.gradle files
@@ -21,6 +25,23 @@ allprojects {
     repositories {
         google()
         mavenCentral()
+    }
+
+    // Tenna ships a FOSS-only APK. `androidx.credentials:credentials-play-services-auth`
+    // (pulled in by @capgo/capacitor-autofill-save-password) is Apache-2.0 itself, but it
+    // exists solely to bridge Credential Manager to Google Play Services, and drags the
+    // proprietary play-services-{auth,base,basement,fido,…} binaries into the APK along
+    // with their activities and services in the merged manifest.
+    //
+    // Excluding it leaves the base `androidx.credentials` API, which talks to the
+    // Credential Manager built into the OS on Android 14+ (API 34+) and so works with
+    // any provider, FOSS password managers included. Below that there is no provider,
+    // the call rejects, and `saveNsec` in src/lib/credentialManager.ts writes the key to
+    // a file instead — the path a de-Googled phone already took. Don't re-add it to
+    // "fix" older devices. release.yml fails the build if any GMS class comes back.
+    configurations.configureEach {
+        exclude group: 'androidx.credentials', module: 'credentials-play-services-auth'
+        exclude group: 'com.google.android.gms'
     }
 }
 

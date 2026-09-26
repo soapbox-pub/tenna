@@ -39,6 +39,12 @@
 - On iPhone, only a site's own page can ask for your signature. A frame
   embedded in the site from somewhere else could reach the same channel
   before.
+- The Android app no longer contains Google Play Services. Since 0.6.0 it
+  had carried Google's sign-in and account libraries, which came in with the
+  code that saves your key to a password manager. Tenna now uses Android's own
+  password saving, which works with any password manager on Android 14 and
+  up. On older phones your key is saved to a file instead, as it already was
+  on phones without Google.
 
 ## [0.11.0] - 2026-09-26
 

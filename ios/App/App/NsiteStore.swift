@@ -13,7 +13,9 @@ import Foundation
  document under a custom scheme cannot register a real service worker and the
  one the site asked for is otherwise nowhere (see `NsiteOrigins`); its
  **subscriptions**, which are how the extension works out that a push is this
- site's and not a neighbour's; and whether the user has **muted** it.
+ site's and not a neighbour's; whether the user has **muted** it; and the
+ **periodic sync** tags it registered, which the main app's background refresh
+ task reads (see `NappPeriodicSync`).
 
  Records live in the App Group container as one JSON file per site, named by
  the site id. An id is a DNS label — `NsiteOrigins.isSiteId` — so it is already
@@ -33,6 +35,8 @@ struct NsiteRecord {
     var subscriptions: [Any]
     /// The user's answer, which outlives whatever the site sets.
     var muted: Bool
+    /// What the site passed to `registration.periodicSync.register`.
+    var periodicSync: [NsitePeriodicTag] = []
     var updatedAt: Double
 
     /// Every filter the site is listening on, for routing a push.
@@ -40,6 +44,33 @@ struct NsiteRecord {
 
     /// Whether this site would take a push at all right now.
     var listening: Bool { !muted && !subscriptions.isEmpty }
+}
+
+/// One `registration.periodicSync` tag.
+struct NsitePeriodicTag {
+    var tag: String
+    /// Seconds, already rounded up to the floor.
+    var minInterval: TimeInterval
+    /// When it last ran, or was registered if it never has. Seconds since 1970.
+    var lastRun: TimeInterval
+
+    init(tag: String, minInterval: TimeInterval, lastRun: TimeInterval) {
+        self.tag = tag
+        self.minInterval = minInterval
+        self.lastRun = lastRun
+    }
+
+    init?(_ object: Any) {
+        guard let object = object as? [String: Any],
+              let tag = object["tag"] as? String, !tag.isEmpty else { return nil }
+        self.tag = tag
+        self.minInterval = (object["minInterval"] as? NSNumber)?.doubleValue ?? 0
+        self.lastRun = (object["lastRun"] as? NSNumber)?.doubleValue ?? 0
+    }
+
+    var json: [String: Any] {
+        ["tag": tag, "minInterval": minInterval, "lastRun": lastRun]
+    }
 }
 
 enum NsiteStore {
@@ -96,6 +127,7 @@ enum NsiteStore {
             worker: (object["worker"] as? String).flatMap { NsiteBlobs.isPath($0) ? $0 : nil },
             subscriptions: object["subscriptions"] as? [Any] ?? [],
             muted: object["muted"] as? Bool ?? false,
+            periodicSync: (object["periodicSync"] as? [Any] ?? []).compactMap { NsitePeriodicTag($0) },
             updatedAt: (object["updatedAt"] as? NSNumber)?.doubleValue ?? 0
         )
     }
@@ -113,6 +145,7 @@ enum NsiteStore {
             "servers": record.servers,
             "subscriptions": record.subscriptions,
             "muted": record.muted,
+            "periodicSync": record.periodicSync.map(\.json),
             "updatedAt": Date().timeIntervalSince1970,
         ]
         if let worker = record.worker { object["worker"] = worker }

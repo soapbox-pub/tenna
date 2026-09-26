@@ -26,7 +26,7 @@ import type { NsiteApp } from '@/hooks/useNsiteApp';
 import type { UseNsitePinResult } from '@/hooks/useNsitePin';
 import { useToast } from '@/hooks/useToast';
 import { impactLight, impactMedium, notificationError } from '@/lib/haptics';
-import { NappPush, supportsNappPush } from '@/lib/nappPushPlugin';
+import { NappPush, supportsNappPush, supportsPeriodicSync } from '@/lib/nappPushPlugin';
 import { NativeApps, supportsNativeApps } from '@/lib/nativeAppsPlugin';
 import {
   clearNsitePermissions,
@@ -358,6 +358,15 @@ export function NsiteAppInfo({
     });
   };
 
+  // The same for "refresh in the background": the tags are scheduled natively,
+  // and would go on waking the site after the grant behind them was gone.
+  const forgetPeriodicSync = () => {
+    if (!supportsPeriodicSync()) return;
+    void NappPush.periodicSyncClear({ siteId }).catch(() => {
+      // Left scheduled; the next register() from the site prompts again.
+    });
+  };
+
   /**
    * Whether the user wants to hear from this site at all.
    *
@@ -417,6 +426,7 @@ export function NsiteAppInfo({
   const handleRemoveBrowser = (perm: NsiteBrowserPermission) => {
     removeNsiteBrowserPermission(siteId, perm.type);
     if (perm.type === 'notifications') forgetSubscriptions();
+    if (perm.type === 'periodic-background-sync') forgetPeriodicSync();
   };
 
   const handleClearAll = () => {
@@ -426,6 +436,7 @@ export function NsiteAppInfo({
     const couldNotify = browserPermissions.some((perm) => perm.type === 'notifications');
     clearNsiteBrowserPermissions(siteId);
     if (couldNotify) forgetSubscriptions();
+    forgetPeriodicSync();
 
     if (!user) return;
     void clearNsitePermissions(siteId, user.pubkey);

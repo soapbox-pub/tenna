@@ -94,6 +94,11 @@ dependencies {
     implementation "androidx.webkit:webkit:$androidxWebkitVersion"
     // NappPushService: the WebSocket client that keeps relays open.
     implementation "com.squareup.okhttp3:okhttp:$okhttpVersion"
+    // NappPeriodicSync: the scheduler behind `registration.periodicSync`.
+    // Survives a reboot on its own and waits for a network, which is all a
+    // periodic job needs and more than the push service could offer without
+    // holding a foreground notification up between runs.
+    implementation "androidx.work:work-runtime:$androidxWorkVersion"
     // NostrCrypto: ACINQ's JNI bindings over libsecp256k1, the audited C
     // library Bitcoin Core uses — and Amber and Amethyst, through these same
     // bindings. BIP-340 Schnorr signing and the ECDH both encryption NIPs

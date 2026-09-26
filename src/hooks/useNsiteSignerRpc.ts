@@ -29,7 +29,12 @@ import type { NostrEvent } from '@nostrify/nostrify';
 import { useCallback, useRef, useState } from 'react';
 
 import { useCurrentUser } from '@/hooks/useCurrentUser';
-import { NappPush, supportsNappPush, supportsNappWorkerShim } from '@/lib/nappPushPlugin';
+import {
+  NappPush,
+  supportsNappPush,
+  supportsNappWorkerShim,
+  supportsPeriodicSync,
+} from '@/lib/nappPushPlugin';
 import { normalizeNappSubscriptions } from '@/lib/nappSubscriptions';
 import {
   getNsiteBrowserPermission,
@@ -49,6 +54,9 @@ import {
 
 /** NIP-42 client authentication. Signed on request, without asking. */
 const NIP42_AUTH = 22242;
+
+/** The longest periodic sync tag a site may register. Chromium sets none; a tag is a name, not a payload. */
+const MAX_PERIODIC_SYNC_TAG = 256;
 
 /** Describes a pending permission prompt waiting for the user's decision. */
 export interface NsitePromptState {
@@ -460,6 +468,71 @@ export function useNsiteSignerRpc({
           return undefined;
         }
 
+        // `registration.periodicSync`. Registering is the one that asks: a
+        // site that is allowed to wake itself up while closed is running code
+        // on the phone with nobody looking, which is a question about the
+        // device, remembered per site. Listing and unregistering ask nobody
+        // anything, as `getTags` and `unregister` never prompt on the web.
+        case 'napp.periodicsync.register': {
+          if (!supportsPeriodicSync()) {
+            throw new Error('Periodic background sync is not available on this platform');
+          }
+
+          // Refused before the user is asked, for the reason `napp.push.set`
+          // is: a prompt for a request that would then fail is a prompt for
+          // nothing.
+          const tag = typeof p.tag === 'string' ? p.tag : '';
+          if (!tag || tag.length > MAX_PERIODIC_SYNC_TAG) {
+            throw new Error('Invalid tag');
+          }
+          const minInterval = typeof p.minInterval === 'number' && Number.isFinite(p.minInterval)
+            ? Math.max(0, p.minInterval)
+            : 0;
+
+          // The web's word for this refusal, which the shim turns into a
+          // `NotAllowedError`.
+          if (!(await onCapability(['periodic-background-sync']))) {
+            throw new Error('Permission denied');
+          }
+
+          await NappPush.periodicSyncRegister({
+            siteId,
+            label: siteName,
+            ...(manifest ? { event: JSON.stringify(manifest) } : {}),
+            tag,
+            minInterval,
+          });
+          return undefined;
+        }
+
+        case 'napp.periodicsync.unregister': {
+          if (!supportsPeriodicSync() || typeof p.tag !== 'string') return undefined;
+          await NappPush.periodicSyncUnregister({ siteId, tag: p.tag });
+          return undefined;
+        }
+
+        case 'napp.periodicsync.tags': {
+          if (!supportsPeriodicSync()) return [];
+          const { tags } = await NappPush.periodicSyncTags({ siteId });
+          return tags;
+        }
+
+        // `navigator.permissions.query`, for the two names Tenna answers
+        // itself. The engine's own answer for either would be about a
+        // permission it does not implement here.
+        case 'permissions.query': {
+          if (p.name === 'periodic-background-sync') {
+            if (!supportsPeriodicSync()) return 'denied';
+            const stored = getNsiteBrowserPermission(siteId, 'periodic-background-sync');
+            return stored === 'allow' ? 'granted' : stored === 'deny' ? 'denied' : 'prompt';
+          }
+          if (p.name === 'notifications') {
+            const state = await notifyPermission();
+            return state === 'default' ? 'prompt' : state;
+          }
+          throw new Error('Unsupported permission');
+        }
+
         case 'napp.push.get': {
           if (!supportsNappPush()) throw new Error('Push is not available on this platform');
           const { subscriptions } = await NappPush.get({ siteId });
@@ -626,6 +699,8 @@ export function useNsiteSignerRpc({
       checkPermission,
       siteId,
       siteName,
+      manifest,
+      onCapability,
       askToNotify,
       showNotification,
       listNotifications,

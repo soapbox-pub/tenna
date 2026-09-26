@@ -152,7 +152,10 @@ class NotificationService: UNNotificationServiceExtension {
             // The host page asks for `/sw.js` because that is the name the
             // shim's marker is hung on; what it gets is the script the site
             // actually registered, which may be anywhere in its manifest.
-            let host = NsiteWorkerHost(siteId: site.siteId) { path, _ in
+            let host = NsiteWorkerHost(
+                siteId: site.siteId,
+                periodicTags: site.periodicSync.map(\.tag)
+            ) { path, _ in
                 await server.file(path == "/sw.js" ? worker : path)
             }
 

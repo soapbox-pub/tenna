@@ -3,7 +3,7 @@ import { Capacitor, type PluginListenerHandle } from '@capacitor/core';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import type { NsiteFrameProps } from '@/components/nsite/types';
-import { supportsNappPush, supportsNappWorkerShim } from '@/lib/nappPushPlugin';
+import { supportsNappPush, supportsNappWorkerShim, supportsPeriodicSync } from '@/lib/nappPushPlugin';
 import { getNsiteBrowserPermission } from '@/lib/nsiteBrowserPermissions';
 import { buildManifest, resolveServers } from '@/lib/nsiteFiles';
 import {
@@ -55,6 +55,7 @@ function nsiteProviderScript(
   // iOS only, where WebKit gives a custom-scheme document no service workers
   // and `register()` is the only place the worker's path is ever said.
   const serviceWorker = supportsNappWorkerShim();
+  const periodicSync = supportsPeriodicSync();
 
   if (!pubkey && !push && !fetch && !notify && !serviceWorker) return undefined;
 
@@ -67,6 +68,7 @@ function nsiteProviderScript(
     fetch,
     notify,
     serviceWorker,
+    periodicSync,
     notifyGrant: stored === 'allow' ? 'granted' : stored === 'deny' ? 'denied' : 'default',
   });
 }

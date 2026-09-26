@@ -26,4 +26,11 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
     func scene(_ scene: UIScene, continue userActivity: NSUserActivity) {
         SceneDelegateProxy.shared.scene(scene, continue: userActivity)
     }
+
+    func sceneDidEnterBackground(_ scene: UIScene) {
+        // A background refresh request only lives as long as nobody replaces
+        // it, and leaving is the last moment to make sure one is in. See
+        // `NappPeriodicSync`.
+        NappPeriodicSync.schedule()
+    }
 }

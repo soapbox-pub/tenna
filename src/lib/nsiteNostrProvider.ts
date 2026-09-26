@@ -105,6 +105,13 @@ export interface NsiteBridgeOptions {
    * other record of it. See {@link SERVICE_WORKER_SOURCE}.
    */
   serviceWorker?: boolean;
+  /**
+   * Stand in for Periodic Background Sync, which neither WebView has.
+   *
+   * `registration.periodicSync` and the `periodic-background-sync` answer to
+   * `navigator.permissions.query`. See {@link PERIODIC_SYNC_SOURCE}.
+   */
+  periodicSync?: boolean;
 }
 
 /**
@@ -474,6 +481,109 @@ function notificationSource(grant: 'granted' | 'denied' | 'default'): string {
 }
 
 /**
+ * Periodic Background Sync, for a WebView that hasn't got it.
+ *
+ * Chrome ships it only to installed web apps, and neither Android's WebView nor
+ * WebKit ships it at all. So the page's half is built here, under its own
+ * names — `registration.periodicSync.register(tag, { minInterval })`,
+ * `getTags()`, `unregister(tag)` — and the event the worker gets is raised by
+ * the worker shims, from a WorkManager job on Android and a background refresh
+ * task on iOS. A site written for Chrome is written for this.
+ *
+ * Where it is not quite Chrome: Chrome refuses `register` unless the site is
+ * installed and never asks, and this asks. A refusal is the `NotAllowedError`
+ * Chrome gives. `minInterval` is rounded up to fifteen minutes, which is the
+ * shortest thing either scheduler will do, and on iOS the system decides when
+ * a run actually happens.
+ *
+ * `navigator.permissions.query` is wrapped for the names Tenna answers itself —
+ * this one and `notifications` — and hands every other name to the engine.
+ * Defined before {@link SERVICE_WORKER_SOURCE}, which hangs the manager on the
+ * stand-in registration iOS gets.
+ */
+const PERIODIC_SYNC_SOURCE = `
+  function periodicSyncRefusal(err) {
+    var message = err && err.message ? String(err.message) : 'Permission denied.';
+    if (!/denied|rejected|refused/i.test(message)) return err;
+    try {
+      return new DOMException('Permission denied.', 'NotAllowedError');
+    } catch (e) {
+      var out = new Error('Permission denied.');
+      out.name = 'NotAllowedError';
+      return out;
+    }
+  }
+
+  function PeriodicSyncManager() {
+    throw new TypeError("Failed to construct 'PeriodicSyncManager': Illegal constructor");
+  }
+
+  PeriodicSyncManager.prototype.register = function(tag, options) {
+    if (arguments.length < 1) {
+      return Promise.reject(new TypeError(
+        "Failed to execute 'register' on 'PeriodicSyncManager': 1 argument required, but only 0 present."));
+    }
+    var minInterval = options && options.minInterval != null ? Number(options.minInterval) : 0;
+    if (!isFinite(minInterval) || minInterval < 0) minInterval = 0;
+
+    // Queued, because this is the one that can put a prompt on screen.
+    return rpc('napp.periodicsync.register', { tag: String(tag), minInterval: minInterval })
+      .then(function() {}, function(err) { throw periodicSyncRefusal(err); });
+  };
+
+  PeriodicSyncManager.prototype.unregister = function(tag) {
+    return call('napp.periodicsync.unregister', { tag: String(tag) }).then(function() {});
+  };
+
+  PeriodicSyncManager.prototype.getTags = function() {
+    return call('napp.periodicsync.tags', {}).then(function(tags) {
+      return Array.isArray(tags) ? tags.map(String) : [];
+    });
+  };
+
+  // One per page, which is one per registration: a site has one worker.
+  var periodicSyncManager = Object.create(PeriodicSyncManager.prototype);
+  window.PeriodicSyncManager = PeriodicSyncManager;
+
+  // Replaced even where the engine has its own, because the engine's would
+  // take registrations nothing is ever going to fire.
+  var periodicRegistration = window.ServiceWorkerRegistration
+    && window.ServiceWorkerRegistration.prototype;
+  if (periodicRegistration) {
+    try {
+      Object.defineProperty(periodicRegistration, 'periodicSync', {
+        configurable: true,
+        get: function() { return periodicSyncManager; }
+      });
+    } catch (e) {}
+  }
+
+  function PermissionStatusStandIn(name, state) {
+    this.name = name;
+    this.state = state;
+    this.onchange = null;
+  }
+  PermissionStatusStandIn.prototype.addEventListener = function() {};
+  PermissionStatusStandIn.prototype.removeEventListener = function() {};
+  PermissionStatusStandIn.prototype.dispatchEvent = function() { return true; };
+
+  var OWN_PERMISSIONS = { 'periodic-background-sync': true, 'notifications': true };
+
+  if (navigator.permissions && typeof navigator.permissions.query === 'function') {
+    var nativeQuery = navigator.permissions.query.bind(navigator.permissions);
+    try {
+      navigator.permissions.query = function(descriptor) {
+        var name = descriptor && descriptor.name;
+        if (!OWN_PERMISSIONS[name]) return nativeQuery(descriptor);
+        return call('permissions.query', { name: name }).then(function(state) {
+          return new PermissionStatusStandIn(name, String(state));
+        });
+      };
+    } catch (e) {}
+  }
+`;
+
+/**
  * `navigator.serviceWorker`, for a WebView that hasn't got one.
  *
  * WebKit exposes service workers only to documents whose scheme is literally
@@ -536,6 +646,9 @@ const SERVICE_WORKER_SOURCE = `
       if (typeof notifyMethods !== 'undefined') {
         registration.showNotification = notifyMethods.showNotification;
         registration.getNotifications = notifyMethods.getNotifications;
+      }
+      if (typeof periodicSyncManager !== 'undefined') {
+        registration.periodicSync = periodicSyncManager;
       }
       return registration;
     }
@@ -602,6 +715,9 @@ export function getNsiteNostrProviderScript(
   // stand-in registration hangs them on itself, there being no
   // `ServiceWorkerRegistration.prototype` here to put them on.
   const serviceWorker = options.serviceWorker ? SERVICE_WORKER_SOURCE : '';
+
+  // Before the stand-in registration, which hangs the manager on itself.
+  const periodicSync = options.periodicSync ? PERIODIC_SYNC_SOURCE : '';
 
   return `(function() {
   'use strict';
@@ -686,7 +802,7 @@ ${receive}
       return call(method, params);
     });
   }
-${options.fetch ? nappFetchImplementation() : ''}${notifications}${serviceWorker}
+${options.fetch ? nappFetchImplementation() : ''}${notifications}${periodicSync}${serviceWorker}
   // ------------------------------------------------------------------
   // NIP-07 provider
   // ------------------------------------------------------------------

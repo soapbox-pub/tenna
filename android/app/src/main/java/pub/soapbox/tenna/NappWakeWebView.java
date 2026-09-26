@@ -97,7 +97,7 @@ final class NappWakeWebView {
     }
 
     private static final class Delivery {
-        /** {@code push}, {@code notificationclick} or {@code notificationclose}. */
+        /** {@code push}, {@code notificationclick}, {@code notificationclose} or {@code periodicsync}. */
         final String kind;
         final String payload;
         final Runnable onDone;

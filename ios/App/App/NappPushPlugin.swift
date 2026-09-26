@@ -46,6 +46,11 @@ public class NappPushPlugin: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "subscriptions", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "deviceToken", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "registerWorker", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "periodicSyncRegister", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "periodicSyncUnregister", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "periodicSyncTags", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "periodicSyncClear", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "setNotifyGrants", returnType: CAPPluginReturnPromise),
     ]
 
     /// Told when a site's row in the shade moves, so the wall can redraw its dots.
@@ -157,6 +162,68 @@ public class NappPushPlugin: CAPPlugin, CAPBridgedPlugin {
             let ok = await server.warm(path)
             if !ok { NSLog("[NappPush] could not cache %@ for %@", path, siteId) }
         }
+    }
+
+    // MARK: - Periodic sync
+
+    /// `registration.periodicSync.register`, the user having said yes. See `NappPeriodicSync`.
+    @objc func periodicSyncRegister(_ call: CAPPluginCall) {
+        guard let siteId = call.getString("siteId"), NsiteOrigins.isSiteId(siteId),
+              let tag = call.getString("tag"), !tag.isEmpty else {
+            call.reject("siteId and tag are required")
+            return
+        }
+        // Milliseconds from the web, seconds here.
+        let minInterval = (call.getDouble("minInterval") ?? 0) / 1000
+
+        do {
+            try NappPeriodicSync.register(
+                siteId: siteId, label: call.getString("label"), tag: tag, minInterval: minInterval)
+        } catch {
+            call.reject(error.localizedDescription)
+            return
+        }
+
+        // The worker will be wanted by a background task that may have no
+        // network worth the name, so fetch it now, as `set` does.
+        if let record = NsiteStore.load(siteId) { warmWorker(record) }
+        call.resolve()
+    }
+
+    @objc func periodicSyncUnregister(_ call: CAPPluginCall) {
+        guard let siteId = call.getString("siteId"), let tag = call.getString("tag") else {
+            call.reject("siteId and tag are required")
+            return
+        }
+        NappPeriodicSync.unregister(siteId: siteId, tag: tag)
+        call.resolve()
+    }
+
+    @objc func periodicSyncTags(_ call: CAPPluginCall) {
+        guard let siteId = call.getString("siteId") else {
+            call.reject("siteId is required")
+            return
+        }
+        call.resolve(["tags": NappPeriodicSync.tags(siteId: siteId)])
+    }
+
+    @objc func periodicSyncClear(_ call: CAPPluginCall) {
+        guard let siteId = call.getString("siteId") else {
+            call.reject("siteId is required")
+            return
+        }
+        NappPeriodicSync.forget(siteId: siteId)
+        call.resolve()
+    }
+
+    /// Every site allowed to notify. See `NappNotifyGrants`.
+    @objc func setNotifyGrants(_ call: CAPPluginCall) {
+        guard let siteIds = call.getArray("siteIds") else {
+            call.reject("siteIds is required")
+            return
+        }
+        NappNotifyGrants.set(siteIds.compactMap { $0 as? String })
+        call.resolve()
     }
 
     // MARK: - Muting

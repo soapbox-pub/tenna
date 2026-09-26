@@ -601,6 +601,8 @@ public class NsiteShortcutsPlugin extends Plugin {
         // silence the site were it ever put back, months later, with nothing
         // on screen to say why.
         NappMuted.forget(context, siteId);
+        // A site nothing is left of has nothing to wake for.
+        NappPeriodicSync.forget(context, siteId);
     }
 
     /**

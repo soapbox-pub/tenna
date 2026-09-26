@@ -113,6 +113,24 @@
     dispatchEvent: function() { return true; }
   };
 
+  /*
+   * `registration.periodicSync`, as far as a worker with no host can have it.
+   *
+   * `getTags()` answers from the tags the host stamped in when it served this
+   * script. `register` and `unregister` resolve without doing anything: there
+   * is nobody here to ask or to tell, so a tag is registered and forgotten from
+   * the site's window. A worker that re-registers from inside its own
+   * `periodicsync` handler — which is common — keeps working.
+   */
+  var periodicTags = Array.isArray(self.__tennaPeriodicTags) ? self.__tennaPeriodicTags.slice() : [];
+  try { delete self.__tennaPeriodicTags; } catch (err) {}
+
+  self.registration.periodicSync = {
+    register: function() { return Promise.resolve(); },
+    unregister: function() { return Promise.resolve(); },
+    getTags: function() { return Promise.resolve(periodicTags.slice()); }
+  };
+
   self.clients = {
     get: function() { return Promise.resolve(undefined); },
     // There is no window. Saying so is better than inventing one for a site
@@ -153,6 +171,8 @@
 
     if (kind === 'push') {
       properties.data = { value: new PushData(String(data)) };
+    } else if (kind === 'periodicsync') {
+      properties.tag = { value: String(data) };
     } else if (kind === 'notificationclick' || kind === 'notificationclose') {
       var payload;
       try {
@@ -196,7 +216,7 @@
     return Promise.allSettled(promises);
   }
 
-  var KINDS = { push: true, notificationclick: true, notificationclose: true };
+  var KINDS = { push: true, notificationclick: true, notificationclose: true, periodicsync: true };
 
   self.addEventListener('message', function(event) {
     var message = event.data;

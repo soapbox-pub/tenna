@@ -33,7 +33,8 @@ export type NsiteBrowserPermissionType =
   | 'camera'
   | 'microphone'
   | 'location'
-  | 'notifications';
+  | 'notifications'
+  | 'periodic-background-sync';
 
 /** A single remembered decision. */
 export interface NsiteBrowserPermission {
@@ -137,6 +138,13 @@ export function clearNsiteBrowserPermissions(siteId: string): void {
   write(read().filter((a) => a.siteId !== siteId));
 }
 
+/** Every site that has been granted a capability and has not had it taken back. */
+export function getNsitesAllowed(type: NsiteBrowserPermissionType): string[] {
+  return read()
+    .filter((a) => a.permissions.some((p) => p.type === type && p.allowed))
+    .map((a) => a.siteId);
+}
+
 /** Everything one site has been granted or refused, if anything. */
 export function getNsiteBrowserAllowance(
   siteId: string,
@@ -211,5 +219,7 @@ export function getBrowserPermissionLabel(
       return 'Use your location';
     case 'notifications':
       return 'Send notifications';
+    case 'periodic-background-sync':
+      return 'Refresh in the background';
   }
 }

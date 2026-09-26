@@ -5,7 +5,8 @@
  * Android's WebView has no Push API and no Web Notifications, so both are
  * stood in for here. An event is delivered as a `message` from a document
  * Tenna opens at the site's origin, and re-raised as the event it really is —
- * a `push`, or the `notificationclick` the user just caused — looking the way
+ * a `push`, the `notificationclick` the user just caused, or a scheduled
+ * `periodicsync` — looking the way
  * one does anywhere else: `event.data.json()`, `event.waitUntil()`,
  * `event.notification.close()` and `event.reply` all work.
  *
@@ -409,6 +410,55 @@
     };
   }
 
+  // -------------------------------------------------------------------------
+  // Periodic background sync
+  // -------------------------------------------------------------------------
+
+  /*
+   * `registration.periodicSync`, which this WebView does not have.
+   *
+   * The same manager the site's window gets — see `PERIODIC_SYNC_SOURCE` in
+   * nsiteNostrProvider.ts — answered over the port rather than the window's
+   * bridge. Registering from here asks nobody, since there is nobody to ask,
+   * so the host allows it only for a site that already holds a tag. See
+   * NappPort.
+   */
+  function PeriodicSyncManager() {
+    throw new TypeError("Failed to construct 'PeriodicSyncManager': Illegal constructor");
+  }
+
+  PeriodicSyncManager.prototype.register = function (tag, options) {
+    var minInterval = options && options.minInterval != null ? Number(options.minInterval) : 0;
+    if (!isFinite(minInterval) || minInterval < 0) minInterval = 0;
+    return call('periodicsync', { op: 'register', tag: String(tag), minInterval: minInterval })
+      .then(function () {}, function (err) {
+        if (!/denied/i.test(String(err && err.message))) throw err;
+        throw new DOMException('Permission denied.', 'NotAllowedError');
+      });
+  };
+
+  PeriodicSyncManager.prototype.unregister = function (tag) {
+    return call('periodicsync', { op: 'unregister', tag: String(tag) }).then(function () {});
+  };
+
+  PeriodicSyncManager.prototype.getTags = function () {
+    return call('periodicsync', { op: 'tags' }).then(function (tags) {
+      return Array.isArray(tags) ? tags.map(String) : [];
+    });
+  };
+
+  var periodicSyncManager = Object.create(PeriodicSyncManager.prototype);
+  self.PeriodicSyncManager = PeriodicSyncManager;
+
+  if (registration) {
+    try {
+      Object.defineProperty(registration, 'periodicSync', {
+        configurable: true,
+        get: function () { return periodicSyncManager; },
+      });
+    } catch (err) {}
+  }
+
   if (self.Notification) {
     try {
       Object.defineProperty(self.Notification, 'permission', { get: function () { return 'granted'; } });
@@ -810,6 +860,8 @@
 
     if (kind === 'push') {
       properties.data = { value: new PushData(String(data)) };
+    } else if (kind === 'periodicsync') {
+      properties.tag = { value: String(data) };
     } else {
       var payload;
       try {
@@ -828,7 +880,7 @@
     return event;
   }
 
-  var KINDS = { push: true, notificationclick: true, notificationclose: true };
+  var KINDS = { push: true, notificationclick: true, notificationclose: true, periodicsync: true };
 
   self.addEventListener('message', function (e) {
     var m = e.data;

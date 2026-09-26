@@ -13,6 +13,10 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
         // returns, the tap that started the app is dropped.
         UNUserNotificationCenter.current().delegate = self
 
+        // Before this returns, or iOS has nobody to hand the task to. See
+        // `NappPeriodicSync`.
+        NappPeriodicSync.registerHandler()
+
         // Not a request for permission — that belongs next to the site asking
         // for it, and is `NappPush.requestPermission`. This only picks the token
         // back up for somebody who has already said yes, since the token can

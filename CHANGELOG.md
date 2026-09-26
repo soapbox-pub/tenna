@@ -1,5 +1,17 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- Sites can ask to wake up every so often while closed, to fetch what is new,
+  using the standard `registration.periodicSync`. Tenna asks you first, with a
+  new **Refresh in the background** permission, and taking it back stops the
+  site straight away. A site woken this way can only put up a notification if
+  you have also let it send notifications. On Android it runs about when the
+  site asked, at most every fifteen minutes. On iPhone the system decides when,
+  and it can be a good while later.
+
 ## [0.11.0] - 2026-09-26
 
 Sites can reach you on iPhone while they are closed. A site that asks to be

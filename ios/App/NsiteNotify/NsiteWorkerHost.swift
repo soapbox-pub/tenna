@@ -53,17 +53,22 @@ final class NsiteWorkerHost: NSObject, WKScriptMessageHandler, WKNavigationDeleg
 
     private let siteId: String
     private let serve: Serve
+    /// The site's periodic sync tags, for `registration.periodicSync.getTags()`
+    /// in a worker that has no host to ask.
+    private let periodicTags: [String]
 
     private var webView: WKWebView?
     private var scheme: SchemeHandler?
     private var continuation: CheckedContinuation<[Notification], Never>?
     private var notifications: [Notification] = []
     private var failure: String?
-    /// The push to hand over once the page says it has a worker.
-    private var pending: String?
+    /// The event to hand over once the page says it has a worker: its kind,
+    /// and the data the shim builds it from.
+    private var pending: (kind: String, data: String)?
 
-    init(siteId: String, serve: @escaping Serve) {
+    init(siteId: String, periodicTags: [String] = [], serve: @escaping Serve) {
         self.siteId = siteId
+        self.periodicTags = periodicTags
         self.serve = serve
         super.init()
     }
@@ -79,11 +84,20 @@ final class NsiteWorkerHost: NSObject, WKScriptMessageHandler, WKNavigationDeleg
      notification the server sent is what the user sees.
      */
     func deliver(push json: String, timeout: TimeInterval) async -> [Notification] {
+        await deliver(kind: "push", data: json, timeout: timeout)
+    }
+
+    /**
+     Hand the worker one event of any kind the shim knows — `push`, or the
+     `periodicsync` the main app's background refresh raises with the tag as
+     its data — and collect what it asks to show.
+     */
+    func deliver(kind: String, data: String, timeout: TimeInterval) async -> [Notification] {
         guard let url = URL(string: "\(NsiteOrigins.scheme)://\(NsiteOrigins.hostFor(siteId) ?? "")\(Self.hostPath)") else {
             return []
         }
 
-        pending = json
+        pending = (kind, data)
 
         let scheme = SchemeHandler(host: self)
         self.scheme = scheme
@@ -147,22 +161,22 @@ final class NsiteWorkerHost: NSObject, WKScriptMessageHandler, WKNavigationDeleg
 
             switch kind {
             case "ready":
-                guard let push = pending else { return }
+                guard let event = pending else { return }
                 pending = nil
 
                 // The envelope the shim reads, not the event on its own: the
                 // worker's channel carries Tenna's traffic and the site's, and
                 // the kind is what tells them apart.
                 guard let envelope = try? JSONSerialization.data(
-                        withJSONObject: ["__tenna": "push", "id": 1, "data": push]),
+                        withJSONObject: ["__tenna": event.kind, "id": 1, "data": event.data]),
                       let text = String(data: envelope, encoding: .utf8) else {
-                    finish(reason: "could not encode the push")
+                    finish(reason: "could not encode the \(event.kind)")
                     return
                 }
 
                 webView?.evaluateJavaScript("window.__tennaDeliver(\(Self.jsString(text)))") { _, error in
                     if let error {
-                        NSLog("[NsiteWorkerHost] could not hand over the push: %@",
+                        NSLog("[NsiteWorkerHost] could not hand over the event: %@",
                               error.localizedDescription)
                     }
                 }
@@ -311,7 +325,10 @@ final class NsiteWorkerHost: NSObject, WKScriptMessageHandler, WKNavigationDeleg
         // `importScripts` rather than concatenation, so a `'use strict'`
         // prologue at the top of the site's script is still at the top of a
         // script and still means what it says.
+        let tags = (try? JSONSerialization.data(withJSONObject: periodicTags))
+            .flatMap { String(data: $0, encoding: .utf8) } ?? "[]"
         let source = """
+        self.__tennaPeriodicTags = \(tags);
         \(shim)
         importScripts(\(Self.jsString(path)));
         self.__tennaWorker.boot();

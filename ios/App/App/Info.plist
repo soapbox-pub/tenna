@@ -52,6 +52,16 @@
 			</array>
 		</dict>
 	</array>
+	<!-- `registration.periodicSync`: one background refresh task for every
+	     site, run when iOS decides to. See NappPeriodicSync.swift. -->
+	<key>BGTaskSchedulerPermittedIdentifiers</key>
+	<array>
+		<string>pub.soapbox.tenna.periodicsync</string>
+	</array>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>fetch</string>
+	</array>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>UIApplicationSceneManifest</key>

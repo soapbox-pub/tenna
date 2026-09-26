@@ -115,6 +115,47 @@ export interface NappPushPlugin {
   registerWorker(options: { siteId: string; label: string; path: string }): Promise<void>;
 
   /**
+   * `registration.periodicSync.register(tag, { minInterval })`, written down
+   * where the scheduler can see it.
+   *
+   * The web layer has already asked the user. Registering a tag the site
+   * already has replaces its interval. `minInterval` is in milliseconds and is
+   * rounded up to the platform's floor — fifteen minutes on both, and on iOS
+   * a request the system is free to honour much later than that.
+   *
+   * `label` and `event` write the site down if nothing has yet, for the reason
+   * they do in {@link show}: the worker is served from the site's record.
+   */
+  periodicSyncRegister(options: {
+    siteId: string;
+    label: string;
+    /** The NIP-5A manifest event, as JSON text. */
+    event?: string;
+    tag: string;
+    minInterval: number;
+  }): Promise<void>;
+
+  /** Forget one of a site's periodic sync tags. Unknown tags are not an error. */
+  periodicSyncUnregister(options: { siteId: string; tag: string }): Promise<void>;
+
+  /** A site's periodic sync tags, for `getTags()`. */
+  periodicSyncTags(options: { siteId: string }): Promise<{ tags: string[] }>;
+
+  /** Forget every periodic sync tag a site has, which is how revoking it reaches the scheduler. */
+  periodicSyncClear(options: { siteId: string }): Promise<void>;
+
+  /**
+   * Every site allowed to send notifications, replacing the last list.
+   *
+   * A mirror of the grants in `nsiteBrowserPermissions`, which live in the web
+   * layer's `localStorage` and cannot be read by anything native. What reads
+   * this is a worker woken with nobody to ask — by a periodic sync, most of
+   * all, which unlike a push is not itself proof the site was allowed to
+   * notify — before it is allowed to put anything in the shade.
+   */
+  setNotifyGrants(options: { siteIds: string[] }): Promise<void>;
+
+  /**
    * Ask the OS for permission to post notifications.
    *
    * Resolves at once where none is needed or it was already given. `granted`
@@ -202,6 +243,18 @@ export function supportsNappPush(): boolean {
   const platform = Capacitor.getPlatform();
   return (platform === 'android' || platform === 'ios')
     && Capacitor.isPluginAvailable('NappPush');
+}
+
+/**
+ * Whether a site's worker can be woken on a schedule here.
+ *
+ * The same platforms as push, by the same two roads: WorkManager waking the
+ * real worker on Android, and a `BGAppRefreshTask` running the shimmed one on
+ * iOS — the second at whatever pace the system chooses. Neither WebView has
+ * Periodic Background Sync of its own; see `PERIODIC_SYNC_SOURCE`.
+ */
+export function supportsPeriodicSync(): boolean {
+  return supportsNappPush();
 }
 
 /**

@@ -344,6 +344,106 @@ public class NappPushPlugin extends Plugin {
         call.resolve(result);
     }
 
+    // ── Periodic sync ────────────────────────────────────────────────────────
+
+    /**
+     * {@code registration.periodicSync.register}, the user having said yes.
+     *
+     * <p>A site with no record yet is written down the way {@link #show}
+     * writes one, because the job that wakes it serves the worker from that
+     * record.
+     */
+    @PluginMethod
+    public void periodicSyncRegister(PluginCall call) {
+        String siteId = call.getString("siteId");
+        String tag = call.getString("tag");
+        Double minInterval = call.getDouble("minInterval");
+
+        if (siteId == null || tag == null || tag.isEmpty()) {
+            call.reject("siteId and tag are required");
+            return;
+        }
+
+        if (NsiteSites.load(getContext(), siteId) == null) {
+            String label = call.getString("label");
+            String event = call.getString("event");
+            if (label == null || label.isEmpty() || event == null) {
+                call.reject("The site has no stored manifest to serve its worker from");
+                return;
+            }
+            try {
+                NsiteSites.save(getContext(), siteId, label, event, null, null, null);
+            } catch (IOException e) {
+                call.reject("Could not record the site", e);
+                return;
+            }
+        }
+
+        try {
+            NappPeriodicSync.register(
+                getContext(), siteId, tag, minInterval == null ? 0 : minInterval.longValue());
+        } catch (IllegalStateException e) {
+            call.reject(e.getMessage());
+            return;
+        }
+        call.resolve();
+    }
+
+    @PluginMethod
+    public void periodicSyncUnregister(PluginCall call) {
+        String siteId = call.getString("siteId");
+        String tag = call.getString("tag");
+        if (siteId == null || tag == null) {
+            call.reject("siteId and tag are required");
+            return;
+        }
+        NappPeriodicSync.unregister(getContext(), siteId, tag);
+        call.resolve();
+    }
+
+    @PluginMethod
+    public void periodicSyncTags(PluginCall call) {
+        String siteId = call.getString("siteId");
+        if (siteId == null) {
+            call.reject("siteId is required");
+            return;
+        }
+        JSObject result = new JSObject();
+        result.put("tags", new JSArray(NappPeriodicSync.tags(getContext(), siteId)));
+        call.resolve(result);
+    }
+
+    /** Forget every tag a site has. How revoking the permission reaches the scheduler. */
+    @PluginMethod
+    public void periodicSyncClear(PluginCall call) {
+        String siteId = call.getString("siteId");
+        if (siteId == null) {
+            call.reject("siteId is required");
+            return;
+        }
+        NappPeriodicSync.forget(getContext(), siteId);
+        call.resolve();
+    }
+
+    /** Every site allowed to notify. See {@link NappNotifyGrants}. */
+    @PluginMethod
+    public void setNotifyGrants(PluginCall call) {
+        JSArray siteIds = call.getArray("siteIds");
+        if (siteIds == null) {
+            call.reject("siteIds is required");
+            return;
+        }
+
+        java.util.Set<String> granted = new java.util.HashSet<>();
+        for (int i = 0; i < siteIds.length(); i++) {
+            Object siteId = siteIds.opt(i);
+            if (siteId instanceof String) granted.add((String) siteId);
+        }
+
+        NappNotifyGrants.set(getContext(), granted);
+        call.resolve();
+    }
+
     /**
      * Ask for the OS notification permission, if the OS has one to ask for.
      *

@@ -845,6 +845,66 @@ thirty seconds, a hard memory ceiling and no way to put anything in front of
 the user, so there is nothing that could answer a prompt. `self.nostr` is
 absent in both.
 
+## `registration.periodicSync` — waking up on a schedule
+
+A site can ask to be woken every so often while it is closed, to fetch what is
+new, using the standard
+[Periodic Background Sync](https://developer.mozilla.org/en-US/docs/Web/API/Web_Periodic_Background_Synchronization_API)
+API. There is nothing Tenna-specific to call:
+
+```js
+const registration = await navigator.serviceWorker.ready;
+await registration.periodicSync.register('inbox', { minInterval: 60 * 60 * 1000 });
+
+// sw.js
+self.addEventListener('periodicsync', (event) => {
+  if (event.tag === 'inbox') event.waitUntil(checkInbox());
+});
+```
+
+`getTags()` and `unregister(tag)` work too, from the page and from the worker.
+Neither WebView has this API, so Tenna provides it, and it differs from Chrome
+in three ways.
+
+### Permission
+
+Chrome only lets an installed web app register, and never asks. Tenna asks. The
+first `register()` shows a **Refresh in the background** prompt, and a refusal
+rejects with the `NotAllowedError` Chrome would give.
+`navigator.permissions.query({ name: 'periodic-background-sync' })` reports
+`granted`, `denied` or `prompt`. Taking the permission back in the site's info
+screen cancels every tag the site has.
+
+A worker registering from inside its own `periodicsync` handler asks nobody,
+because there is nobody to ask. On Android that only works for a site that
+already holds a tag; on iOS it resolves and does nothing. Register from the page.
+
+### Notifications
+
+A worker woken by a periodic sync may call `showNotification` only if the site
+also holds the **Send notifications** permission, and the user has not muted
+it. Being woken on a schedule is not the same as being allowed to speak.
+
+### When it runs
+
+`minInterval` is rounded up to **fifteen minutes**. It is a minimum: a run never
+comes sooner, but it can come later. The first run is one interval after the
+tag was registered. Registering a tag again keeps its place in the schedule, so
+it is fine to call `register()` on every page load.
+
+- **Android** runs each site's tags from a WorkManager job, and only when the
+  phone has a network. Runs happen within minutes of when they are due, keep
+  going after a reboot, and have Chromium's five minutes of `waitUntil`, the
+  same as a push.
+- **iOS** runs every site's tags from one background refresh task, and **iOS
+  decides when that runs**. It depends on how often the user opens Tenna, the
+  battery, and the time of day, so it can be hours late. It never runs after the
+  user swipes Tenna away in the app switcher, or with Background App Refresh
+  turned off. A run gets about 25 seconds for all sites together, one after
+  another, oldest registration first.
+
+Treat it as a way to be fresher when the user comes back, not as a clock.
+
 ## `share_target` — a place in the OS share menu
 
 An nsite the user has put on their home screen can appear in Android's share

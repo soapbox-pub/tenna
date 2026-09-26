@@ -1,4 +1,4 @@
-import { Bell, Camera, KeyRound, Link2, Lock, MapPin, Mic, Pen, UserRound } from 'lucide-react';
+import { Bell, Camera, KeyRound, Link2, Lock, MapPin, Mic, Pen, RefreshCw, UserRound } from 'lucide-react';
 import type { ReactNode } from 'react';
 
 import { getKindLabel } from '@/lib/kindLabels';
@@ -18,6 +18,7 @@ export type PermissionKind =
   | 'nip44.encrypt'
   | 'nip44.decrypt'
   | 'notifications'
+  | 'periodic-background-sync'
   | 'camera'
   | 'microphone'
   | 'location'
@@ -38,6 +39,8 @@ export function permissionIcon(type: PermissionKind): ReactNode {
       return <KeyRound className="size-5 text-violet-500" />;
     case 'notifications':
       return <Bell className="size-5 text-emerald-500" />;
+    case 'periodic-background-sync':
+      return <RefreshCw className="size-5 text-emerald-500" />;
     case 'camera':
       return <Camera className="size-5 text-rose-500" />;
     case 'microphone':
@@ -65,6 +68,8 @@ export function permissionTitle(type: PermissionKind, kind: number | null): stri
       return 'Decrypt message (NIP-44)';
     case 'notifications':
       return 'Send notifications';
+    case 'periodic-background-sync':
+      return 'Refresh in the background';
     case 'camera':
       return 'Use the camera';
     case 'microphone':
@@ -92,6 +97,8 @@ export function permissionDescription(type: PermissionKind): string {
       return 'This app wants to decrypt a message using your keys.';
     case 'notifications':
       return 'This app wants to send you notifications, including while it is closed.';
+    case 'periodic-background-sync':
+      return 'This app wants to wake up every so often while it is closed, briefly, to fetch what is new.';
     case 'camera':
       return 'This app wants to see through your camera while you are using it.';
     case 'microphone':

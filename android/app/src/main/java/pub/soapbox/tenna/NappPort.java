@@ -596,6 +596,9 @@ final class NappPort {
                 case "nostr":
                     nostr(id, params);
                     break;
+                case "periodicsync":
+                    periodicSync(id, params);
+                    break;
                 default:
                     fail(id, "Tenna does not know that call");
                     break;
@@ -606,10 +609,63 @@ final class NappPort {
         }
     }
 
-    /** {@code registration.showNotification}. */
+    /**
+     * {@code registration.showNotification}.
+     *
+     * <p>Only for a site the user let notify. A worker has nobody to prompt,
+     * and one woken by a periodic sync — unlike one woken by a push — has not
+     * shown it was ever allowed to say anything. See {@link NappNotifyGrants}.
+     */
     private void notification(int id, @NonNull JSONObject params) {
+        if (!NappNotifyGrants.allowed(context, siteId)) {
+            fail(id, "Notification refused");
+            return;
+        }
         if (NappNotifications.show(context, siteId, params)) result(id, JSONObject.NULL);
         else fail(id, "Notification refused");
+    }
+
+    /**
+     * {@code registration.periodicSync}, from inside the worker.
+     *
+     * <p>Reading and unregistering are answered as they are for the window.
+     * Registering is not asked of anybody — a worker has nobody to ask — so it
+     * is only allowed for a site that already holds a tag, which is proof the
+     * user granted it: revoking the grant clears every tag. A site with none
+     * registers from its window, where the question can be put.
+     */
+    private void periodicSync(int id, @NonNull JSONObject params) {
+        String op = params.optString("op", "");
+        String tag = params.optString("tag", "");
+
+        switch (op) {
+            case "tags":
+                result(id, new JSONArray(NappPeriodicSync.tags(context, siteId)));
+                return;
+            case "unregister":
+                if (!tag.isEmpty()) NappPeriodicSync.unregister(context, siteId, tag);
+                result(id, JSONObject.NULL);
+                return;
+            case "register":
+                if (tag.isEmpty()) {
+                    fail(id, "Invalid tag");
+                    return;
+                }
+                if (NappPeriodicSync.get(context, siteId).isEmpty()) {
+                    fail(id, "Permission denied");
+                    return;
+                }
+                try {
+                    NappPeriodicSync.register(context, siteId, tag, params.optLong("minInterval", 0));
+                } catch (IllegalStateException e) {
+                    fail(id, e.getMessage());
+                    return;
+                }
+                result(id, JSONObject.NULL);
+                return;
+            default:
+                fail(id, "Tenna does not know that call");
+        }
     }
 
     /**

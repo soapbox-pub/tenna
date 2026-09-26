@@ -40,6 +40,7 @@
 		BC0000000000000000000005 /* NappSubscriptions.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB0000000000000000000005 /* NappSubscriptions.swift */; };
 		BC0000000000000000000006 /* NappNotifications.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB0000000000000000000006 /* NappNotifications.swift */; };
 		BC0000000000000000000007 /* NappPushPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB0000000000000000000007 /* NappPushPlugin.swift */; };
+		BC0000000000000000000008 /* NappPeriodicSync.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB0000000000000000000008 /* NappPeriodicSync.swift */; };
 		BD0000000000000000000001 /* NsiteGroup.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB0000000000000000000001 /* NsiteGroup.swift */; };
 		BD0000000000000000000002 /* NsiteStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB0000000000000000000002 /* NsiteStore.swift */; };
 		BD0000000000000000000003 /* NsiteFilter.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB0000000000000000000003 /* NsiteFilter.swift */; };
@@ -87,6 +88,7 @@
 		BB0000000000000000000005 /* NappSubscriptions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NappSubscriptions.swift; sourceTree = "<group>"; };
 		BB0000000000000000000006 /* NappNotifications.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NappNotifications.swift; sourceTree = "<group>"; };
 		BB0000000000000000000007 /* NappPushPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NappPushPlugin.swift; sourceTree = "<group>"; };
+		BB0000000000000000000008 /* NappPeriodicSync.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NappPeriodicSync.swift; sourceTree = "<group>"; };
 		BB000000000000000000005A /* NsiteNotify.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = NsiteNotify.entitlements; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -176,6 +178,7 @@
 				BB0000000000000000000005 /* NappSubscriptions.swift */,
 				BB0000000000000000000006 /* NappNotifications.swift */,
 				BB0000000000000000000007 /* NappPushPlugin.swift */,
+				BB0000000000000000000008 /* NappPeriodicSync.swift */,
 				AA00000000000000000000E1 /* App.entitlements */,
 				6D415199B4BB638B05E52046 /* NsiteBlobs.swift */,
 				504EC30B1FED79650016851F /* Main.storyboard */,
@@ -340,6 +343,7 @@
 				BC0000000000000000000005 /* NappSubscriptions.swift in Sources */,
 				BC0000000000000000000006 /* NappNotifications.swift in Sources */,
 				BC0000000000000000000007 /* NappPushPlugin.swift in Sources */,
+				BC0000000000000000000008 /* NappPeriodicSync.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

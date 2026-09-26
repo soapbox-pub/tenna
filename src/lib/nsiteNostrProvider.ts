@@ -151,9 +151,10 @@ const NAPP_PUSH_SOURCE = `
  * The `napp.fetch` member.
  *
  * Deliberately a named function rather than a patched `window.fetch` or an
- * option on one. A site opts in with `window.napp?.fetch ?? fetch` and every
- * call site is then unchanged — but the ambient `fetch` stays the web's own,
- * which is what every runtime that has faced this question has settled on:
+ * option on one. It stands in for a CORS proxy, not for `fetch`: a site calls
+ * it only for hosts that send no CORS headers, falling back to a proxy of its
+ * own where it is absent. The ambient `fetch` stays the web's own, which is
+ * what every runtime that has faced this question has settled on:
  * Tauri's http plugin exports a drop-in `fetch`, Electron has `net.fetch`, and
  * Chrome extensions moved cross-origin requests *out* of the content script's
  * `fetch` and into a message channel when MV3 landed. The one mainstream

@@ -544,15 +544,19 @@ A native app can call any HTTP API it likes. A page cannot, because the
 browser will not let it read a cross-origin response the far end has not
 consented to — and an nsite is a page. So a site that wants to read an API
 with no `Access-Control-Allow-Origin` on it, or a Blossom server that never
-thought about browsers, has until now had to route it through somebody's
-proxy.
+thought about browsers, has to route it through somebody's proxy.
+
+`napp.fetch` is that proxy, provided by the host. It is **not a better
+`fetch`**, and a site should not use it for requests that `fetch` can already
+make. It is for the one case that needs it: a known host that does not send
+CORS headers — an OAuth token endpoint, say.
 
 ```ts
 declare global {
   interface Window {
     readonly napp?: {
       readonly push?: NappPush;
-      /** Exactly `fetch`, minus CORS. */
+      /** `fetch`'s signature, for requests CORS would otherwise block. */
       readonly fetch?: typeof fetch;
     };
   }
@@ -561,21 +565,34 @@ declare global {
 
 It takes what `fetch` takes and returns what `fetch` returns — a real
 `Response`, with a streaming body and real headers, not an imitation of one.
-So the way to use it is to pick it up once and change nothing else:
+Where it is absent, what takes its place is the proxy a site would have used
+anyway, not `fetch`: plain `fetch` to such a host fails. So wrap it once, and
+call the wrapper only where CORS is in the way:
 
 ```js
-const http = window.napp?.fetch ?? fetch;
+/** For hosts that send no CORS headers. Everything else uses `fetch`. */
+function corsFetch(url, init) {
+  if (window.napp?.fetch) return window.napp.fetch(url, init);
+  return fetch(`https://proxy.shakespeare.diy/?url=${encodeURIComponent(url)}`, init);
+}
 
-const res = await http('https://api.example.com/thing', {
-  headers: { authorization: `Nostr ${token}` },
+const res = await corsFetch('https://oauth.example.com/token', {
+  method: 'POST',
+  body: new URLSearchParams({ grant_type: 'authorization_code', code }),
 });
 const data = await res.json();
 ```
 
-On the web `window.napp` is absent and on iOS it carries no `fetch`, so `http`
-is the ordinary `fetch` and the call is subject to CORS exactly as it was
-before. Nothing is branched
-and nothing breaks; a site simply gets more of what it asked for on Android.
+On the web `window.napp` is absent and on iOS it carries no `fetch`, so the
+request goes through the proxy. On Android it leaves the phone directly. A
+third-party proxy sees the whole request, `Authorization` header included;
+Tenna's `napp.fetch` involves no third party.
+
+**Do not assume it is direct.** What `napp.fetch` promises is the signature
+and the lifting of CORS, not how the request gets there. Another host — a web
+shim, say — could provide it through a remote proxy of its own, which can be
+slow, rate-limited or down. That is the reason to use it only where it is
+needed. What follows describes Tenna's implementation.
 
 **Not a patched `window.fetch`, and not an option on one.** A site's own code
 is not the only code on its page, and an ambient `fetch` that is quietly more
@@ -677,10 +694,16 @@ by a push is often the only thing running, and what it needs to say may be
 behind an API call.
 
 ```js
-self.addEventListener('push', async (event) => {
-  if (!self.napp) return;                     // the web, or iOS
-  const res = await self.napp.fetch(url);
-  // ...
+function corsFetch(url, init) {
+  if (self.napp?.fetch) return self.napp.fetch(url, init);
+  return fetch(`https://proxy.shakespeare.diy/?url=${encodeURIComponent(url)}`, init);
+}
+
+self.addEventListener('push', (event) => {
+  event.waitUntil((async () => {
+    const res = await corsFetch(url);
+    // ...
+  })());
 });
 ```
 
@@ -725,7 +748,7 @@ breaks in the meantime; the feature detection simply says no.
 Not on the web, where there is no host around the page to make the request,
 and not on iOS, where `WKURLSchemeHandler` cannot intercept `https` and is
 never handed a request body anyway. `window.napp.fetch` and `self.napp.fetch`
-are both simply absent there, which is what the `?? fetch` is for. See
+are both simply absent there, and a site falls back to its own proxy. See
 [On iOS](#on-ios).
 
 ## `registration.periodicSync` — waking up on a schedule

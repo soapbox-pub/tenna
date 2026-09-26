@@ -114,7 +114,8 @@
    * Nor does traffic on it keep a worker alive. A port message is not an event
    * and does not touch the idle timer, so a site with something long to do
    * still has to hold the event open with `waitUntil`, exactly as it would
-   * anywhere else.
+   * anywhere else — and that is passed through to the `message` the event
+   * arrived as, which is the one Chromium is counting.
    */
 
   /** How long a call waits for a port before giving up on there being one. */
@@ -851,8 +852,30 @@
       try { self.dispatchEvent(event); } catch (err) {}
     }
 
-    Promise.allSettled(promises).then(function () {
+    var finished = settle(promises).then(function () {
       reply(e.source, { __napp: 'done', id: m.id });
     });
+
+    // The site's `waitUntil` has to mean to Chromium what it would mean
+    // anywhere else. Chromium is tracking this `message`, not the `push` made
+    // out of it, so the promises are handed on to the event it can see — and
+    // the worker is kept alive for as long as they are pending, under
+    // Chromium's own ceiling, rather than being stopped as idle half way
+    // through the work.
+    if (typeof e.waitUntil === 'function') e.waitUntil(finished);
   });
+
+  /**
+   * Wait for every promise, including ones added while waiting.
+   *
+   * The standard lets a handler call `waitUntil` again later, so long as an
+   * earlier promise is still pending, and one that does so is extending the
+   * same event rather than starting a new one.
+   */
+  function settle(promises) {
+    var seen = promises.length;
+    return Promise.allSettled(promises.slice()).then(function () {
+      if (promises.length > seen) return settle(promises);
+    });
+  }
 })();

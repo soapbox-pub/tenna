@@ -61,18 +61,24 @@ final class NappWakeWebView {
     /**
      * How long a worker gets to settle its {@code waitUntil} promises.
      *
-     * <p>Nothing outside is counting: delivery runs inside a foreground
-     * service, so this is a judgement about fairness rather than a deadline
-     * imposed on us. What it costs is queue latency — one site's hung worker
-     * holds that site's next event for this long, and a burst is that many
-     * times over — which is why it is not simply enormous.
+     * <p>Nothing outside Chromium is counting: delivery runs inside a
+     * foreground service, which Android puts no clock on. Chromium's is the
+     * one that matters. The shim hands a site's {@code waitUntil} on to the
+     * {@code message} the event arrived as, and Chromium lets one event run
+     * for five minutes before it stops the worker — so this is level with
+     * that, and a site gets exactly what {@code waitUntil} gives it on the
+     * web. Waiting any longer would be waiting on a worker that is gone.
+     *
+     * <p>What it costs is queue latency: one site's hung worker holds that
+     * site's next event for this long. Each site has its own queue, so no
+     * other site waits behind it.
      *
      * <p><b>iOS cannot follow this.</b> There a worker is run inside a
      * {@code UNNotificationServiceExtension}, which the system kills at around
      * thirty seconds, so its budget stays at twenty and is documented
      * separately. See {@code NotificationService.swift}.
      */
-    private static final long DELIVERY_TIMEOUT_MS = 60_000;
+    private static final long DELIVERY_TIMEOUT_MS = 5 * 60_000;
 
     /** How long the wake page itself gets to come up. A different failure; see {@link #timedOut}. */
     private static final long READY_TIMEOUT_MS = 15_000;
@@ -80,9 +86,9 @@ final class NappWakeWebView {
     /**
      * How long this survives an empty queue.
      *
-     * <p>Kept level with the delivery deadline so that a site whose events
-     * arrive in a burst is not torn down and navigated again between two of
-     * them.
+     * <p>Long enough that a site whose events arrive in a burst is not torn
+     * down and navigated again between two of them. It only starts once the
+     * queue is empty, so it never cuts a delivery short.
      */
     private static final long IDLE_MS = 60_000;
 

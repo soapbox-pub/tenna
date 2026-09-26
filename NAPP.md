@@ -177,8 +177,8 @@ it arrive, the relays it is expected to be on. It is never empty on Android.
 
 `event.data.text()`, `.arrayBuffer()` and `.blob()` are also provided.
 `event.waitUntil()` works; Tenna waits for the promises before moving on to
-the next event for the site, with a timeout of sixty seconds on Android and
-twenty on iOS — see [The delivery deadline](#the-delivery-deadline).
+the next event for the site, with a timeout of five minutes on Android and
+twenty seconds on iOS — see [The delivery deadline](#the-delivery-deadline).
 
 #### `showNotification(title, options)`
 
@@ -430,8 +430,8 @@ self.addEventListener('notificationclick', (event) => {
 **Swiping one away** raises `notificationclose`.
 
 `event.waitUntil()` works on all of these. Tenna waits for the promises before
-moving on to the next event for the site, with a timeout of sixty seconds on
-Android and twenty on iOS — see [The delivery deadline](#the-delivery-deadline).
+moving on to the next event for the site, with a timeout of five minutes on
+Android and twenty seconds on iOS — see [The delivery deadline](#the-delivery-deadline).
 
 #### What is not there yet
 
@@ -685,9 +685,8 @@ One consequence does leak out:
 - **A 307 or 308 redirect will fail** on a large body. See
   [What it cannot make true](#what-it-cannot-make-true).
 
-There is still a clock. A worker woken by a push has sixty seconds on Android
-and twenty on iOS, and sixteen megabytes does not go over a mobile connection
-in either — see [The delivery deadline](#the-delivery-deadline).
+There is still a clock. A worker woken by a push has five minutes on Android
+and twenty seconds on iOS — see [The delivery deadline](#the-delivery-deadline).
 
 Everything else is identical, including feature detection: `self.napp` is
 absent on the web and on iOS, and on Android an installed worker does not get
@@ -791,13 +790,15 @@ and there is no way to ask:**
 
 | Platform | Deadline   | Set by                                           |
 | -------- | ---------- | ------------------------------------------------ |
-| Android  | 60 seconds | Tenna, as a judgement about queue fairness       |
+| Android  | 5 minutes  | Chromium, as it is for any service worker event  |
 | iOS      | 20 seconds | the system, near enough                          |
 
 They differ because they are not the same kind of number. On Android delivery
-runs inside a foreground service and nothing outside is counting, so the limit
-is a choice: long enough for real work, short enough that one site's hung
-worker does not hold up its own next event for very long. On iOS a worker runs
+runs inside a foreground service that Android puts no clock on, so the only
+limit is Chromium's own: `waitUntil` keeps the worker alive exactly as it would
+on the web, and Chromium stops a worker whose event has run for five minutes.
+Tenna waits as long as that and no longer. A site's hung worker holds up its
+own next event for that long, and no other site's. On iOS a worker runs
 inside a `UNNotificationServiceExtension`, which the system kills at around
 thirty seconds; twenty leaves room to hand over a fallback notification
 deliberately rather than be cut off mid-sentence.
@@ -1000,7 +1001,7 @@ when something matches. Three things follow from that:
 
 | | Android | iOS |
 | --- | --- | --- |
-| deadline for `waitUntil` | 60 seconds | 20 seconds |
+| deadline for `waitUntil` | 5 minutes | 20 seconds |
 | payload | the whole event, always | about 4 KB; a long event arrives as `event_id` and `relays` |
 | notifications per push | as many as the worker asks for | the first |
 | `notificationclick` | raised in the worker | not raised; a tap routes by `data.url` |

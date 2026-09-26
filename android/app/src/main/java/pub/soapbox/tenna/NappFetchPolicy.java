@@ -69,9 +69,10 @@ final class NappFetchPolicy {
      * <p>The same number, and now for the same reason. A worker's body crosses
      * its {@link NappPort} in chunks, each written to the socket as it arrives,
      * so nothing about the transport bounds it — this is policy, and the memory
-     * cost of raising it would be nothing. What stops it going further is the
-     * clock: a worker woken by a push has sixty seconds, and sixteen megabytes
-     * does not go over a mobile connection inside that.
+     * cost of raising it would be nothing. It was once held here by the clock,
+     * when a worker woken by a push had sixty seconds; it has five minutes on
+     * Android now, so what keeps it at sixteen is only that a window gets
+     * sixteen too. On iOS there is no {@code napp.fetch} in a worker at all.
      */
     static final int MAX_WORKER_BODY_BYTES = 16 * 1024 * 1024;
 

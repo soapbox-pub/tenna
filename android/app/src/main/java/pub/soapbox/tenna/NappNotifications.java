@@ -121,6 +121,9 @@ final class NappNotifications {
      */
     private static final String LEGACY_CONVERSATION_SUFFIX = "!conversation";
 
+    /** Draw a notification with its own small icon rather than the app's. */
+    private static final String EXTRA_PREFER_SMALL_ICON = "android.app.preferSmallIcon";
+
     /** Lines listed in a header, for the places that draw one in full. */
     private static final int MAX_SUMMARY_LINES = 6;
 
@@ -438,7 +441,13 @@ final class NappNotifications {
      * tells the site which ones went.
      *
      * The header's name line is Android's and says Tenna; the site's name goes
-     * beside it as the sub-text, and its mark into the status bar. The lines
+     * beside it as the sub-text. Its icon would be Tenna's too — the shade
+     * draws a group header with the app's launcher icon — except where the
+     * summary asks for its own small icon instead, which is the site's badge.
+     * A header over one site's rows wearing Tenna's logo reads as Tenna's
+     * notifications, which they are not. The small icon is drawn as a
+     * silhouette there, so the badge is the most of the site that fits; its
+     * full-colour tile cannot be put there at all. The lines
      * are for the places that draw a summary in full rather than as a header —
      * a watch, or an older shade.
      *
@@ -480,6 +489,10 @@ final class NappNotifications {
             .setContentIntent(openSite(context, siteId, null, null))
             .setDeleteIntent(onDismiss(context, siteId, null));
 
+        // Notification.EXTRA_PREFER_SMALL_ICON, spelled out until the compile
+        // SDK has it. Read by SystemUI's icon style provider before it reaches
+        // for the app's icon, and ignored everywhere older.
+        builder.getExtras().putBoolean(EXTRA_PREFER_SMALL_ICON, true);
         smallIcon(builder, context, siteId, badge, deadline, again);
         if (tile != null) builder.setColor(tile.color).setColorized(false);
 

@@ -1,5 +1,12 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+
+- On Android, a site's bundle of notifications is headed by the site's own
+  mark rather than Tenna's logo.
+
 ## [0.12.1] - 2026-09-27
 
 On Android, every notification from a site can now be tapped, answered or

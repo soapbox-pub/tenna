@@ -5,10 +5,11 @@
   "license": "AGPL-3.0-or-later",
   "type": "module",
   "scripts": {
-    "dev": "npm i --silent && npm run -s icons && vite",
-    "build": "npm i --silent && npm run -s icons && vite build -l error && cp dist/index.html dist/404.html && echo 'Project built successfully!'",
-    "test": "npm i --silent && npm run -s icons && tsc --noEmit && eslint --cache && vitest run --reporter=dot --silent && vite build -l error && cp dist/index.html dist/404.html && echo 'All tests passed!'",
-    "icons": "node scripts/generate-icons.mjs"
+    "dev": "npm i --silent && npm run -s icons && npm run -s idb && vite",
+    "build": "npm i --silent && npm run -s icons && npm run -s idb && vite build -l error && cp dist/index.html dist/404.html && echo 'Project built successfully!'",
+    "test": "npm i --silent && npm run -s icons && npm run -s idb && tsc --noEmit && eslint --cache && vitest run --reporter=dot --silent && vite build -l error && cp dist/index.html dist/404.html && echo 'All tests passed!'",
+    "icons": "node scripts/generate-icons.mjs",
+    "idb": "node scripts/build-idb.mjs"
   },
   "dependencies": {
     "@capacitor/app": "^8.1.1",
@@ -61,6 +62,7 @@
     "@tailwindcss/vite": "^4.2.4",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
+    "@types/jsdom": "^28.0.3",
     "@types/node": "^24.12.2",
     "@types/qrcode": "^1.5.5",
     "@types/react": "^19.2.14",

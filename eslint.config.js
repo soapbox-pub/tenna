@@ -11,7 +11,8 @@ import customRules from "./eslint-rules/index.js";
 export default defineConfig(
   // `android` and `ios` are Capacitor-generated native projects; they contain
   // a copy of the built `dist` output and their own generated sources.
-  globalIgnores(["dist", ".agents", "android", "ios"]),
+  // `vendor` is third-party code kept exactly as published.
+  globalIgnores(["dist", ".agents", "android", "ios", "vendor"]),
   {
     name: "app/ts",
     files: ["**/*.{ts,tsx}"],

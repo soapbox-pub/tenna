@@ -1,0 +1,23 @@
+{
+  "skipped": {
+    "storage-buckets.https.any.js": "The Storage Buckets API (navigator.storageBuckets), which WebKit does not have either."
+  },
+  "failures": {
+    "blob-contenttype.any.js": {
+      "Ensure that content type round trips when reading blob data": "jsdom's XMLHttpRequest cannot load blob: URLs."
+    },
+    "idlharness.any.js": {
+      "IDBRequest interface: existence and properties of interface object": "jsdom's EventTarget is a class of Node's realm, so the harness looks for the TypeError a call throws in the wrong realm.",
+      "IDBOpenDBRequest interface: existence and properties of interface object": "As IDBRequest: jsdom's EventTarget belongs to Node's realm.",
+      "IDBDatabase interface: existence and properties of interface object": "As IDBRequest: jsdom's EventTarget belongs to Node's realm.",
+      "IDBTransaction interface: existence and properties of interface object": "As IDBRequest: jsdom's EventTarget belongs to Node's realm.",
+      "IDBVersionChangeEvent interface: existence and properties of interface object": "As IDBRequest, for jsdom's Event."
+    },
+    "key_invalid.any.js": {
+      "Invalid key - proxy of an array": "Script cannot tell a Proxy of an Array from an Array: Array.isArray answers true for both. Tenna accepts it as the array it proxies."
+    },
+    "structured-clone.any.js": {
+      "FileList: [object FileList]": "A FileList can only be made through DataTransfer, which jsdom lacks."
+    }
+  }
+}

@@ -161,10 +161,23 @@ public class NappPushService extends Service {
         @Nullable String action,
         @Nullable String reply
     ) {
-        Context app = context.getApplicationContext();
-
-        NappNotificationStore.Entry entry = NappNotificationStore.get(app, siteId, key);
+        NappNotificationStore.Entry entry =
+            NappNotificationStore.get(context.getApplicationContext(), siteId, key);
         if (entry == null) return;
+
+        dispatchNotificationEvent(context, siteId, kind, entry, action, reply);
+    }
+
+    /** The same, for a notification whose record has already been taken. */
+    static void dispatchNotificationEvent(
+        @NonNull Context context,
+        @NonNull String siteId,
+        @NonNull String kind,
+        @NonNull NappNotificationStore.Entry entry,
+        @Nullable String action,
+        @Nullable String reply
+    ) {
+        Context app = context.getApplicationContext();
 
         // The user just asked for something, so for the next minute the site's
         // worker may open its window in answer. Dismissing is not asking for

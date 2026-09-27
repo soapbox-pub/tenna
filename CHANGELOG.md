@@ -1,5 +1,14 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+
+- On Android, each notification from a site is now its own row in the site's
+  bundle, so you can tap it, answer it with its own buttons, or swipe it away
+  without touching the others. Swiping the bundle's header still clears the
+  whole site at once.
+
 ## [0.12.0] - 2026-09-26
 
 Sites can now refresh in the background: with your permission, a closed site

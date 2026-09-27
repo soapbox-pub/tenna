@@ -148,7 +148,7 @@ public class NappPushPlugin extends Plugin {
      * The window's road to the same place the worker's {@code
      * showNotification} reaches over its reserved path — see
      * {@link NsiteRequests} — and deliberately the same place. A notification
-     * is a notification: it joins the site's one row, replaces the last one
+     * is a notification: it joins the site's bundle, replaces the last one
      * with its tag, and answers to the same mute switch, whether the site was
      * open when it said so or asleep.
      *

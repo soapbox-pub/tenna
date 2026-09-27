@@ -45,11 +45,16 @@ let pending: string | null = null;
  * A cold start delivers that one URL twice: once as the launch URL read
  * below, and again as the `appUrlOpen` the bridge fires once it is up. Without
  * this the second delivery reopens the site a moment after the user has left
- * it. Only that one URL, and only once — a link is an ordinary thing to follow
- * twice, and an address tapped twice in the app is a button pressed twice.
+ * it. Only that one URL, only once, and only soon after launch — a link is an
+ * ordinary thing to follow twice, and one followed again later has to bring
+ * the site forward. Swallowing every later delivery of it was a link that
+ * worked the first time and never again until the process died.
  */
 let launchUrl: string | null = null;
-let launchSpent = false;
+let launchEchoUntil = 0;
+
+/** How long after launch the bridge's echo of the launch URL is expected. */
+const LAUNCH_ECHO_MS = 5_000;
 
 function announce(): void {
   for (const listener of listeners) listener(pending);
@@ -59,8 +64,12 @@ function announce(): void {
 export function requestNsiteOpen(url: string): void {
   if (!isNsiteUrl(url)) return;
 
-  // The bridge repeating the launch URL, after it has already been opened.
-  if (url === launchUrl && launchSpent) return;
+  // The bridge repeating the launch URL. Taken once, whether it lands before
+  // or after the launch URL was acted on: either way it is the same link.
+  if (url === launchUrl && Date.now() < launchEchoUntil) {
+    launchUrl = null;
+    return;
+  }
 
   pending = url;
   announce();
@@ -68,7 +77,6 @@ export function requestNsiteOpen(url: string): void {
 
 /** Done with it, however it went. */
 export function clearNsiteOpen(url: string): void {
-  if (url === launchUrl) launchSpent = true;
   if (pending !== url) return;
   pending = null;
   announce();
@@ -103,6 +111,7 @@ export const nsiteOpenPending: Promise<boolean> = Capacitor.isNativePlatform()
       .then((launch) => {
         if (!launch?.url || !isNsiteUrl(launch.url)) return false;
         launchUrl = launch.url;
+        launchEchoUntil = Date.now() + LAUNCH_ECHO_MS;
         pending = launch.url;
         announce();
         return true;

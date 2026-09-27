@@ -158,6 +158,8 @@ enum NappPeriodicSync {
         let completion = Completion(task)
         let work = Task { @MainActor in
             await run(deadline: Date().addingTimeInterval(budget))
+            // Back to suspended next, and holding no lock in the App Group.
+            NsiteIndexedDB.closeIdle()
             completion.finish(success: true)
         }
         task.expirationHandler = {

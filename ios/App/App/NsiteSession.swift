@@ -33,6 +33,8 @@ final class NsiteSession: NSObject, WKNavigationDelegate, WKUIDelegate {
     /// When the user last tapped the site. See `TouchWitness`.
     private let witness = TouchWitness()
     private var location: NsiteLocation?
+    /// This WebView's connection to the site's IndexedDB. See `NsiteIndexedDB`.
+    private let indexedDB = NsiteIndexedDBChannel()
     private lazy var downloads = NsiteDownloads(presenter: { [weak self] in self?.presenter() })
 
     /// The JavaScript dialog on screen, if any, and what the page is told if
@@ -118,6 +120,16 @@ final class NsiteSession: NSObject, WKNavigationDelegate, WKUIDelegate {
             injectionTime: .atDocumentStart,
             forMainFrameOnly: true
         ))
+        // IndexedDB, into every frame that is the site's own: the page, its
+        // same-origin iframes, `about:blank` ones that inherit its origin.
+        // Anybody else's frame keeps WebKit's. See `NsiteIndexedDB`.
+        if let source = Self.indexedDBScript(siteId: siteId) {
+            controller.addUserScript(WKUserScript(
+                source: source,
+                injectionTime: .atDocumentStart,
+                forMainFrameOnly: false
+            ))
+        }
 
         self.webView = WKWebView(frame: .zero, configuration: config)
 
@@ -131,6 +143,8 @@ final class NsiteSession: NSObject, WKNavigationDelegate, WKUIDelegate {
             webView.configuration.userContentController.add(host, name: Self.hostObject)
         }
         webView.configuration.userContentController.add(host, name: NsiteLocation.handlerName)
+        webView.configuration.userContentController.addScriptMessageHandler(
+            IndexedDBHost(session: self), contentWorld: .page, name: Self.indexedDBObject)
 
         location = NsiteLocation(
             askSite: { [weak self] decide in
@@ -311,6 +325,50 @@ final class NsiteSession: NSObject, WKNavigationDelegate, WKUIDelegate {
             .replacingOccurrences(of: "\u{2029}", with: "\\u2029")
     }
 
+    // MARK: - IndexedDB
+
+    private static let indexedDBObject = "tennaIDB"
+
+    /// The engine, for frames whose origin is this site's and no other.
+    private static func indexedDBScript(siteId: String) -> String? {
+        guard let script = NsiteIndexedDB.script, let origin = NsiteOrigins.originFor(siteId) else { return nil }
+        return "if (self.origin === \(jsString(origin))) {\n\(script)\n}"
+    }
+
+    /// Carries the engine's messages to the store, answering each in turn.
+    private final class IndexedDBHost: NSObject, WKScriptMessageHandlerWithReply {
+        private weak var session: NsiteSession?
+
+        init(session: NsiteSession) {
+            self.session = session
+            super.init()
+        }
+
+        nonisolated func userContentController(
+            _ controller: WKUserContentController,
+            didReceive message: WKScriptMessage,
+            replyHandler: @escaping @MainActor @Sendable (Any?, String?) -> Void
+        ) {
+            MainActor.assumeIsolated {
+                guard let session else { return replyHandler(nil, "UnknownError: The site has closed.") }
+                session.receiveIndexedDB(message, reply: replyHandler)
+            }
+        }
+    }
+
+    /**
+     A message from the engine in one of the site's frames. Any frame will do,
+     as long as its origin is the site's: the data is the site's own, and a
+     frame of the site's is the site.
+     */
+    private func receiveIndexedDB(_ message: WKScriptMessage, reply: @escaping (Any?, String?) -> Void) {
+        let origin = message.frameInfo.securityOrigin
+        guard origin.protocol == NsiteOrigins.scheme, origin.host == NsiteOrigins.hostFor(siteId) else {
+            return reply(nil, "UnknownError: Refused.")
+        }
+        NsiteIndexedDB.site(siteId).receive(body: message.body, from: indexedDB, reply: reply)
+    }
+
     // MARK: - Capabilities
 
     /// Answer a question previously raised as `nsiteCapability`.
@@ -407,6 +465,8 @@ final class NsiteSession: NSObject, WKNavigationDelegate, WKUIDelegate {
         let controller = webView.configuration.userContentController
         controller.removeScriptMessageHandler(forName: Self.hostObject)
         controller.removeScriptMessageHandler(forName: NsiteLocation.handlerName)
+        controller.removeScriptMessageHandler(forName: Self.indexedDBObject, contentWorld: .page)
+        NsiteIndexedDB.site(siteId).close(indexedDB)
         webView.navigationDelegate = nil
         webView.uiDelegate = nil
         webView.stopLoading()

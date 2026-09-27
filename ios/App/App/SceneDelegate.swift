@@ -32,5 +32,9 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         // it, and leaving is the last moment to make sure one is in. See
         // `NappPeriodicSync`.
         NappPeriodicSync.schedule()
+        // A suspended app holding a lock on a file in the App Group is killed,
+        // and an open SQLite connection is one. What is still in a transaction
+        // stays open under the background task `NsiteIndexedDB.activity` holds.
+        NsiteIndexedDB.closeIdle()
     }
 }

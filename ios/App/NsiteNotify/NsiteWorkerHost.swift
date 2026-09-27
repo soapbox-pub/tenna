@@ -59,6 +59,9 @@ final class NsiteWorkerHost: NSObject, WKScriptMessageHandler, WKNavigationDeleg
 
     private var webView: WKWebView?
     private var scheme: SchemeHandler?
+    /// The worker's connection to the site's IndexedDB, the one the site's
+    /// pages use. See `NsiteIndexedDB`.
+    private let indexedDB = NsiteIndexedDBChannel()
     private var continuation: CheckedContinuation<[Notification], Never>?
     private var notifications: [Notification] = []
     private var failure: String?
@@ -105,8 +108,11 @@ final class NsiteWorkerHost: NSObject, WKScriptMessageHandler, WKNavigationDeleg
         let config = WKWebViewConfiguration()
         config.setURLSchemeHandler(scheme, forURLScheme: NsiteOrigins.scheme)
         config.userContentController.add(self, name: "tenna")
-        // Nothing here will ever be looked at, and a store on disk is a store
-        // to clean up. The worker gets one push and the process goes away.
+        config.userContentController.addScriptMessageHandler(
+            IndexedDBRelay(siteId: siteId, channel: indexedDB), contentWorld: .page, name: "tennaIDB")
+        // Nothing WebKit keeps here will ever be looked at, and a store on
+        // disk is a store to clean up. What the worker keeps, it keeps in
+        // IndexedDB, which is Tenna's store and not this one.
         config.websiteDataStore = .nonPersistent()
 
         let webView = WKWebView(frame: CGRect(x: 0, y: 0, width: 320, height: 480), configuration: config)
@@ -140,6 +146,8 @@ final class NsiteWorkerHost: NSObject, WKScriptMessageHandler, WKNavigationDeleg
         scheme?.cancelAll()
         scheme = nil
         webView?.configuration.userContentController.removeScriptMessageHandler(forName: "tenna")
+        webView?.configuration.userContentController.removeScriptMessageHandler(forName: "tennaIDB", contentWorld: .page)
+        NsiteIndexedDB.site(siteId).close(indexedDB)
         webView?.navigationDelegate = nil
         webView?.stopLoading()
         webView = nil
@@ -199,6 +207,30 @@ final class NsiteWorkerHost: NSObject, WKScriptMessageHandler, WKNavigationDeleg
 
             default:
                 break
+            }
+        }
+    }
+
+    // MARK: - IndexedDB
+
+    /// Answers the host page's relay of the worker's IndexedDB messages.
+    private final class IndexedDBRelay: NSObject, WKScriptMessageHandlerWithReply {
+        private let siteId: String
+        private let channel: NsiteIndexedDBChannel
+
+        init(siteId: String, channel: NsiteIndexedDBChannel) {
+            self.siteId = siteId
+            self.channel = channel
+            super.init()
+        }
+
+        nonisolated func userContentController(
+            _ controller: WKUserContentController,
+            didReceive message: WKScriptMessage,
+            replyHandler: @escaping @MainActor @Sendable (Any?, String?) -> Void
+        ) {
+            MainActor.assumeIsolated {
+                NsiteIndexedDB.site(siteId).receive(body: message.body, from: channel, reply: replyHandler)
             }
         }
     }
@@ -305,8 +337,16 @@ final class NsiteWorkerHost: NSObject, WKScriptMessageHandler, WKNavigationDeleg
         }
     }
 
-    /// The host page and the shim are Tenna's; everything else is the site's.
+    /// Where the worker loads the IndexedDB engine from.
+    static let indexedDBPath = "/.tenna/idb.js"
+
+    /// The host page, the shim and the engine are Tenna's; everything else is
+    /// the site's.
     fileprivate func answer(path: String, shimmed: Bool) async -> (Data, String)? {
+        if path == Self.indexedDBPath {
+            guard let script = NsiteIndexedDB.script else { return nil }
+            return (Data(script.utf8), "text/javascript; charset=utf-8")
+        }
         if path == Self.hostPath {
             guard let page = Self.resource("NsiteWorkerHostPage", "html") else { return nil }
             // The worker's URL, carrying the marker that asks for the shim.
@@ -327,9 +367,13 @@ final class NsiteWorkerHost: NSObject, WKScriptMessageHandler, WKNavigationDeleg
         // script and still means what it says.
         let tags = (try? JSONSerialization.data(withJSONObject: periodicTags))
             .flatMap { String(data: $0, encoding: .utf8) } ?? "[]"
+        // The engine after the shim, which gives it its transport, and before
+        // the site, whose top-level code may open a database.
+        let engine = NsiteIndexedDB.script == nil ? "" : "importScripts(\(Self.jsString(Self.indexedDBPath)));"
         let source = """
         self.__tennaPeriodicTags = \(tags);
         \(shim)
+        \(engine)
         importScripts(\(Self.jsString(path)));
         self.__tennaWorker.boot();
         """

@@ -35,6 +35,23 @@
 
   tell({ __tenna: 'trace', message: 'worker constructed' });
 
+  // The worker's IndexedDB talks to the store through this page: a port of
+  // its own, its first message, relayed to the handler that answers each.
+  // See `NsiteWorkerShim.js`.
+  var idb = window.webkit.messageHandlers.tennaIDB;
+  if (idb) {
+    var channel = new MessageChannel();
+    channel.port1.onmessage = function(event) {
+      var message = event.data;
+      idb.postMessage(message.text).then(function(reply) {
+        channel.port1.postMessage({ id: message.id, reply: reply });
+      }, function(err) {
+        channel.port1.postMessage({ id: message.id, error: String((err && err.message) || err) });
+      });
+    };
+    worker.postMessage({ __tennaIDBPort: true }, [channel.port2]);
+  }
+
   worker.onmessage = function(event) {
     var message = event.data;
     if (!message || typeof message !== 'object' || !message.__tenna) return;

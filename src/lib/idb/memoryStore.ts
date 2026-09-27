@@ -152,7 +152,7 @@ export class MemoryStore {
   private readonly transactions = new Map<string, MemoryTransaction>();
   private readonly writers = new Map<string, (() => void)[]>();
   private readonly busy = new Set<string>();
-  private readonly waiters = new Map<string, { resolve?: (notices: Wire[]) => void; notices: Wire[] }>();
+  private readonly waiters = new Map<string, { resolve: (notices: Wire[]) => void; open: [string, number, string][] }>();
 
   /**
    * @param later — how an answer is held back to a later task, as the
@@ -184,7 +184,7 @@ export class MemoryStore {
       case 'tx':
         return this.transaction(request[1] as string, request[2] as string, request[3] as Wire[] | null, request[4] as Wire[][]);
       case 'wait':
-        return this.wait(request[1] as string);
+        return this.wait(request[1] as string, request[2] as [string, number, string][]);
       case 'bye':
         this.bye(request[1] as string);
         return 0;
@@ -222,27 +222,38 @@ export class MemoryStore {
     else this.busy.delete(name);
   }
 
-  private notify(from: string, notice: Wire): void {
+  /** A database as a realm would see it: committed, or not there. */
+  private current(name: string): [number, string] {
+    const db = this.databases.get(name);
+    return db && db.committed ? [db.committedVersion, db.incarnation] : [0, ''];
+  }
+
+  private differences(open: [string, number, string][]): Wire[] {
+    const out: Wire[] = [];
+    for (const [name, version, incarnation] of open) {
+      const [v, i] = this.current(name);
+      if (v !== version || i !== incarnation) out.push([name, v, i]);
+    }
+    return out;
+  }
+
+  /** Something committed: answer every wait it matters to. */
+  private notify(): void {
     for (const [realm, waiter] of this.waiters) {
-      if (realm === from) continue;
-      waiter.notices.push(notice);
-      if (waiter.resolve) {
-        const resolve = waiter.resolve;
-        waiter.resolve = undefined;
-        resolve(waiter.notices.splice(0));
-      }
+      const found = this.differences(waiter.open);
+      if (!found.length) continue;
+      this.waiters.delete(realm);
+      waiter.resolve(found);
     }
   }
 
-  private wait(realm: string): Promise<Wire> {
-    let waiter = this.waiters.get(realm);
-    if (!waiter) {
-      waiter = { notices: [] };
-      this.waiters.set(realm, waiter);
-    }
-    if (waiter.notices.length) return Promise.resolve(waiter.notices.splice(0));
+  private wait(realm: string, open: [string, number, string][]): Promise<Wire> {
+    this.waiters.get(realm)?.resolve([]);
+    this.waiters.delete(realm);
+    const found = this.differences(open);
+    if (found.length) return Promise.resolve(found);
     return new Promise((resolve) => {
-      waiter!.resolve = resolve;
+      this.waiters.set(realm, { resolve, open });
     });
   }
 
@@ -253,17 +264,18 @@ export class MemoryStore {
         this.transactions.delete(id);
       }
     }
+    this.waiters.get(realm)?.resolve([]);
     this.waiters.delete(realm);
   }
 
-  private async drop(realm: string, name: string): Promise<Wire> {
+  private async drop(_realm: string, name: string): Promise<Wire> {
     await this.acquire(name);
     try {
       const db = this.databases.get(name);
       if (!db) return 0;
       this.databases.delete(name);
-      this.notify(realm, [name, 0, '']);
-      return db.version;
+      this.notify();
+      return db.committed ? db.committedVersion : 0;
     } finally {
       this.release(name);
     }
@@ -360,7 +372,7 @@ export class MemoryStore {
     if (commit && txn.mode === 'v' && txn.database) {
       txn.database.committed = true;
       txn.database.committedVersion = txn.database.version;
-      this.notify(txn.realm, [txn.name, txn.database.version, txn.database.incarnation]);
+      this.notify();
     }
   }
 

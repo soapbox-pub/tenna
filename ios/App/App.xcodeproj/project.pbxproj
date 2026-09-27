@@ -35,6 +35,10 @@
 		AA00000000000000000000F1 /* NsiteWorkerHost.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA00000000000000000000A4 /* NsiteWorkerHost.swift */; };
 		AA00000000000000000000F2 /* NsiteWorkerShim.js in Resources */ = {isa = PBXBuildFile; fileRef = AA00000000000000000000A5 /* NsiteWorkerShim.js */; };
 		AA00000000000000000000F3 /* NsiteWorkerHostPage.html in Resources */ = {isa = PBXBuildFile; fileRef = AA00000000000000000000A6 /* NsiteWorkerHostPage.html */; };
+		AA0000000000000000000013 /* NsiteIndexedDB.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000011 /* NsiteIndexedDB.swift */; };
+		AA0000000000000000000014 /* NsiteIndexedDB.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000011 /* NsiteIndexedDB.swift */; };
+		AA0000000000000000000015 /* NsiteIndexedDB.js in Resources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000012 /* NsiteIndexedDB.js */; };
+		AA0000000000000000000016 /* NsiteIndexedDB.js in Resources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000012 /* NsiteIndexedDB.js */; };
 		AA00000000000000000000C9 /* NsiteNotify.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = AA00000000000000000000A2 /* NsiteNotify.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		BC0000000000000000000001 /* NsiteGroup.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB0000000000000000000001 /* NsiteGroup.swift */; };
 		BC0000000000000000000002 /* NsiteStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB0000000000000000000002 /* NsiteStore.swift */; };
@@ -84,6 +88,8 @@
 		AA00000000000000000000A4 /* NsiteWorkerHost.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NsiteWorkerHost.swift; sourceTree = "<group>"; };
 		AA00000000000000000000A5 /* NsiteWorkerShim.js */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.javascript; path = NsiteWorkerShim.js; sourceTree = "<group>"; };
 		AA00000000000000000000A6 /* NsiteWorkerHostPage.html */ = {isa = PBXFileReference; lastKnownFileType = text.html; path = NsiteWorkerHostPage.html; sourceTree = "<group>"; };
+		AA0000000000000000000011 /* NsiteIndexedDB.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NsiteIndexedDB.swift; sourceTree = "<group>"; };
+		AA0000000000000000000012 /* NsiteIndexedDB.js */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.javascript; path = NsiteIndexedDB.js; sourceTree = "<group>"; };
 		AA00000000000000000000A8 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		BB0000000000000000000001 /* NsiteGroup.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NsiteGroup.swift; sourceTree = "<group>"; };
 		BB0000000000000000000002 /* NsiteStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NsiteStore.swift; sourceTree = "<group>"; };
@@ -155,6 +161,8 @@
 				AA00000000000000000000A4 /* NsiteWorkerHost.swift */,
 				AA00000000000000000000A6 /* NsiteWorkerHostPage.html */,
 				AA00000000000000000000A5 /* NsiteWorkerShim.js */,
+				AA0000000000000000000011 /* NsiteIndexedDB.swift */,
+				AA0000000000000000000012 /* NsiteIndexedDB.js */,
 				BB000000000000000000005A /* NsiteNotify.entitlements */,
 				AA00000000000000000000A8 /* Info.plist */,
 			);
@@ -312,6 +320,7 @@
 				2FAD9763203C412B000D30F8 /* config.xml in Resources */,
 				AA00000000000000000000F3 /* NsiteWorkerHostPage.html in Resources */,
 				AA00000000000000000000F2 /* NsiteWorkerShim.js in Resources */,
+				AA0000000000000000000015 /* NsiteIndexedDB.js in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -321,6 +330,7 @@
 			files = (
 				AA00000000000000000000B6 /* NsiteWorkerHostPage.html in Resources */,
 				AA00000000000000000000B5 /* NsiteWorkerShim.js in Resources */,
+				AA0000000000000000000016 /* NsiteIndexedDB.js in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -345,6 +355,7 @@
 				26081D0B72868ABF4539D67A /* NsiteBlobs.swift in Sources */,
 				9582B6832FE993A70072D4E8 /* SceneDelegate.swift in Sources */,
 				AA00000000000000000000F1 /* NsiteWorkerHost.swift in Sources */,
+				AA0000000000000000000013 /* NsiteIndexedDB.swift in Sources */,
 				BC0000000000000000000001 /* NsiteGroup.swift in Sources */,
 				BC0000000000000000000002 /* NsiteStore.swift in Sources */,
 				BC0000000000000000000003 /* NsiteFilter.swift in Sources */,
@@ -361,6 +372,7 @@
 			files = (
 				AA00000000000000000000B3 /* NotificationService.swift in Sources */,
 				AA00000000000000000000B4 /* NsiteWorkerHost.swift in Sources */,
+				AA0000000000000000000014 /* NsiteIndexedDB.swift in Sources */,
 				AA00000000000000000000B9 /* NsiteOrigins.swift in Sources */,
 				BD0000000000000000000001 /* NsiteGroup.swift in Sources */,
 				BD0000000000000000000002 /* NsiteStore.swift in Sources */,

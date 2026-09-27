@@ -262,6 +262,9 @@ class NotificationService: UNNotificationServiceExtension {
     private func deliver(_ content: UNNotificationContent) {
         guard let handler = contentHandler else { return }
         contentHandler = nil
+        // The process is about to be suspended or ended, and a suspended one
+        // holding a lock on a file in the App Group is killed.
+        NsiteIndexedDB.closeIdle()
         handler(content)
     }
 }

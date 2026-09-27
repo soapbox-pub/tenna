@@ -216,6 +216,50 @@
     return Promise.allSettled(promises);
   }
 
+  // -------------------------------------------------------------------------
+  // IndexedDB
+  // -------------------------------------------------------------------------
+
+  /**
+   * How the worker's IndexedDB reaches the site's store: `NsiteIndexedDB.js`,
+   * loaded next, takes this as its transport. The host page hands over a
+   * port to itself as the first message the worker gets, and relays what
+   * comes down it to the store; until the port arrives, messages wait.
+   *
+   * The port's message is taken before any listener of the site's can see
+   * it, which is why this listener is added here, ahead of the site's file.
+   */
+  var idbPort = null;
+  var idbQueue = [];
+  var idbPending = {};
+  var idbNext = 1;
+
+  self.addEventListener('message', function(event) {
+    var message = event.data;
+    if (!message || typeof message !== 'object' || message.__tennaIDBPort !== true) return;
+    event.stopImmediatePropagation();
+    idbPort = event.ports[0];
+    idbPort.onmessage = function(reply) {
+      var answer = reply.data;
+      var waiter = idbPending[answer.id];
+      delete idbPending[answer.id];
+      if (!waiter) return;
+      if (typeof answer.error === 'string') waiter[1](new Error(answer.error));
+      else waiter[0](answer.reply);
+    };
+    idbQueue.splice(0).forEach(function(queued) { idbPort.postMessage(queued); });
+  });
+
+  self.__tennaIDBTransport = function(text) {
+    return new Promise(function(resolve, reject) {
+      var id = idbNext++;
+      idbPending[id] = [resolve, reject];
+      var message = { id: id, text: text };
+      if (idbPort) idbPort.postMessage(message);
+      else idbQueue.push(message);
+    });
+  };
+
   var KINDS = { push: true, notificationclick: true, notificationclose: true, periodicsync: true };
 
   self.addEventListener('message', function(event) {

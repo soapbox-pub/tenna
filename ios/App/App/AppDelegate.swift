@@ -7,6 +7,9 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
 
     var window: UIWindow?
 
+    /// Held while a site has an IndexedDB transaction open. See `NsiteIndexedDB`.
+    private var indexedDBTask: UIBackgroundTaskIdentifier = .invalid
+
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
         // Set before anything can be delivered, which on a cold launch out of a
         // tap is immediately: without a delegate in place by the time this
@@ -16,6 +19,22 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
         // Before this returns, or iOS has nobody to hand the task to. See
         // `NappPeriodicSync`.
         NappPeriodicSync.registerHandler()
+
+        // A transaction is a lock on a file in the App Group, and iOS kills a
+        // suspended app holding one. So while any is open the app asks for a
+        // little more time, which is all a transaction ever needs.
+        NsiteIndexedDB.activity = { [weak self] open in
+            guard let self else { return }
+            if open, self.indexedDBTask == .invalid {
+                self.indexedDBTask = application.beginBackgroundTask(withName: "IndexedDB") {
+                    application.endBackgroundTask(self.indexedDBTask)
+                    self.indexedDBTask = .invalid
+                }
+            } else if !open, self.indexedDBTask != .invalid {
+                application.endBackgroundTask(self.indexedDBTask)
+                self.indexedDBTask = .invalid
+            }
+        }
 
         // Not a request for permission — that belongs next to the site asking
         // for it, and is `NappPush.requestPermission`. This only picks the token

@@ -43,9 +43,13 @@
  * Ops run in order. A transaction ends with op `commit` or `abort`, or when
  * its realm goes away (abort).
  *
- * `['wait', realm]` → `[[name, version, incarnation], ...]`, answered when
- * another realm has upgraded or deleted a database: its current version (0
- * when deleted) and incarnation. The engine keeps one outstanding.
+ * `['wait', realm, [[name, version, incarnation], ...]]`: the databases the
+ * realm has open, as it has them. Answered — at once, if it is already so —
+ * when any of them differs in the store, with the ones that differ as
+ * `[name, version, incarnation]`, version 0 and incarnation '' for one that
+ * is gone. A newer wait from the same realm answers the older one with `[]`.
+ * Only committed changes count. The engine keeps one outstanding, and sends a
+ * new one whenever what it has open changes.
  *
  * `['bye', realm]`: the realm is going away; abort its transactions.
  *

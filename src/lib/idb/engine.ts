@@ -87,7 +87,8 @@ interface Realm {
   schedulers: Map<string, Scheduler>;
   /** Open and delete requests queue per database name. */
   queues: Map<string, Promise<void>>;
-  waiting: boolean;
+  /** Which `wait` is the current one; an answer to any other is stale. */
+  waits: number;
   /** Settles once any one-time work before the first request is done. */
   ready: Promise<void>;
 }
@@ -104,7 +105,7 @@ export function connect(transport: Transport, ready: Promise<void> = Promise.res
     connections: new Map(),
     schedulers: new Map(),
     queues: new Map(),
-    waiting: false,
+    waits: 0,
     ready,
   };
 }
@@ -250,21 +251,23 @@ class Connection {
 }
 
 /**
- * Keep one `wait` outstanding while any connection is open, and act on what
- * it reports: another realm upgraded or deleted a database this one has open.
+ * Keep one `wait` outstanding for the connections this realm has open, and
+ * act on its answer: another realm upgraded or deleted one of them. Called
+ * again whenever the set of connections changes, which supersedes the wait
+ * before.
  */
 function listen(): void {
-  if (realm.waiting) return;
-  realm.waiting = true;
-  const loop = async () => {
-    while ([...realm.connections.values()].some((set) => set.size)) {
-      let notices: Wire;
-      try {
-        notices = await realm.send(['wait', realm.id]);
-      } catch {
-        break;
-      }
-      for (const notice of notices as Wire[][]) {
+  const open: Wire[] = [];
+  for (const set of realm.connections.values()) {
+    // A connection mid-upgrade has a version the store has not committed.
+    for (const conn of set) if (!conn.closePending && !conn.upgrade) open.push([conn.name, conn.version, conn.incarnation]);
+  }
+  if (!open.length) return;
+  const generation = ++realm.waits;
+  realm.send(['wait', realm.id, open]).then(
+    (answer) => {
+      if (generation !== realm.waits) return;
+      for (const notice of answer as Wire[][]) {
         const [name, version, incarnation] = notice as [string, number, string];
         for (const conn of [...(realm.connections.get(name) ?? [])]) {
           if (conn.closePending) continue;
@@ -278,10 +281,10 @@ function listen(): void {
           });
         }
       }
-    }
-    realm.waiting = false;
-  };
-  void loop();
+      listen();
+    },
+    () => undefined,
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -2077,12 +2080,12 @@ async function runOpen(request: IDBOpenDBRequest, name: string, requested: numbe
   const before = header as Schema;
   current = before[0];
   const conn = new Connection(name, version, before[1], before);
-  conn.register();
   // The begin went out above; this transaction's stream continues it.
   const txn = new TxnState(conn, 'versionchange', [], 'default', txnId);
   txn.begun = true;
   txn.started = true;
   conn.upgrade = txn;
+  conn.register();
   const oldVersion = current;
   txn.undo.push(() => {
     conn.version = oldVersion;
@@ -2114,6 +2117,7 @@ async function runOpen(request: IDBOpenDBRequest, name: string, requested: numbe
 
   await finished;
   conn.upgrade = null;
+  listen();
   if (txn.aborted) {
     conn.closePending = true;
     conn.maybeClose();

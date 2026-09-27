@@ -7,18 +7,26 @@
  * talking the real wire protocol to a fresh `MemoryStore`, then
  * testharness.js, the file's support scripts, and the file.
  *
+ * With `WPT_STORE` set to a command, each file's store is instead a process
+ * of that command — `ios/IDBStoreCLI`, the native SQLite store built for the
+ * command line — given a fresh database path, so the same suite checks the
+ * store the phone runs.
+ *
  * `wpt-expectations.json` lists the subtests known to fail, each with the
  * reason. A subtest that fails and is not listed fails this suite, and so
  * does one that is listed but now passes, so the list stays the truth.
  */
 
-import { appendFile, readFile, readdir } from 'node:fs/promises';
+import { spawn } from 'node:child_process';
+import { appendFile, readFile, readdir, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { JSDOM, VirtualConsole } from 'jsdom';
 import { beforeAll, describe, expect, it } from 'vitest';
 
 import { MemoryStore } from './memoryStore';
+import type { Transport } from './protocol';
 import expectations from './wpt-expectations.json';
 
 const ROOT = join(__dirname, '../../../vendor/wpt');
@@ -54,6 +62,53 @@ async function resolveScript(from: string, path: string): Promise<string> {
   if (path === '/resources/WebIDLParser.js') return join(ROOT, 'resources/webidl2/lib/webidl2.js');
   if (path.startsWith('/')) return join(ROOT, path);
   return join(from, path);
+}
+
+let stores = 0;
+
+/**
+ * A store in another process, spoken to in frames of a request id, a length,
+ * a status and UTF-16LE: see `ios/IDBStoreCLI/main.swift`.
+ */
+function externalStore(command: string): { transport: Transport; close(): Promise<void> } {
+  const path = join(tmpdir(), `idb-wpt-${process.pid}-${stores++}`);
+  const child = spawn(`${command} ${path}`, { shell: true, stdio: ['pipe', 'pipe', 'inherit'] });
+  const pending = new Map<number, [(text: string) => void, (error: Error) => void]>();
+  let next = 1;
+  let buffer = Buffer.alloc(0);
+  child.stdout.on('data', (chunk: Buffer) => {
+    buffer = Buffer.concat([buffer, chunk]);
+    while (buffer.length >= 12) {
+      const length = buffer.readUInt32LE(4);
+      if (buffer.length < 12 + length) break;
+      const id = buffer.readUInt32LE(0);
+      const status = buffer.readUInt32LE(8);
+      const text = buffer.subarray(12, 12 + length).toString('utf16le');
+      buffer = buffer.subarray(12 + length);
+      const waiter = pending.get(id);
+      pending.delete(id);
+      if (status === 0) waiter?.[0](text);
+      else waiter?.[1](new Error(text));
+    }
+  });
+  const transport: Transport = (message) =>
+    new Promise((resolve, reject) => {
+      const id = next++;
+      pending.set(id, [resolve, reject]);
+      const body = Buffer.from(message, 'utf16le');
+      const header = Buffer.alloc(8);
+      header.writeUInt32LE(id, 0);
+      header.writeUInt32LE(body.length, 4);
+      child.stdin.write(Buffer.concat([header, body]));
+    });
+  return {
+    transport,
+    close: async () => {
+      child.stdin.end();
+      await new Promise((resolve) => child.once('exit', resolve));
+      await rm(path, { recursive: true, force: true });
+    },
+  };
 }
 
 /** A MessageChannel good enough for the engine: one-way, a task per message. */
@@ -115,8 +170,8 @@ async function runFile(file: string, variant: string): Promise<{ results: Result
   // jsdom has no MessageChannel, and the engine's per-event tasks would
   // otherwise each wait on a clamped timer. setImmediate is a task too.
   win.MessageChannel = FastChannel as unknown as typeof MessageChannel;
-  const store = new MemoryStore(setImmediate);
-  win.__tennaIDBTransport = store.transport;
+  const external = process.env.WPT_STORE ? externalStore(process.env.WPT_STORE) : undefined;
+  win.__tennaIDBTransport = external ? external.transport : new MemoryStore(setImmediate).transport;
   // idlharness reads the IDL it checks against with fetch.
   win.fetch = (async (url: string) => {
     const idl = await readFile(join(ROOT, new URL(url, 'https://wpt.test/').pathname), 'utf8');
@@ -166,6 +221,7 @@ async function runFile(file: string, variant: string): Promise<{ results: Result
   } finally {
     clearTimeout(timer);
     win.close();
+    await external?.close();
   }
 }
 

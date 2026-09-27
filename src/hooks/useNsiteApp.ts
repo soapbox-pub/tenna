@@ -378,6 +378,17 @@ async function readIcon(url: string): Promise<{ glyph: boolean | null; thumb: st
 export function useNsiteApp(event: NostrEvent, options?: { enabled?: boolean }) {
   return useQuery({
     enabled: options?.enabled ?? true,
+    ...nsiteAppQuery(event),
+  });
+}
+
+/**
+ * The query behind {@link useNsiteApp}, for a caller that wants the answer
+ * once rather than a subscription to it — through the same cache, so a site
+ * the wall has already read is not read twice.
+ */
+export function nsiteAppQuery(event: NostrEvent) {
+  return {
     queryKey: ['nsite-app', event.id],
     queryFn: async (): Promise<NsiteApp> => {
       const files = buildManifest(event);
@@ -480,5 +491,5 @@ export function useNsiteApp(event: NostrEvent, options?: { enabled?: boolean }) 
     },
     staleTime: Infinity,
     retry: 1,
-  });
+  };
 }

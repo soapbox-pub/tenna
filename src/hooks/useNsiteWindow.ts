@@ -1,7 +1,8 @@
 import type { NostrEvent } from '@nostrify/nostrify';
+import { useQueryClient } from '@tanstack/react-query';
 import { useCallback } from 'react';
 
-import type { NsiteApp } from '@/hooks/useNsiteApp';
+import { type NsiteApp, nsiteAppQuery } from '@/hooks/useNsiteApp';
 import { useToast } from '@/hooks/useToast';
 import { renderAppBadgePng } from '@/lib/appBadgeBitmap';
 import { renderAppIconPng } from '@/lib/appIconBitmap';
@@ -54,6 +55,7 @@ interface UseNsiteOpenerResult {
  */
 export function useNsiteOpener(): UseNsiteOpenerResult {
   const { toast } = useToast();
+  const queryClient = useQueryClient();
 
   const open = useCallback(
     (event: NostrEvent, name: string, app?: NsiteApp, channel?: number, path?: string) => {
@@ -83,10 +85,17 @@ export function useNsiteOpener(): UseNsiteOpenerResult {
           return;
         }
 
-        void redrawArtwork(siteId, name, app, channel);
+        // A caller with no document read — a link, or a search result that
+        // was pressed before its row had fetched one — would otherwise leave
+        // the site with no artwork at all until it was opened from a tile,
+        // and a site that is never on the wall never is. Its notifications
+        // then wear no face of the site's. Read it here instead, after the
+        // window is already up, so nothing is waited on.
+        const drawn = app ?? await queryClient.fetchQuery(nsiteAppQuery(event)).catch(() => undefined);
+        void redrawArtwork(siteId, name, drawn, channel);
       })();
     },
-    [toast],
+    [toast, queryClient],
   );
 
   return { available: supportsNsiteWindows(), open };

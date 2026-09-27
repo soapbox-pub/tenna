@@ -192,6 +192,14 @@ export interface NsiteWebViewPlugin {
     event: 'nsiteLink',
     handler: (event: { url: string }) => void,
   ): Promise<PluginListenerHandle>;
+
+  /**
+   * Forget everything kept for a site: its IndexedDB, its cookies, local
+   * storage and cache, and its record, with its subscriptions and periodic
+   * syncs. iOS only; Android forgets a site when the wall it is mirrored
+   * with no longer has it (`NsiteShortcuts.setWall`).
+   */
+  forget(options: { siteId: string }): Promise<void>;
 }
 
 export const NsiteWebView = registerPlugin<NsiteWebViewPlugin>('NsiteWebView');
@@ -212,6 +220,15 @@ export function supportsNativeNsite(): boolean {
   const platform = Capacitor.getPlatform();
   return (platform === 'android' || platform === 'ios')
     && Capacitor.isPluginAvailable('NsiteWebView');
+}
+
+/**
+ * Whether removing a site from the wall should forget what is kept for it
+ * with `NsiteWebView.forget`. iOS: Android does the same through the wall it
+ * is told about.
+ */
+export function forgetsRemovedSites(): boolean {
+  return Capacitor.getPlatform() === 'ios' && Capacitor.isPluginAvailable('NsiteWebView');
 }
 
 /**

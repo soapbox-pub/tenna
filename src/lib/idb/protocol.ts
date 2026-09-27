@@ -51,6 +51,9 @@
  * Only committed changes count. The engine keeps one outstanding, and sends a
  * new one whenever what it has open changes.
  *
+ * `['migration']` → 1 once the site's old data has been copied in, else 0.
+ * `['migration', 1]` records that it has. See `migrate.ts`.
+ *
  * `['bye', realm]`: the realm is going away; abort its transactions.
  *
  * ## Ops

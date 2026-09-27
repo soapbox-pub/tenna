@@ -9,6 +9,7 @@ import { useLocalStorage } from '@/hooks/useLocalStorage';
 import { forgetSynced } from '@/hooks/useNsitePin';
 import { useNostrStorage } from '@/hooks/useNostrStorage';
 import { nsitePointerFilter } from '@/lib/nsiteAddress';
+import { forgetsRemovedSites, NsiteWebView } from '@/lib/nsiteNativePlugin';
 import { isServableNsite } from '@/lib/nsiteFiles';
 import { NsiteShortcuts, supportsNsiteWindows } from '@/lib/nsiteShortcutsPlugin';
 import { getNsiteSubdomain, hexToBase36, parseNsiteSubdomain } from '@/lib/nsiteSubdomain';
@@ -267,6 +268,11 @@ export function useWall() {
       if (address?.kind === 'nsite') {
         removeTileSnapshot(address.id);
         forgetSynced(address.id);
+        if (forgetsRemovedSites()) {
+          void NsiteWebView.forget({ siteId: address.id }).catch(() => {
+            // An older build than this method. The data stays, as it always did.
+          });
+        }
       }
       setUris((prev) => prev.filter((existing) => existing !== uri));
     },

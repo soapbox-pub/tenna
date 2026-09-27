@@ -37,7 +37,7 @@
 
   // The worker's IndexedDB talks to the store through this page: a port of
   // its own, its first message, relayed to the handler that answers each.
-  // See `NsiteWorkerShim.js`.
+  // See `src/lib/idb/entry.ts`.
   var idb = window.webkit.messageHandlers.tennaIDB;
   if (idb) {
     var channel = new MessageChannel();

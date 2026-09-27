@@ -55,6 +55,11 @@ final class NsiteSchemeHandler: NSObject, WKURLSchemeHandler {
                 return
             }
 
+            if let answer = Self.indexedDB(url) {
+                finish(id, with: answer, url: url)
+                return
+            }
+
             Task { [weak self] in
                 let response = await self?.server.serve(url)
                 guard let self, let response else { return }
@@ -94,6 +99,52 @@ final class NsiteSchemeHandler: NSObject, WKURLSchemeHandler {
         task.didReceive(http)
         task.didReceive(response.body)
         task.didFinish()
+    }
+
+    // MARK: - IndexedDB for workers
+
+    /// The marker a worker's script URL carries when the engine must load
+    /// ahead of it, with `classic` or `module` for how. See `entry.ts`.
+    static let workerMarker = "__tenna_idb_worker"
+
+    /**
+     Tenna's answers under the site's origin: the IndexedDB engine, and the
+     wrapper a worker the site starts is really started with — the engine,
+     then the site's own script, which is loaded rather than inlined so that
+     it is still a script of its own with its own `'use strict'`, and at a URL
+     in the same directory, so the worker resolves relative URLs as the site
+     meant.
+     */
+    private static func indexedDB(_ url: URL) -> NsiteFileServer.Response? {
+        let engine = "/.tenna/idb.js"
+        if url.path == engine {
+            guard let script = NsiteIndexedDB.script else { return nil }
+            return javascript(script)
+        }
+        guard var parts = URLComponents(url: url, resolvingAgainstBaseURL: false),
+              let kind = parts.queryItems?.first(where: { $0.name == workerMarker })?.value else { return nil }
+        parts.queryItems = parts.queryItems?.filter { $0.name != workerMarker }
+        if parts.queryItems?.isEmpty == true { parts.queryItems = nil }
+        let original = parts.percentEncodedPath + (parts.percentEncodedQuery.map { "?" + $0 } ?? "")
+        let source = kind == "module"
+            ? "import \(jsString(engine));\nimport \(jsString(original));\n"
+            : "importScripts(\(jsString(engine)), \(jsString(original)));\n"
+        return javascript(source)
+    }
+
+    private static func javascript(_ source: String) -> NsiteFileServer.Response {
+        NsiteFileServer.Response(
+            status: 200,
+            contentType: "text/javascript; charset=utf-8",
+            headers: ["Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"],
+            body: Data(source.utf8)
+        )
+    }
+
+    private static func jsString(_ value: String) -> String {
+        guard let data = try? JSONSerialization.data(withJSONObject: value, options: [.fragmentsAllowed]),
+              let json = String(data: data, encoding: .utf8) else { return "\"\"" }
+        return json
     }
 
     /// Refuse everything outstanding. Called when the site is torn down, so

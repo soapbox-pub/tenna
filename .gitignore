@@ -52,3 +52,6 @@ yarn.lock
 /android/key.properties
 /android/app/*.jks
 /android/app/*.keystore
+
+# The conformance suite as an nsite, from `node scripts/build-wpt-site.mjs`.
+/dist-wpt

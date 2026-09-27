@@ -196,6 +196,15 @@ final class NsiteIndexedDB {
             guard let realm = message[safe: 1]?.ascii, let open = message[safe: 2]?.list else { return reply(.failure(.corrupt)) }
             channel.realms.insert(realm)
             wait(realm: realm, open: open, reply: answer)
+        case "migration":
+            // A marker beside the databases: the move out of WebKit is the
+            // site's, once, whichever of its databases it touched.
+            let marker = directory.appendingPathComponent(".migrated")
+            if message.count > 1 {
+                try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+                FileManager.default.createFile(atPath: marker.path, contents: Data())
+            }
+            reply(.success(IDBWire.number(FileManager.default.fileExists(atPath: marker.path) ? 1 : 0).encoded))
         case "bye":
             if let realm = message[safe: 1]?.ascii { bye(realm) }
             reply(.success(IDBWire.number(0).encoded))

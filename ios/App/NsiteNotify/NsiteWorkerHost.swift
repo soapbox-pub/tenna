@@ -367,8 +367,8 @@ final class NsiteWorkerHost: NSObject, WKScriptMessageHandler, WKNavigationDeleg
         // script and still means what it says.
         let tags = (try? JSONSerialization.data(withJSONObject: periodicTags))
             .flatMap { String(data: $0, encoding: .utf8) } ?? "[]"
-        // The engine after the shim, which gives it its transport, and before
-        // the site, whose top-level code may open a database.
+        // The engine before the site, whose top-level code may open a
+        // database; it reaches the store through the port the host page sends.
         let engine = NsiteIndexedDB.script == nil ? "" : "importScripts(\(Self.jsString(Self.indexedDBPath)));"
         let source = """
         self.__tennaPeriodicTags = \(tags);

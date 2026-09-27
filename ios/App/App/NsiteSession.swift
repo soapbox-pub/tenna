@@ -387,7 +387,7 @@ final class NsiteSession: NSObject, WKNavigationDelegate, WKUIDelegate {
 
     /// A stable store identity per site, so a site's storage survives closing
     /// and reopening it the way its cache does.
-    private static func storeIdentifier(for siteId: String) -> UUID {
+    static func storeIdentifier(for siteId: String) -> UUID {
         // A UUID is sixteen bytes and a site id is up to sixty-three, so the
         // digest is what makes the mapping total rather than lossy.
         var digest = [UInt8](repeating: 0, count: 16)

@@ -13,40 +13,175 @@
  * How the realm reaches the store:
  *
  * - `self.__tennaIDBTransport`, when whatever loaded this script set one
- *   first — a worker, relaying through the page or host page that made it,
- *   or a test. Taken and deleted, so a site cannot call it.
- * - Otherwise `webkit.messageHandlers.tennaIDB`, which answers each message
- *   with a promise: a site's page and its frames.
+ *   first — a test. Taken and deleted, so a site cannot call it.
+ * - `webkit.messageHandlers.tennaIDB`, which answers each message with a
+ *   promise: a site's page and its frames.
+ * - In a worker, a MessagePort, which the realm that started the worker sends
+ *   as its first message and answers through its own transport: a worker
+ *   the site's page starts, one that worker starts, and the service worker
+ *   the notification extension runs, whose host page does the same.
  *
- * With neither, the realm keeps whatever IndexedDB it had.
+ * A realm with a transport starts its workers with the engine loaded ahead of
+ * them — see `wrapWorkers`.
  */
 
 import { INTERNAL } from './keyRange';
-import { connect, disconnect, IDBFactory, INTERFACES, DOMStringList } from './engine';
+import { connect, disconnect, IDBFactory, INTERFACES, DOMStringList, send } from './engine';
+import { migrate, type Native } from './migrate';
 import type { Transport } from './protocol';
+import type { Wire } from './wire';
 
 interface Scope {
   __tennaIDBTransport?: Transport;
+  top?: unknown;
+  importScripts?: unknown;
+  Worker?: typeof Worker;
+  origin?: string;
+  location?: { href: string };
   webkit?: { messageHandlers?: { tennaIDB?: { postMessage(message: string): Promise<string> } } };
   addEventListener?: (type: string, listener: () => void) => void;
 }
 
-function transportFor(scope: Scope): Transport | undefined {
+/** The transport, and whether this is a page's top frame reaching the store itself. */
+function transportFor(scope: Scope): [Transport, boolean] | undefined {
   const given = scope.__tennaIDBTransport;
   if (typeof given === 'function') {
     delete scope.__tennaIDBTransport;
-    return given;
+    return [given, false];
   }
   const handler = scope.webkit?.messageHandlers?.tennaIDB;
   if (handler) {
     const post = handler.postMessage.bind(handler);
-    return (message) => post(message);
+    return [(message) => post(message), isTop(scope)];
   }
+  if (typeof scope.importScripts === 'function') return [portTransport(scope as typeof globalThis & Scope), false];
   return undefined;
 }
 
-function install(scope: typeof globalThis & Scope, transport: Transport): void {
-  connect(transport);
+/** A relayed message, and its answer. */
+interface Relayed {
+  id: number;
+  text?: string;
+  reply?: string;
+  error?: string;
+}
+
+const PORT_MARKER = '__tennaIDBPort';
+
+/**
+ * A worker's way to the store: the port its starter sends first. The
+ * listener goes on before any of the site's code runs, and takes the port's
+ * message before a listener of the site's could see it.
+ */
+function portTransport(scope: typeof globalThis & Scope): Transport {
+  let port: MessagePort | null = null;
+  const queue: Relayed[] = [];
+  const pending = new Map<number, [(text: string) => void, (error: Error) => void]>();
+  let next = 1;
+  scope.addEventListener('message', (event: Event) => {
+    const message = (event as MessageEvent).data as Record<string, unknown> | null;
+    if (!message || typeof message !== 'object' || message[PORT_MARKER] !== true) return;
+    event.stopImmediatePropagation();
+    port = (event as MessageEvent).ports[0];
+    port.onmessage = (reply) => {
+      const answer = reply.data as Relayed;
+      const waiter = pending.get(answer.id);
+      pending.delete(answer.id);
+      if (!waiter) return;
+      if (typeof answer.error === 'string') waiter[1](new Error(answer.error));
+      else waiter[0](answer.reply!);
+    };
+    for (const queued of queue.splice(0)) port.postMessage(queued);
+  });
+  return (text) =>
+    new Promise((resolve, reject) => {
+      const id = next++;
+      pending.set(id, [resolve, reject]);
+      const message: Relayed = { id, text };
+      if (port) port.postMessage(message);
+      else queue.push(message);
+    });
+}
+
+/**
+ * Start the site's workers with the engine ahead of them, reaching the store
+ * through this realm. A script of the site's is started at its own URL with a
+ * marker, which the scheme handler answers with the engine and then the
+ * script (`NsiteSchemeHandler.indexedDB`); a `blob:` script through a
+ * wrapper blob that does the same. Anybody else's script is started as it
+ * is, and has WebKit's IndexedDB.
+ */
+function wrapWorkers(scope: typeof globalThis & Scope, transport: Transport): void {
+  const Native = scope.Worker;
+  if (typeof Native !== 'function' || !scope.location) return;
+  const origin = scope.origin;
+  const engine = `${origin}/.tenna/idb.js`;
+
+  const Worker = function Worker(this: unknown, url: string | URL, options?: WorkerOptions) {
+    if (!new.target) throw new TypeError("Failed to construct 'Worker': Please use the 'new' operator.");
+    const target = new URL(String(url), scope.location!.href);
+    const module = options?.type === 'module';
+    let start: string;
+    if (target.protocol === 'blob:') {
+      const source = module
+        ? `import ${JSON.stringify(engine)};
+import ${JSON.stringify(target.href)};
+`
+        : `importScripts(${JSON.stringify(engine)}, ${JSON.stringify(target.href)});
+`;
+      start = URL.createObjectURL(new Blob([source], { type: 'text/javascript' }));
+    } else if (target.origin === origin) {
+      target.searchParams.append('__tenna_idb_worker', module ? 'module' : 'classic');
+      start = target.href;
+    } else {
+      return Reflect.construct(Native, [url, options], new.target) as Worker;
+    }
+    const worker = Reflect.construct(Native, [start, options], new.target) as Worker;
+    const channel = new MessageChannel();
+    channel.port1.onmessage = (event) => {
+      const message = event.data as Relayed;
+      transport(message.text!).then(
+        (reply) => channel.port1.postMessage({ id: message.id, reply }),
+        (error: unknown) => channel.port1.postMessage({ id: message.id, error: String((error as Error)?.message ?? error) }),
+      );
+    };
+    worker.postMessage({ [PORT_MARKER]: true }, [channel.port2]);
+    return worker;
+  };
+  Worker.prototype = Native.prototype;
+  Object.setPrototypeOf(Worker, Native);
+  Object.defineProperty(Native.prototype, 'constructor', { value: Worker, writable: true, configurable: true });
+  Object.defineProperty(scope, 'Worker', { value: Worker, writable: true, configurable: true, enumerable: false });
+}
+
+function isTop(scope: Scope): boolean {
+  try {
+    return scope.top === scope;
+  } catch {
+    return false;
+  }
+}
+
+function install(scope: typeof globalThis & Scope, transport: Transport, top: boolean): void {
+  // WebKit's own, before it is replaced: the page's old data is in it.
+  let native: Native | undefined;
+  try {
+    const indexedDB = (scope as unknown as { indexedDB?: Native['indexedDB'] }).indexedDB;
+    if (indexedDB && typeof scope.IDBKeyRange === 'function') native = { indexedDB, IDBKeyRange: scope.IDBKeyRange };
+  } catch {
+    native = undefined;
+  }
+
+  // A page's top frame moves the site's old data in before any request of
+  // the site's own is answered. Frames and workers have none of their own:
+  // what WebKit kept, it kept for the origin, which the page moves.
+  let release: () => void = () => {};
+  const ready = top ? new Promise<void>((resolve) => { release = resolve; }) : Promise.resolve();
+  connect(transport, ready);
+  if (top) {
+    migrate(native, new IDBFactory(INTERNAL, true), (message) => send(message as Wire)).then(release, release);
+  }
+
   const factory = new IDBFactory(INTERNAL);
   const get = function (this: unknown) {
     if (this !== undefined && this !== null && this !== scope) throw new TypeError('Illegal invocation');
@@ -65,8 +200,9 @@ function install(scope: typeof globalThis & Scope, transport: Transport): void {
   if (Native && Native !== DOMStringList) Object.setPrototypeOf(DOMStringList.prototype, Native.prototype);
   else Object.defineProperty(scope, 'DOMStringList', { value: DOMStringList, writable: true, configurable: true, enumerable: false });
   scope.addEventListener?.('pagehide', disconnect);
+  wrapWorkers(scope, transport);
 }
 
 const scope = globalThis as typeof globalThis & Scope;
-const transport = transportFor(scope);
-if (transport) install(scope, transport);
+const found = transportFor(scope);
+if (found) install(scope, found[0], found[1]);

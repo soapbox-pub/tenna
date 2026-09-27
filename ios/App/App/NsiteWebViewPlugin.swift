@@ -1,5 +1,6 @@
 import Capacitor
 import UIKit
+import UserNotifications
 import WebKit
 
 /**
@@ -41,6 +42,7 @@ public class NsiteWebViewPlugin: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "respond", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "respondCapability", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "setIcon", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "forget", returnType: CAPPluginReturnPromise),
     ]
 
     /// The site on screen, if there is one. Only ever one at a time.
@@ -260,6 +262,41 @@ public class NsiteWebViewPlugin: CAPPlugin, CAPBridgedPlugin {
                 call.resolve()
             } else {
                 call.reject("Could not store the icon")
+            }
+        }
+    }
+
+    /**
+     Forget everything Tenna keeps for a site: its IndexedDB, its WebKit data
+     store — cookies, localStorage, cache — its record in the App Group, and
+     with the record its subscriptions, its periodic syncs and whether it was
+     muted, and whatever it has in Notification Centre. What
+     `NsiteShortcutsPlugin.forgetSite` does on Android when a site leaves the
+     wall.
+
+     A site open on screen is closed first: WebKit will not remove a data
+     store a WebView is using.
+     */
+    @objc func forget(_ call: CAPPluginCall) {
+        guard let siteId = call.getString("siteId"), NsiteOrigins.isSiteId(siteId) else {
+            call.reject("Not a site")
+            return
+        }
+        DispatchQueue.main.async { [weak self] in
+            if let self, self.site?.siteId == siteId {
+                self.site?.tearDown()
+                self.site = nil
+            }
+            NsiteIndexedDB.forget(siteId)
+            NsiteStore.remove(siteId)
+            let center = UNUserNotificationCenter.current()
+            center.getDeliveredNotifications { delivered in
+                let ids = delivered.filter { $0.request.content.threadIdentifier == siteId }.map(\.request.identifier)
+                center.removeDeliveredNotifications(withIdentifiers: ids)
+            }
+            WKWebsiteDataStore.remove(forIdentifier: NsiteSession.storeIdentifier(for: siteId)) { error in
+                if let error { NSLog("[NsiteWebView] could not remove %@'s data store: %@", siteId, error.localizedDescription) }
+                call.resolve()
             }
         }
     }

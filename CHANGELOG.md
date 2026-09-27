@@ -1,6 +1,11 @@
 # Changelog
 
-## [Unreleased]
+## [0.12.1] - 2026-09-27
+
+On Android, every notification from a site can now be tapped, answered or
+swiped away on its own, while a site's notifications still stay together in
+one bundle. Opening a site from its tile no longer brings back an older
+version of it.
 
 ### Changed
 
@@ -8,6 +13,12 @@
   bundle, so you can tap it, answer it with its own buttons, or swipe it away
   without touching the others. Swiping the bundle's header still clears the
   whole site at once.
+
+### Fixed
+
+- Opening a site from its tile no longer puts back an older version of it
+  after the site has updated. Tenna also checks for updated sites whenever you
+  come back to it.
 
 ## [0.12.0] - 2026-09-26
 

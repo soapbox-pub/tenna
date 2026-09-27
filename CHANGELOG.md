@@ -1,6 +1,11 @@
 # Changelog
 
-## [Unreleased]
+## [0.12.2] - 2026-09-27
+
+On Android, a site's notifications are back in one row led by the site's own
+icon, which looked better than the bundle 0.12.1 put them in. A site opened
+from a link now shows its own icon on its notifications, and following the
+same link again brings the site back to the front.
 
 ### Changed
 
@@ -9,6 +14,13 @@
   notification out, the bundle Android drew for it lost the site's icon. The
   row's buttons and tap belong to the newest notification, and swiping the
   row clears the site.
+
+### Fixed
+
+- A site opened from a link, rather than from its tile, now has its own icon
+  on its notifications and in the app switcher.
+- Following a link to a site again, after Tenna was opened by that same link,
+  brings the site back to the front instead of doing nothing.
 
 ## [0.12.1] - 2026-09-27
 

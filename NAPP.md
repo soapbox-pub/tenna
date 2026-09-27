@@ -269,12 +269,11 @@ await registration.showNotification('Alice', {
 Each site is its own app as far as the shade is concerned, and none of it is
 declared:
 
-- **One bundle in the shade, its rows led by the site's own icon.** Each
-  notification is a row of its own, drawn as a *conversation* headed by the
-  site — its icon large on the left, its name at the head of the row, Tenna's
-  own mark badged small into the corner — and the site's rows gather under one
-  header that swipes them all away together. See
-  [The conversation](#the-conversation).
+- **One row in the shade, led by the site's own icon.** Everything the site has
+  out gathers into a single *conversation* headed by the site — its icon large
+  on the left, its name at the head of the row, Tenna's own mark badged small
+  into the corner — with each notification listed inside it as its own line.
+  See [The conversation](#the-conversation).
 - **The status-bar icon is the site's**, out of its `badge` or its manifest.
   See [The badge](#the-badge).
 - **The colour** is the site's own — the same one its tile is drawn on, on
@@ -285,10 +284,10 @@ declared:
   name channels inside it: that arrived with `data.napp` and left with it,
   since a channel a site names is a settings entry the user cannot be rid of
   short of reinstalling.
-- **A bundle of its own.** A site's rows never mix with another site's, and
-  since they are conversations Android files the bundle in the conversation
-  section at the top of the shade rather than in the pile it makes of an app
-  with several notifications out.
+- **Nothing else.** There is no second row and no header above one. Whatever
+  the site sends, however many times, it has the one row — which is also why
+  Android files it in the conversation section at the top of the shade rather
+  than in the pile it makes of an app with several notifications out.
 
 ##### The conversation
 
@@ -300,42 +299,45 @@ smallest slot in it. No amount of `badge` fixes this; the badge is the status
 bar's, and the shade does not consult it.
 
 The one layout Android has that does the right thing is the conversation, and
-it is what every messaging app on the platform uses. So **each notification is
-a conversation with the site**, and the site's conversations are one bundle:
+it is what every messaging app on the platform uses. So **a site is a
+conversation**, and its notifications are the lines in it:
 
 | What Android draws            | What it is                                     |
 | ----------------------------- | ---------------------------------------------- |
-| the bundle's header           | Tenna's name, then the site's, then the time   |
-| each row under it             | one of the site's notifications                |
-| a row's icon on the left      | the site's own, with Tenna's badged into its corner |
-| the name at the head of a row | the site's                                    |
-| the name inside a row         | that notification's `title`                    |
-| a row's face                  | that notification's `icon`, cut to a circle    |
-| a row's text                  | that notification's `body`                     |
-| a row's picture               | that notification's `image`, as a thumbnail above its words |
+| the icon on the left          | the site's own, with Tenna's badged into its corner |
+| the name at the head of the row | the site's                                    |
+| each line inside it           | one of the site's notifications                |
+| a line's name                 | that notification's `title`                    |
+| a line's face                 | that notification's `icon`, cut to a circle    |
+| a line's text                 | that notification's `body`                     |
+| a line's picture              | that notification's `image`, as a thumbnail above its words |
 
-A notification with no `body` has only its title to give, so the row is spoken
-by the site itself and the title is the words. Nothing is declared and nothing
-can ask for it: a site written for a browser already sends the parts.
+A notification with no `body` has only its title to give, so the line is spoken
+by the site itself and the title is the words. Collapsed, the row shows the
+newest line; expanded, it shows them all. Nothing is declared and nothing can
+ask for it: a site written for a browser already sends the parts.
 
-Collapsed, the bundle lists its rows a line each; expanded, each row is drawn
-whole and can itself be expanded to its buttons. Every row is a notification of
-its own to Android, so each has **its own tap, its own buttons and its own
-swipe**. Swiping one away raises `notificationclose` for that one; swiping the
-header away takes the whole bundle and raises it for each. A site with one
-notification out has no header at all — Android draws a bundle of one as just
-the row.
+The row is rebuilt from what the site has out, so a notification the site
+closed, or the user swiped, or replaced by `tag`, leaves it. Swiping the row
+away closes all of them at once and raises `notificationclose` for each; the
+next push starts a fresh conversation rather than resurrecting what was
+dismissed.
 
-A `tag` is the row's name in the shade too, so replacing a notification by
-`tag` redraws that row and leaves the others alone.
+The buttons under the row are the **newest** notification's — one row of
+buttons cannot answer four different things.
 
 An `image` is a line of its own, above the words, because Android draws a
 message carrying a picture *as* the picture and anything written on it is lost.
 It is drawn small — about two lines of text tall. The shade gives a
 conversation a fixed height and draws a picture at whatever size it arrives
-at, so a photograph handed over whole takes the row and pushes the words out
-of it, which is the opposite of the point. A thumbnail costs about one line
-instead. Tapping it opens the site, where the picture is full size.
+at, so a photograph handed over whole takes the row and the notifications above
+it are hidden to make space, which is the opposite of the point. A thumbnail
+costs about one line instead. Tapping it opens the site, where the picture is
+full size.
+
+Only the newest photograph in the row is drawn, for the same reason: a second
+is one the shade has no space for. A notification whose photograph is not shown
+still shows everything it said.
 
 ##### The badge
 
@@ -348,8 +350,8 @@ else**. What the shade shows is [the conversation](#the-conversation).
 Three answers, in order:
 
 1. **The notification's own `badge`**, in any of the shapes under
-   [Pictures](#pictures). The status bar has one icon per bundle, so for a
-   site with several notifications out it is the newest one's badge that shows.
+   [Pictures](#pictures). The status bar has one icon per row, so for a site's
+   conversation it is the newest notification's badge that shows.
 2. **The site's monochrome web app manifest icon** — an entry declaring
    `"purpose": "monochrome"`. Read when the site is opened from the channel
    wall, and kept, so it is there for a notification that arrives with the site
@@ -393,7 +395,7 @@ photograph will still pick up even though a face will not.
 
 The face on a line is that notification's `icon`, cut to a circle because that
 is the shape of the slot. A line with no `icon` gets the system's own lettered
-circle rather than the site's mark repeated down the bundle.
+circle rather than the site's mark repeated down the row.
 
 An `image` is scaled to a thumbnail, written to Tenna's cache and handed to the
 shade as a file, since that is what a message carrying a picture takes. A
@@ -405,8 +407,8 @@ one anybody is looking at.
 **Tapping the body** opens the site's window at `data.url`, falling back to the
 site's front page. It happens immediately, without waiting for anything: a tap
 has to land at once, and the worker that would have routed it may not be
-running. A tap takes that one row off the shade and leaves the rest of the
-site's bundle where it is.
+running. A tap on the conversation goes where its **newest** line pointed —
+that is the one the row is showing and the one the user is answering.
 
 `data.url` is a convention rather than anything the standard says — but it is
 what every push service worker on Nostr already writes, and it is the only
@@ -451,8 +453,7 @@ self.addEventListener('notificationclick', (event) => {
 });
 ```
 
-**Swiping one away** raises `notificationclose` for it, and swiping the site's
-header away raises it for every row under it.
+**Swiping one away** raises `notificationclose`.
 
 `event.waitUntil()` works on all of these. Tenna waits for the promises before
 moving on to the next event for the site, with a timeout of five minutes on
@@ -466,11 +467,10 @@ Android and twenty seconds on iOS — see [The delivery deadline](#the-delivery-
   withdrawn. Some of it is worth having, but not in a shape settled in the
   abstract, and anything that comes back will come back as the standard
   spelling of it wherever one exists.
-- **Threads.** Every row in a site's bundle is the same conversation as far as
-  Android is concerned, so a site with several threads going has no way to say
-  so — `tag` names a notification, not a thread, and giving each tag a
-  conversation of its own would spend a rate-limited, evictable resource on a
-  guess.
+- **More than one conversation per site.** Everything a site sends shares one
+  row. A site with several threads going has no way to say so — `tag` names a
+  notification, not a conversation, and giving each tag a row of its own would
+  spend a rate-limited, evictable resource on a guess.
 - **Calls.** No `CallStyle`, no full-screen intent, no ringtone channel.
 - **NIP-42.** The service holds no keys, so it cannot answer an `AUTH`
   challenge. A relay that requires authentication to serve a filter, as many
@@ -497,7 +497,7 @@ await registration.showNotification('Alice', { body: 'sent a message', tag: 'dm-
 `showNotification`, `getNotifications` and `close` behave exactly as they do in
 the worker, take the same options, and work on the **same tray** — a
 notification posted from the page is closed by the worker, replaced by a push
-with the same `tag`, and listed by either. There is one bundle for the site and
+with the same `tag`, and listed by either. There is one row for the site and
 one set of rules for what goes in it, whoever put it there.
 
 `Notification.permission` is real in the page, where the worker's always reads
@@ -972,7 +972,7 @@ when something matches. Three things follow from that:
 | notifications per push | as many as the worker asks for | the first |
 | `notificationclick` | raised in the worker | not raised; a tap routes by `data.url` |
 | `icon`, `badge`, `image`, `actions` | drawn | accepted and ignored |
-| the shade | a bundle of conversations, led by the site's icon | a thread, led by Tenna's |
+| the row | a conversation, led by the site's icon | a thread, led by Tenna's |
 | `self.napp.fetch` | in the worker | absent |
 | `napp.fetch`, `share_target` | yes | no |
 

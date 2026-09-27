@@ -45,9 +45,9 @@ final class NappPictures {
     /**
      * Pictures kept on disk at once.
      *
-     * One per notification in the shade, and a site rarely has more than a
-     * few out, so this is a margin rather than a gallery. Evicted
-     * least-recently-shown first.
+     * Only one is ever drawn — a site's row shows its newest photograph and no
+     * others — so this is a margin against a site that alternates between a
+     * few of them, not a gallery. Evicted least-recently-shown first.
      */
     private static final int MAX_FILES = 16;
 

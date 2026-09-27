@@ -66,15 +66,15 @@ final class NappImages {
      * The shade draws a picture message at the bitmap's own size, capped to
      * the width of the row, and a conversation is a fixed height — so a
      * picture handed over at full resolution takes the whole row and the
-     * words are hidden to make space. Which is the opposite of the point: a
-     * photograph is a preview of what the notification is about rather than
-     * the notification.
+     * notifications above it are hidden to make space. Which is the opposite
+     * of the point: a site's notifications belong together, and a photograph
+     * is a preview of one of them rather than the row.
      *
      * 96dp is about the height of two lines of text, which is what a
      * photograph is worth costing: it reads as a thumbnail of the thing
-     * rather than the thing, and the words under it are still there. Measured
-     * rather than reasoned — at 180dp a line above it was already being
-     * dropped. Nothing is ever scaled up to reach it.
+     * rather than the thing, and the notification either side of it is still
+     * there. Measured rather than reasoned — at 180dp the notification above
+     * it was already being dropped. Nothing is ever scaled up to reach it.
      */
     private static final int PICTURE_DP = 96;
 

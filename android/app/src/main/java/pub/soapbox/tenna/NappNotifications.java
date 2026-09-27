@@ -40,24 +40,25 @@ import java.util.concurrent.atomic.AtomicInteger;
  * {@code timestamp} and {@code vibrate}. A site written for the web is a site
  * written for this, and there is nothing to opt into. See {@link NappOptions}.
  *
- * <b>A site is a bundle of conversations.</b> Each thing a site says is an OS
+ * <b>A site is a conversation.</b> Everything a site sends goes into one
  * notification of its own, drawn in the layout Android built for messaging
  * apps: the <i>site's</i> icon large on the left with Tenna's badged into its
- * corner, the site's name at the head of the row, and the notification inside
- * it with its own sender and its own face. That is the only layout the
- * platform has where the app's mark is the small one — since Android 12 an
- * ordinary notification puts the app's icon on the left and exiles anything
- * the notification itself supplied to the far corner, which for a browser of
- * other people's sites is exactly backwards.
+ * corner, the site's name at the head of the row, and each push listed inside
+ * it as its own line with its own sender and its own face. That is the only
+ * layout the platform has where the app's mark is the small one — since
+ * Android 12 an ordinary notification puts the app's icon on the left and
+ * exiles anything the notification itself supplied to the far corner, which
+ * for a browser of other people's sites is exactly backwards.
  *
- * A site's rows share a group with a summary above them, so the shade draws
- * them as one bundle: swiped away together from its header, or one at a time,
- * each with its own tap and its own buttons. A site's {@code tag} is the OS
- * notification's tag, so replacing one by tag replaces that row and no other.
- * See {@link #post} and {@link #summary}.
+ * So one OS notification per site, rebuilt from the site's live notifications
+ * every time one arrives, is taken back, or is closed. A site's {@code tag}
+ * still names a notification, still replaces the last one with that name, and
+ * is still what {@code getNotifications()} and {@code close()} work on; it is
+ * only the row in the shade that is shared. See {@link #render}.
  *
  * A photograph goes in too, as a line whose body is a picture rather than
- * words — see {@link NappPictures}.
+ * words — see {@link NappPictures}. There is no second kind of row and no
+ * bundle above one; a site is a row.
  *
  * Each site also gets a channel group of its own in system settings, named
  * after the site, so a user can mute one site without muting the rest — the
@@ -103,39 +104,30 @@ final class NappNotifications {
     private static final String LEGACY_SITES_GROUP = "napp.sites";
 
     /**
-     * The tag of the header above a site's rows.
+     * The tag of a site's row.
      *
      * A site's own notifications are filed under {@code <site>/<tag>}, so
      * nothing a site can say produces this — which is what stops a site from
-     * closing or replacing the header its notifications gather under.
+     * closing or replacing the row its notifications live in.
      */
-    private static final String SUMMARY_SUFFIX = "!summary";
-
-    /** The group a site's rows and their header share. */
-    private static final String BUNDLE_PREFIX = "napp.bundle.";
+    private static final String CONVERSATION_SUFFIX = "!conversation";
 
     /**
-     * The single row a version before this one drew every one of a site's
-     * notifications into, as lines of one conversation. Taken down on the way
-     * past so an upgrade does not leave one sitting in the shade forever.
-     */
-    private static final String LEGACY_CONVERSATION_SUFFIX = "!conversation";
-
-    /** Draw a notification with its own small icon rather than the app's. */
-    private static final String EXTRA_PREFER_SMALL_ICON = "android.app.preferSmallIcon";
-
-    /** Lines listed in a header, for the places that draw one in full. */
-    private static final int MAX_SUMMARY_LINES = 6;
-
-    /**
-     * How long a record is taken on trust before the tray has to vouch for it.
+     * The header a site's notifications used to gather under.
      *
-     * {@code notify()} is queued rather than done, so a notification posted a
-     * moment ago may not be in {@code getActiveNotifications()} yet, and a
-     * second push landing right behind the first must not decide the first
-     * was swiped.
+     * Nothing posts one any more — a site has one row and a header above one
+     * row is a count of itself. Taken down on the way past so an upgrade does
+     * not leave one sitting in the shade forever.
      */
-    private static final long SETTLE_MS = 10_000;
+    private static final String LEGACY_SUMMARY_SUFFIX = "!summary";
+
+    /**
+     * Lines shown in a site's conversation.
+     *
+     * The platform keeps the last 25 of a {@code MessagingStyle} and drops the
+     * rest, so sending more is only a bigger parcel over the binder.
+     */
+    private static final int MAX_MESSAGES = 25;
 
     /**
      * How long a notification will wait for its pictures before going out.
@@ -250,7 +242,7 @@ final class NappNotifications {
         if (json == null) json = new JSONObject();
 
         NappOptions options = NappOptions.parse(json);
-        prune(context, siteId);
+        discardStale(context, siteId);
 
         // A tagged notification replaces the last one with the same tag, as it
         // does on the web; an untagged one is always another.
@@ -276,7 +268,7 @@ final class NappNotifications {
         // site asks otherwise. Anything the site has not said before alerts.
         boolean alert = !options.silent && (!replacing || options.renotify);
 
-        if (!post(context, siteId, key, alert, System.currentTimeMillis() + PICTURE_DEADLINE_MS)) {
+        if (!render(context, siteId, alert, System.currentTimeMillis() + PICTURE_DEADLINE_MS)) {
             NappNotificationStore.remove(context, siteId, key);
             return false;
         }
@@ -285,12 +277,12 @@ final class NappNotifications {
     }
 
     /**
-     * Show one of a site's rows again without alerting, because something it
-     * was waiting on has arrived.
+     * Show a site's row again without alerting, because something it was
+     * waiting on has arrived.
      *
      * Only ever called by {@link NappImages} once a picture has been decoded.
-     * Everything shown is read back from the record written when the
-     * notification was posted, so this cannot show anything a site did not
+     * Everything shown is read back from the records written when the
+     * notifications were posted, so this cannot show anything a site did not
      * already say.
      *
      * Worth doing for a photograph and for the mark in the status bar, both of
@@ -300,20 +292,20 @@ final class NappNotifications {
     static void repost(@NonNull Context context, @NonNull String siteId, @NonNull String key) {
         if (!isEnabled(context)) return;
 
-        // Gone: closed by the site, or swiped away or tapped while the picture
-        // was in the air.
+        // Gone: closed by the site, or swiped away while the picture was in
+        // the air.
         if (NappNotificationStore.get(context, siteId, key) == null) return;
-        if (!isActive(context, key)) return;
+        if (!isActive(context, conversationKey(siteId))) return;
 
-        post(context, siteId, key, false, 0);
+        render(context, siteId, false, 0);
     }
 
     // -----------------------------------------------------------------------
-    // The site's bundle
+    // The site's conversation
     // -----------------------------------------------------------------------
 
     /**
-     * Draw one of the site's notifications as a row in the site's bundle.
+     * Draw everything the site currently has to say as one conversation.
      *
      * This is about where the pictures go. Since Android 12 a plain
      * notification is drawn with the <i>app's</i> icon in the circle on the
@@ -325,50 +317,52 @@ final class NappNotifications {
      * A {@code MessagingStyle} notification naming a long-lived shortcut is
      * the one layout that does what is wanted: the system draws the
      * <i>shortcut's</i> icon large on the left and badges the app's own into
-     * its corner. So the shortcut is the site — its icon, its name — and the
-     * notification is a message inside it, spoken by whoever its title names
-     * and wearing whatever face its {@code icon} points at. Every row of a
-     * site names the same shortcut, so a site costs one shortcut however much
-     * it has to say.
+     * its corner. So the shortcut is the site — its icon, its name — and each
+     * of the site's live notifications is a message inside it, spoken by
+     * whoever the notification's title names and wearing whatever face its
+     * {@code icon} points at. Expanded, that is the site's notifications one
+     * under another, which is what a site with four things to say ought to
+     * look like.
      *
-     * One row per notification rather than one row per site, so that each has
-     * its own tap, its own buttons and its own swipe. What keeps them together
-     * is the group: a conversation's group follows its children into the
-     * shade's conversation section, header and all.
+     * Rebuilt from the store rather than added to, because that is the only
+     * thing that stays true: a notification the site closed, or the user
+     * swiped, or replaced by tag, has to leave the row it was in.
      */
-    private static boolean post(
-        Context context,
-        String siteId,
-        String key,
-        boolean alert,
-        long deadline
-    ) {
+    private static boolean render(Context context, String siteId, boolean alert, long deadline) {
         NsiteSites.Record record = NsiteSites.load(context, siteId);
         if (record == null) return false;
 
-        NappNotificationStore.Entry entry = NappNotificationStore.get(context, siteId, key);
-        if (entry == null) return false;
+        String key = conversationKey(siteId);
+        List<NappNotificationStore.Entry> entries = NappNotificationStore.list(context, siteId);
+
+        if (entries.isEmpty()) {
+            NotificationManagerCompat.from(context).cancel(key, 0);
+            changed(siteId);
+            return false;
+        }
 
         // The application's, so a picture still in the air cannot hold a
         // window's context alive behind it.
         Context app = context.getApplicationContext();
 
-        NappOptions options = optionsOf(entry);
-        NappImages.OnLoaded again = () -> repost(app, siteId, key);
-        String channel = ensureChannel(context, siteId, record.label);
+        NappNotificationStore.Entry newest = entries.get(entries.size() - 1);
+        NappOptions options = optionsOf(newest);
+        NappImages.OnLoaded again = () -> repost(app, siteId, newest.key);
 
         NotificationCompat.Builder builder =
-            new NotificationCompat.Builder(context, channel)
+            new NotificationCompat.Builder(context, ensureChannel(context, siteId, record.label))
                 .setAutoCancel(true)
                 .setCategory(NotificationCompat.CATEGORY_MESSAGE)
                 .setSilent(!alert)
                 .setOnlyAlertOnce(!alert)
                 .setPriority(NotificationCompat.PRIORITY_DEFAULT)
-                .setWhen(options.timestamp > 0 ? options.timestamp : entry.postedAt)
+                .setWhen(options.timestamp > 0 ? options.timestamp : newest.postedAt)
                 .setShowWhen(true)
-                .setGroup(bundleKey(siteId))
-                .setContentIntent(openSite(context, siteId, key, options.url))
-                .setDeleteIntent(onDismiss(context, siteId, key));
+                // The tap goes where the newest one pointed: it is the one the
+                // user is answering, and the only one the row is showing in
+                // full when it is collapsed.
+                .setContentIntent(openSite(context, siteId, newest.key, options.url))
+                .setDeleteIntent(conversationDismissed(context, siteId));
 
         smallIcon(builder, context, siteId, options.badge, deadline, again);
 
@@ -388,7 +382,13 @@ final class NappNotifications {
         Bitmap mark = tile == null ? null : tile.bitmap;
 
         if (publish(context, record, shortcut, mark)) {
-            builder.setShortcutId(shortcut);
+            // A group of its own, which is a group of one. Android lifts a
+            // conversation out of the shade's ordinary section entirely, so it
+            // can neither join the site's bundle nor be swept into the pile
+            // Android makes of four loose notifications from one app — and an
+            // explicit key is how it opts out of the second without asking for
+            // the first.
+            builder.setShortcutId(shortcut).setGroup(shortcut);
         } else if (mark != null) {
             // No shortcut, so no icon on the left; the corner is all that is
             // left to put the site's mark in.
@@ -397,19 +397,31 @@ final class NappNotifications {
 
         NotificationCompat.MessagingStyle style =
             new NotificationCompat.MessagingStyle(new Person.Builder().setName("You").build())
-                // The site names the conversation and the notification speaks
-                // for itself. Without this the system draws the row as the
-                // site talking, and the sender's name is lost.
+                // The site names the conversation, and each notification
+                // inside it speaks for itself. Without this the system draws
+                // the whole row as one person talking, and the titles of
+                // everything but the newest are lost.
                 .setGroupConversation(true)
                 .setConversationTitle(record.label);
 
-        for (NotificationCompat.MessagingStyle.Message line
-            : messages(context, siteId, record, entry, deadline, again)) {
-            style.addMessage(line);
+        // Only the newest photograph is drawn. An image takes most of the row,
+        // so a second one is a picture the shade has no space to show — and
+        // the older it is the more certainly it is the one dropped. Everything
+        // else keeps its words either way.
+        int photograph = newestPicture(entries);
+
+        for (int i = Math.max(0, entries.size() - MAX_MESSAGES); i < entries.size(); i++) {
+            for (NotificationCompat.MessagingStyle.Message line
+                : messages(context, siteId, record, entries.get(i), i == photograph, deadline, again)) {
+                style.addMessage(line);
+            }
         }
 
         builder.setStyle(style);
-        actions(context, siteId, builder, key, options, deadline, again);
+
+        // The newest one's, because they are what the user is being asked
+        // about; a button under a row of four cannot answer all of them.
+        actions(context, siteId, builder, newest.key, options, deadline, again);
 
         NotificationManagerCompat manager = NotificationManagerCompat.from(context);
 
@@ -420,87 +432,15 @@ final class NappNotifications {
             return false;
         }
 
-        summary(context, siteId, record, channel, tile, options.badge, deadline, again);
-
-        // The single row a version before this one drew a site into.
-        manager.cancel(NsiteSites.key(siteId) + LEGACY_CONVERSATION_SUFFIX, 0);
+        // A header posted by a version that had more than one row per site,
+        // and the rows under it, which are the lines of this one now.
+        manager.cancel(NsiteSites.key(siteId) + LEGACY_SUMMARY_SUFFIX, 0);
+        for (NappNotificationStore.Entry entry : entries) manager.cancel(entry.key, 0);
 
         changed(siteId);
 
         if (alert) Log.i(TAG, "Posted a notification for " + record.label);
         return true;
-    }
-
-    /**
-     * The header above a site's rows.
-     *
-     * Android draws a group as its summary's header with the children under
-     * it, and hides the header altogether while there is only one child — so a
-     * site with one thing to say looks exactly like that one thing. Swiping the
-     * header away takes every row with it, and each row's own delete intent
-     * tells the site which ones went.
-     *
-     * The header's name line is Android's and says Tenna; the site's name goes
-     * beside it as the sub-text. Its icon would be Tenna's too — the shade
-     * draws a group header with the app's launcher icon — except where the
-     * summary asks for its own small icon instead, which is the site's badge.
-     * A header over one site's rows wearing Tenna's logo reads as Tenna's
-     * notifications, which they are not. The small icon is drawn as a
-     * silhouette there, so the badge is the most of the site that fits; its
-     * full-colour tile cannot be put there at all. The lines
-     * are for the places that draw a summary in full rather than as a header —
-     * a watch, or an older shade.
-     *
-     * Silent always. It is posted again with every row, and only the row is
-     * news.
-     */
-    private static void summary(
-        Context context,
-        String siteId,
-        NsiteSites.Record record,
-        String channel,
-        @Nullable NsiteSites.TaskIcon tile,
-        @Nullable String badge,
-        long deadline,
-        NappImages.OnLoaded again
-    ) {
-        List<NappNotificationStore.Entry> entries = NappNotificationStore.list(context, siteId);
-
-        NotificationCompat.InboxStyle lines = new NotificationCompat.InboxStyle()
-            .setBigContentTitle(record.label);
-        for (int i = entries.size() - 1; i >= Math.max(0, entries.size() - MAX_SUMMARY_LINES); i--) {
-            NappNotificationStore.Entry entry = entries.get(i);
-            String body = optionsOf(entry).body;
-            lines.addLine(body.isEmpty() ? entry.title : entry.title + ": " + body);
-        }
-
-        NotificationCompat.Builder builder = new NotificationCompat.Builder(context, channel)
-            .setGroup(bundleKey(siteId))
-            .setGroupSummary(true)
-            .setSilent(true)
-            .setOnlyAlertOnce(true)
-            .setCategory(NotificationCompat.CATEGORY_MESSAGE)
-            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
-            .setContentTitle(record.label)
-            .setContentText(entries.size() == 1 ? "1 notification" : entries.size() + " notifications")
-            .setSubText(record.label)
-            .setStyle(lines)
-            .setAutoCancel(true)
-            .setContentIntent(openSite(context, siteId, null, null))
-            .setDeleteIntent(onDismiss(context, siteId, null));
-
-        // Notification.EXTRA_PREFER_SMALL_ICON, spelled out until the compile
-        // SDK has it. Read by SystemUI's icon style provider before it reaches
-        // for the app's icon, and ignored everywhere older.
-        builder.getExtras().putBoolean(EXTRA_PREFER_SMALL_ICON, true);
-        smallIcon(builder, context, siteId, badge, deadline, again);
-        if (tile != null) builder.setColor(tile.color).setColorized(false);
-
-        try {
-            NotificationManagerCompat.from(context).notify(summaryKey(siteId), 0, builder.build());
-        } catch (SecurityException e) {
-            // The row is up; a missing header is not worth failing over.
-        }
     }
 
     /**
@@ -527,6 +467,7 @@ final class NappNotifications {
         String siteId,
         NsiteSites.Record record,
         NappNotificationStore.Entry entry,
+        boolean picture,
         long deadline,
         NappImages.OnLoaded again
     ) {
@@ -554,9 +495,9 @@ final class NappNotifications {
 
         List<NotificationCompat.MessagingStyle.Message> lines = new ArrayList<>(2);
 
-        android.net.Uri uri = options.image == null
-            ? null
-            : NappPictures.uri(context, siteId, options.image, deadline, again);
+        android.net.Uri uri = picture
+            ? NappPictures.uri(context, siteId, options.image, deadline, again)
+            : null;
         if (uri != null) {
             lines.add(new NotificationCompat.MessagingStyle.Message("", at, sender)
                 .setData(NappPictures.mimeType(uri), uri));
@@ -564,6 +505,14 @@ final class NappNotifications {
 
         lines.add(new NotificationCompat.MessagingStyle.Message(text, at, sender));
         return lines;
+    }
+
+    /** The last of the site's notifications carrying an {@code image}, or -1. */
+    private static int newestPicture(List<NappNotificationStore.Entry> entries) {
+        for (int i = entries.size() - 1; i >= 0; i--) {
+            if (optionsOf(entries.get(i)).image != null) return i;
+        }
+        return -1;
     }
 
     /**
@@ -629,62 +578,24 @@ final class NappNotifications {
     }
 
     /**
-     * Forget whichever of a site's notifications are no longer in the shade.
+     * Forget a site's conversation when the conversation is no longer there.
      *
      * The store outlives the tray: notifications do not survive a reboot and
-     * their records do, and a tap takes a row away without anything of ours
-     * hearing about it — {@code setAutoCancel} is the system's doing. Without
-     * this the header would go on counting rows the user has already dealt
-     * with, and {@code getNotifications()} would go on handing them back.
+     * their records do. Without this the first push after one would arrive
+     * with a week of old ones stacked underneath it, none of which the user
+     * has been able to see since the phone came back up.
      */
-    private static void prune(Context context, String siteId) {
+    private static void discardStale(Context context, String siteId) {
         java.util.Set<String> active = activeKeys(context);
-        // Unreadable: trust the records rather than deciding the shade is empty.
-        if (active == null) return;
+        // Unreadable, or the conversation is up and its records are current.
+        if (active == null || active.contains(conversationKey(siteId))) return;
 
-        long now = System.currentTimeMillis();
-        for (NappNotificationStore.Entry entry : NappNotificationStore.list(context, siteId)) {
-            if (active.contains(entry.key)) continue;
-            if (now - entry.postedAt < SETTLE_MS) continue;
-            NappNotificationStore.remove(context, siteId, entry.key);
-        }
-    }
-
-    /**
-     * Take the header down once there is nothing left under it.
-     *
-     * Android does not do this itself for a group an app posted: a header
-     * whose rows were tapped or swiped one by one stays behind as a row of its
-     * own, announcing a site with nothing to say. {@code gone} is a row
-     * already on its way out that the tray may not have caught up with.
-     */
-    private static void tidy(Context context, String siteId, @Nullable String gone) {
-        java.util.Set<String> active = activeKeys(context);
-        String prefix = NsiteSites.key(siteId) + "/";
-
-        boolean any = false;
-        if (active == null) {
-            for (NappNotificationStore.Entry entry : NappNotificationStore.list(context, siteId)) {
-                if (!entry.key.equals(gone)) any = true;
-            }
-        } else {
-            for (String tag : active) {
-                if (tag.startsWith(prefix) && !tag.equals(gone)) any = true;
-            }
-        }
-
-        if (!any) NotificationManagerCompat.from(context).cancel(summaryKey(siteId), 0);
-        changed(siteId);
+        NappNotificationStore.clear(context, siteId);
     }
 
     @NonNull
-    private static String summaryKey(String siteId) {
-        return NsiteSites.key(siteId) + SUMMARY_SUFFIX;
-    }
-
-    @NonNull
-    private static String bundleKey(String siteId) {
-        return BUNDLE_PREFIX + NsiteSites.key(siteId);
+    private static String conversationKey(String siteId) {
+        return NsiteSites.key(siteId) + CONVERSATION_SUFFIX;
     }
 
     @NonNull
@@ -804,57 +715,42 @@ final class NappNotifications {
 
     /**
      * Take a notification down, as {@code Notification.close()} does on the
-     * web — and the header with it when it was the last one.
+     * web.
+     *
+     * A line rather than a row, so the row is drawn again without it — and
+     * taken down by {@link #render} when it was the last one.
      */
     static void cancel(@NonNull Context context, @NonNull String siteId, @NonNull String key) {
         if (NappNotificationStore.get(context, siteId, key) == null) return;
         NappNotificationStore.remove(context, siteId, key);
-        NotificationManagerCompat.from(context).cancel(key, 0);
-        tidy(context, siteId, key);
+        render(context, siteId, false, 0);
     }
 
     /**
-     * One of a site's rows swiped away.
+     * The site's notifications that its row is currently showing.
      *
-     * The site is told, then the record goes. Nothing is posted: the system
-     * has already taken the row down, and when the swipe was at the header it
-     * is taking the rest down too, each of which arrives here on its own.
+     * For the swipe that takes the whole row away: each one is a notification
+     * the site is owed a {@code notificationclose} for.
      */
-    static void dismissed(@NonNull Context context, @NonNull String siteId, @NonNull String key) {
-        NappNotificationStore.Entry entry = NappNotificationStore.take(context, siteId, key);
-        if (entry != null) {
-            NappPushService.dispatchNotificationEvent(context, siteId, "notificationclose", entry, null, null);
+    @NonNull
+    static List<String> conversationKeys(@NonNull Context context, @NonNull String siteId) {
+        List<String> keys = new ArrayList<>();
+        for (NappNotificationStore.Entry entry : NappNotificationStore.list(context, siteId)) {
+            keys.add(entry.key);
         }
-        tidy(context, siteId, key);
+        return keys;
     }
 
     /**
-     * The header swiped away, or the single row a version before this one
-     * drew a site into.
+     * Forget the whole of a site's row, the user having swiped it.
      *
-     * Every row under the header reports its own dismissal, so for the header
-     * this is usually nothing left to do. It is what an old row's swipe still
-     * means, though, and a record is taken before it is announced, so a
-     * notification is never closed twice.
+     * Nothing is redrawn and nothing is cancelled: the system has already
+     * taken the row away, and posting it again minus one line is not what a
+     * swipe asked for.
      */
-    static void dismissedAll(@NonNull Context context, @NonNull String siteId) {
-        for (NappNotificationStore.Entry listed : NappNotificationStore.list(context, siteId)) {
-            NappNotificationStore.Entry entry = NappNotificationStore.take(context, siteId, listed.key);
-            if (entry == null) continue;
-            NappPushService.dispatchNotificationEvent(context, siteId, "notificationclose", entry, null, null);
-        }
+    static void forgetConversation(@NonNull Context context, @NonNull String siteId) {
+        NappNotificationStore.clear(context, siteId);
         changed(siteId);
-    }
-
-    /**
-     * One of a site's rows tapped, which took it off the shade.
-     *
-     * The record stays — the site is about to be told about the tap, and may
-     * look the notification up while it answers — but a header over nothing
-     * does not.
-     */
-    static void opened(@NonNull Context context, @NonNull String siteId, @NonNull String key) {
-        tidy(context, siteId, key);
     }
 
     /**
@@ -866,9 +762,11 @@ final class NappNotifications {
      */
     static void cancelAll(@NonNull Context context, @NonNull String siteId) {
         NotificationManagerCompat manager = NotificationManagerCompat.from(context);
-        manager.cancel(summaryKey(siteId), 0);
-        manager.cancel(NsiteSites.key(siteId) + LEGACY_CONVERSATION_SUFFIX, 0);
+        manager.cancel(conversationKey(siteId), 0);
+        manager.cancel(NsiteSites.key(siteId) + LEGACY_SUMMARY_SUFFIX, 0);
 
+        // A row per notification is how a version before this one drew them,
+        // and its notifications outlive it.
         for (NappNotificationStore.Entry entry : NappNotificationStore.list(context, siteId)) {
             manager.cancel(entry.key, 0);
         }
@@ -909,11 +807,10 @@ final class NappNotifications {
             String prefix = NsiteSites.key(siteId);
 
             for (String tag : active) {
-                // One of its rows, or the single row a version before this one
-                // drew. Not the header, which can outlive what was under it. A
-                // site's keys all begin with its own hash, and the service and
-                // signer notifications begin with neither.
-                if (tag.equals(prefix + LEGACY_CONVERSATION_SUFFIX) || tag.startsWith(prefix + "/")) {
+                // The row, or one of the rows a version before this one posted
+                // per notification. A site's keys all begin with its own hash,
+                // and the service and signer notifications begin with neither.
+                if (tag.equals(prefix + CONVERSATION_SUFFIX) || tag.startsWith(prefix + "/")) {
                     unread.add(siteId);
                     break;
                 }
@@ -1088,36 +985,33 @@ final class NappNotifications {
      * would have routed it may not be running. The window then tells the push
      * service to raise {@code notificationclick} in the worker anyway, so a
      * site that routes there still can — see {@link NsiteAppActivity}.
-     *
-     * A null {@code key} is the header's, which opens the site and announces
-     * nothing.
      */
     private static PendingIntent openSite(
         Context context,
         String siteId,
-        @Nullable String key,
+        @NonNull String key,
         @Nullable String path
     ) {
         return PendingIntent.getActivity(
             context,
-            // Distinct per row, or one row's tap would replace another's: the
-            // intent's data is the site's, so only this tells them apart.
-            (key != null ? key : summaryKey(siteId)).hashCode(),
+            // Distinct per site, or one site's tap would replace another's.
+            conversationKey(siteId).hashCode(),
             NsiteAppActivity.notificationIntentFor(context, siteId, path, key),
             PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE
         );
     }
 
     /**
-     * Fired when the user swipes one of a site's rows away, or its header
-     * when {@code key} is null.
+     * Fired when the user swipes a site's row away.
+     *
+     * Which is several notifications at once, and the site is owed a
+     * {@code notificationclose} for each of them.
      */
-    private static PendingIntent onDismiss(Context context, String siteId, @Nullable String key) {
+    private static PendingIntent conversationDismissed(Context context, String siteId) {
         Intent intent = new Intent(context, NappNotificationReceiver.class)
             .setAction(NappNotificationReceiver.ACTION_DISMISSED)
-            .setData(android.net.Uri.parse("tenna-napp:" + (key != null ? key : summaryKey(siteId))))
+            .setData(android.net.Uri.parse("tenna-napp:" + conversationKey(siteId)))
             .putExtra(NappNotificationReceiver.EXTRA_SITE_ID, siteId);
-        if (key != null) intent.putExtra(NappNotificationReceiver.EXTRA_KEY, key);
 
         return PendingIntent.getBroadcast(
             context,

@@ -2,10 +2,13 @@
 
 ## [Unreleased]
 
-### Fixed
+### Changed
 
-- On Android, a site's bundle of notifications is headed by the site's own
-  mark rather than Tenna's logo.
+- On Android, a site's notifications are back in a single row led by the
+  site's own icon, as they were before 0.12.1. Once a site had more than one
+  notification out, the bundle Android drew for it lost the site's icon. The
+  row's buttons and tap belong to the newest notification, and swiping the
+  row clears the site.
 
 ## [0.12.1] - 2026-09-27
 

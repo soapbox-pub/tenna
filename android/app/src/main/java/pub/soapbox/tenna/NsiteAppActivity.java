@@ -244,7 +244,6 @@ public class NsiteAppActivity extends BridgeActivity {
         intent.removeExtra(EXTRA_NOTIFICATION);
         intent.removeExtra(EXTRA_NONCE);
         NappPushService.dispatchNotificationEvent(this, siteId, "notificationclick", key, "", null);
-        NappNotifications.opened(this, siteId, key);
     }
 
     /**

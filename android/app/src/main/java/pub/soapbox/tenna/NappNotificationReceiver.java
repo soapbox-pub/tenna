@@ -13,9 +13,9 @@ import androidx.core.app.RemoteInput;
  *
  * Both raise an event in the site's service worker, which is where the web
  * puts them: pressing a button is {@code notificationclick} with an
- * {@code action}, and dismissing is {@code notificationclose} — one for each
- * row the swipe took, which is all of a site's when it was at the header.
- * Neither opens a window: a reply typed into the shade is answered
+ * {@code action}, and dismissing is {@code notificationclose} — one for every
+ * notification in the row, since a site has one row and the swipe took all of
+ * them. Neither opens a window: a reply typed into the shade is answered
  * without leaving the shade, and a dismissal is the user saying they are
  * done.
  *
@@ -34,11 +34,10 @@ public class NappNotificationReceiver extends BroadcastReceiver {
     static final String ACTION_ACTION = "pub.soapbox.tenna.napp.NOTIFICATION_ACTION";
 
     /**
-     * One of a site's rows swiped away, named by {@link #EXTRA_KEY}.
+     * A site's row swiped away, and with it every notification in it.
      *
-     * With no key it is the header above them, or the single row a version
-     * before this one drew a whole site into — which is still in the shade of
-     * anyone who upgraded with one up.
+     * There is no dismissing one on its own: a site has one row, so the swipe
+     * the user makes is a swipe at all of them.
      */
     static final String ACTION_DISMISSED = "pub.soapbox.tenna.napp.NOTIFICATION_DISMISSED";
 
@@ -57,9 +56,16 @@ public class NappNotificationReceiver extends BroadcastReceiver {
         if (siteId == null) return;
 
         if (ACTION_DISMISSED.equals(intent.getAction())) {
-            String key = intent.getStringExtra(EXTRA_KEY);
-            if (key != null) NappNotifications.dismissed(context, siteId, key);
-            else NappNotifications.dismissedAll(context, siteId);
+            // One swipe, every notification in the row. Dispatched before they
+            // are forgotten: each event carries the notification the site is
+            // being told about, read out of the same record that is about to
+            // be deleted.
+            for (String dismissed : NappNotifications.conversationKeys(context, siteId)) {
+                NappPushService.dispatchNotificationEvent(
+                    context, siteId, "notificationclose", dismissed, null, null
+                );
+            }
+            NappNotifications.forgetConversation(context, siteId);
             return;
         }
 

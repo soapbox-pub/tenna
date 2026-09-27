@@ -30,8 +30,8 @@ import java.util.List;
  * route and everything the site attached are written down.
  *
  * <b>What does the site have out?</b> {@code getNotifications()} is a real
- * method and has to answer with the site's own live notifications — and each
- * row in the site's bundle is drawn from one, so a record is what puts a
+ * method and has to answer with the site's own live notifications — and the
+ * one row the site occupies is drawn from them, so a record is what puts a
  * notification on screen rather than a note about one that is.
  *
  * One file per site, replaced whole. These are small, there are at most
@@ -171,23 +171,6 @@ final class NappNotificationStore {
         write(context, siteId, stored);
     }
 
-    /**
-     * Forget a notification and hand back what it was, or null if something
-     * else got there first.
-     *
-     * For the swipes, where a header and each of its rows all report the same
-     * dismissal and only one of them may tell the site.
-     */
-    @Nullable
-    static synchronized Entry take(@NonNull Context context, @NonNull String siteId, @NonNull String key) {
-        JSONObject stored = read(context, siteId);
-        Entry entry = Entry.fromJson(stored.optJSONObject(key));
-        if (entry == null) return null;
-        stored.remove(key);
-        write(context, siteId, stored);
-        return entry;
-    }
-
     /** Forget a site's notifications entirely — it lost its permission, or its record. */
     static synchronized void clear(@NonNull Context context, @NonNull String siteId) {
         //noinspection ResultOfMethodCallIgnored
@@ -224,8 +207,8 @@ final class NappNotificationStore {
         try (OutputStream out = new FileOutputStream(file)) {
             out.write(stored.toString().getBytes(StandardCharsets.UTF_8));
         } catch (IOException e) {
-            // Nothing is lost but this site's records, and the rows in the
-            // shade stand without them; better an empty file than half of one.
+            // Nothing is lost but this site's row, which the next push
+            // rebuilds; better an empty file than half of one.
             //noinspection ResultOfMethodCallIgnored
             file.delete();
         }

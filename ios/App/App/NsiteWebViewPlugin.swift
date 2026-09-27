@@ -40,6 +40,7 @@ public class NsiteWebViewPlugin: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "setConcealed", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "respond", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "respondCapability", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "setIcon", returnType: CAPPluginReturnPromise),
     ]
 
     /// The site on screen, if there is one. Only ever one at a time.
@@ -242,6 +243,26 @@ public class NsiteWebViewPlugin: CAPPlugin, CAPBridgedPlugin {
     }
 
     // MARK: - RPC
+
+    // MARK: - setIcon
+
+    /// The site's tile, kept for its notifications. See `NsiteStore.setIcon`.
+    @objc func setIcon(_ call: CAPPluginCall) {
+        guard let siteId = call.getString("siteId"), NsiteOrigins.isSiteId(siteId),
+              let text = call.getString("icon"),
+              let png = Data(base64Encoded: text) else {
+            call.reject("Not an icon")
+            return
+        }
+
+        DispatchQueue.global(qos: .utility).async {
+            if NsiteStore.setIcon(siteId, png: png) {
+                call.resolve()
+            } else {
+                call.reject("Could not store the icon")
+            }
+        }
+    }
 
     /// Deliver a JSON-RPC response for a call previously raised as `nsiteRpc`.
     ///

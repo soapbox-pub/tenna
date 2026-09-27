@@ -1,8 +1,11 @@
 import { App } from '@capacitor/app';
 import { Capacitor, type PluginListenerHandle } from '@capacitor/core';
+import { useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import type { NsiteFrameProps } from '@/components/nsite/types';
+import { nsiteAppQuery } from '@/hooks/useNsiteApp';
+import { renderAppIconPng } from '@/lib/appIconBitmap';
 import { supportsNappPush, supportsNappWorkerShim, supportsPeriodicSync } from '@/lib/nappPushPlugin';
 import { getNsiteBrowserPermission } from '@/lib/nsiteBrowserPermissions';
 import { buildManifest, resolveServers } from '@/lib/nsiteFiles';
@@ -91,6 +94,7 @@ export function NsiteNative({
   // window. Nothing is ever drawn into it — it is measured, and the numbers
   // are what cross the bridge. See `NsiteFrameRect`.
   const boxRef = useRef<HTMLDivElement>(null);
+  const queryClient = useQueryClient();
 
   const measure = useCallback((): NsiteFrameRect | undefined => {
     const box = boxRef.current;
@@ -225,6 +229,28 @@ export function NsiteNative({
       for (const listener of listeners) void listener.remove();
     };
   }, [event, name, pubkey, measure]);
+
+  // The site's face for its notifications, which on iOS are drawn by an
+  // extension that has nothing of the wall's to draw with. Read after the
+  // window is up, so nothing is waited on; a document that never arrives
+  // leaves whatever was stored last time, rather than the lettered tile
+  // `renderAppIconPng` falls back to for a site that has no artwork at all.
+  useEffect(() => {
+    if (Capacitor.getPlatform() !== 'ios') return;
+    let cancelled = false;
+
+    (async () => {
+      const app = await queryClient.fetchQuery(nsiteAppQuery(event)).catch(() => undefined);
+      if (!app || cancelled) return;
+      const icon = await renderAppIconPng(name, app);
+      if (!icon || cancelled) return;
+      await NsiteWebView.setIcon({ siteId: getNsiteSubdomain(event), icon });
+    })().catch((err) => {
+      console.warn('[NsiteNative] could not store the site icon:', err);
+    });
+
+    return () => { cancelled = true; };
+  }, [event, name, queryClient]);
 
   // Keep the native view on top of the box it stands in. Rotation, the
   // keyboard, the bar appearing or going away — anything that reflows the page

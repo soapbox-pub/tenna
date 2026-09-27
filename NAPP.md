@@ -971,8 +971,9 @@ when something matches. Three things follow from that:
 | payload | the whole event, always | about 4 KB; a long event arrives as `event_id` and `relays` |
 | notifications per push | as many as the worker asks for | the first |
 | `notificationclick` | raised in the worker | not raised; a tap routes by `data.url` |
-| `icon`, `badge`, `image`, `actions` | drawn | accepted and ignored |
-| the row | a conversation, led by the site's icon | a thread, led by Tenna's |
+| `icon` | drawn | drawn, as the face beside the notification |
+| `badge`, `image`, `actions` | drawn | accepted and ignored |
+| the row | a conversation, led by the site's icon | a thread; each notification led by its `icon`, or the site's icon, with Tenna's badged into its corner |
 | `self.napp.fetch` | in the worker | absent |
 | `napp.fetch`, `share_target` | yes | no |
 

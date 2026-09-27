@@ -81,7 +81,11 @@ import UserNotifications
    so routing is `data.url` and nothing else. See `AppDelegate`.
  - **Pictures and buttons.** An attachment wants a file on disk and an action
    category has to be registered in advance; neither is a thing a worker can ask
-   for on the way past. See NAPP.md.
+   for on the way past. See NAPP.md. The `icon` is the exception: it is drawn as
+   the face of a communication notification, not attached. See
+   `NappNotifications.speaking`.
+ - **A push no site claims** keeps Tenna's face, and so does one the worker
+   ran out of time on: there is no site to show, or no time left to show it.
  */
 class NotificationService: UNNotificationServiceExtension {
 
@@ -189,7 +193,15 @@ class NotificationService: UNNotificationServiceExtension {
                       notifications.count)
             }
 
-            self.deliver(content)
+            // Whoever wrote the words, the notification is this site's, and it
+            // wears the site's face rather than Tenna's. See `speaking`.
+            let face = await NappFaces.face(
+                notifications.first?.options["icon"] as? String, siteId: site.siteId)
+            guard !Task.isCancelled else { return }
+            let spoken = await NappNotifications.speaking(content, label: site.label, face: face)
+            guard !Task.isCancelled else { return }
+
+            self.deliver(spoken)
         }
     }
 

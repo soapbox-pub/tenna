@@ -125,6 +125,20 @@ export interface NsiteWebViewPlugin {
    */
   respondCapability(options: { id: number; granted: boolean }): Promise<void>;
 
+  /**
+   * Keep the site's icon where its notifications can find it. iOS only.
+   *
+   * A push is shown by an extension with no wall and no WebView, long after
+   * the manifest the icon was picked out of was read — so the tile is drawn
+   * here, while there is one, and written down. Android's counterpart is
+   * `NsiteShortcuts.refreshIcon`.
+   */
+  setIcon(options: {
+    siteId: string;
+    /** Base64 PNG of the wall's tile, without a data URL prefix. */
+    icon: string;
+  }): Promise<void>;
+
   /** Answer a call previously raised as `nsiteRpc`. */
   respond(options: {
     id: number;

@@ -1,4 +1,6 @@
 import Foundation
+import ImageIO
+import UniformTypeIdentifiers
 
 /**
  What a site needs written down for a push to reach it.
@@ -187,6 +189,61 @@ enum NsiteStore {
     static func remove(_ siteId: String) {
         guard let url = url(siteId) else { return }
         try? FileManager.default.removeItem(at: url)
+        if let icon = iconURL(siteId) { try? FileManager.default.removeItem(at: icon) }
+    }
+
+    // MARK: - The site's icon
+
+    /**
+     The site's own face, for a notification that brings none.
+
+     Beside the record rather than in it, because it is a picture and the
+     record is read on every push to route it. Drawn by the web layer from
+     the wall's tile — the one place a site's manifest and artwork are read —
+     and kept here because a push is shown by an extension that has neither.
+     */
+    private static func iconURL(_ siteId: String) -> URL? {
+        guard NsiteOrigins.isSiteId(siteId) else { return nil }
+        return directory.appendingPathComponent("\(siteId).png", isDirectory: false)
+    }
+
+    /**
+     The tile is drawn for a launcher, on a canvas a mask will cut two thirds
+     out of — the same 72-of-108 an adaptive icon keeps. A notification's
+     circle cuts nothing of its own, so the margin is spent here, once, as
+     Android's `NsiteSites.tileIcon` does; otherwise the face sits small in a
+     ring of its own background.
+     */
+    private static let viewport: CGFloat = 72.0 / 108.0
+
+    @discardableResult
+    static func setIcon(_ siteId: String, png: Data) -> Bool {
+        guard let url = iconURL(siteId),
+              let source = CGImageSourceCreateWithData(png as CFData, nil),
+              let image = CGImageSourceCreateImageAtIndex(source, 0, nil) else { return false }
+
+        let width = CGFloat(image.width)
+        let height = CGFloat(image.height)
+        let crop = CGRect(
+            x: (width * (1 - viewport) / 2).rounded(),
+            y: (height * (1 - viewport) / 2).rounded(),
+            width: (width * viewport).rounded(),
+            height: (height * viewport).rounded()
+        )
+        let cropped = image.cropping(to: crop) ?? image
+
+        let out = NSMutableData()
+        guard let destination = CGImageDestinationCreateWithData(
+            out, UTType.png.identifier as CFString, 1, nil) else { return false }
+        CGImageDestinationAddImage(destination, cropped, nil)
+        guard CGImageDestinationFinalize(destination) else { return false }
+
+        return (try? (out as Data).write(to: url, options: .atomic)) != nil
+    }
+
+    static func icon(_ siteId: String) -> Data? {
+        guard let url = iconURL(siteId) else { return nil }
+        return try? Data(contentsOf: url)
     }
 
     // MARK: - The merged list

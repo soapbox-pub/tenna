@@ -1,5 +1,14 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+
+- On iPhone, a site's notifications show the notification's own icon, or the
+  site's icon if it has none, instead of Tenna's. Tenna's icon now appears
+  only as a small badge in the corner, and the site's name heads the
+  notification.
+
 ## [0.12.2] - 2026-09-27
 
 On Android, a site's notifications are back in one row led by the site's own

@@ -49,9 +49,13 @@ final class NsiteWorkerHost: NSObject, WKScriptMessageHandler, WKNavigationDeleg
     /// that published again since it last subscribed, a Blossom fetch. Blocking
     /// the main thread for either would be blocking the thread every WebKit
     /// callback in this process arrives on.
-    typealias Serve = (_ path: String, _ shimmed: Bool) async -> (Data, String)?
+    typealias Serve = (_ path: String) async -> (Data, String)?
 
     private let siteId: String
+    /// The path the site registered its worker at. The worker is started
+    /// there, so that its own URL — and every relative URL it resolves — is
+    /// the one the site meant.
+    private let worker: String
     private let serve: Serve
     /// The site's periodic sync tags, for `registration.periodicSync.getTags()`
     /// in a worker that has no host to ask.
@@ -69,8 +73,9 @@ final class NsiteWorkerHost: NSObject, WKScriptMessageHandler, WKNavigationDeleg
     /// and the data the shim builds it from.
     private var pending: (kind: String, data: String)?
 
-    init(siteId: String, periodicTags: [String] = [], serve: @escaping Serve) {
+    init(siteId: String, worker: String, periodicTags: [String] = [], serve: @escaping Serve) {
         self.siteId = siteId
+        self.worker = worker
         self.periodicTags = periodicTags
         self.serve = serve
         super.init()
@@ -366,14 +371,14 @@ final class NsiteWorkerHost: NSObject, WKScriptMessageHandler, WKNavigationDeleg
         if path == Self.hostPath {
             guard let page = Self.resource("NsiteWorkerHostPage", "html") else { return nil }
             // The worker's URL, carrying the marker that asks for the shim.
-            let worker = "/sw.js?\(Self.shimQuery)=1"
+            let worker = "\(self.worker)?\(Self.shimQuery)=1"
             return (
                 Data(page.replacingOccurrences(of: "%%WORKER%%", with: Self.jsString(worker)).utf8),
                 "text/html; charset=utf-8"
             )
         }
 
-        guard let (body, contentType) = await serve(path, shimmed) else { return nil }
+        guard let (body, contentType) = await serve(path) else { return nil }
         guard shimmed, let shim = Self.resource("NsiteWorkerShim", "js") else {
             return (body, contentType)
         }

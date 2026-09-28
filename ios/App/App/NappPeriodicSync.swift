@@ -214,9 +214,12 @@ enum NappPeriodicSync {
             }
 
             let server = NsiteFileServer(files: site.files, servers: site.servers)
-            let worker = site.worker ?? "/sw.js"
-            let host = NsiteWorkerHost(siteId: site.siteId, periodicTags: site.periodicSync.map(\.tag)) { path, _ in
-                await server.file(path == "/sw.js" ? worker : path)
+            let host = NsiteWorkerHost(
+                siteId: site.siteId,
+                worker: site.worker ?? "/sw.js",
+                periodicTags: site.periodicSync.map(\.tag)
+            ) { path in
+                await server.file(path)
             }
 
             for tag in due {

@@ -939,7 +939,8 @@ ever said, and Tenna writes it down: when a push arrives, **that file is
 fetched out of the site's own manifest and run**, with `registration`,
 `clients` and the push events shimmed around it, exactly as the same file runs
 on Android. A site that never calls `register()` gets nothing, which is what
-happens in a browser too.
+happens in a browser too. It runs at the path it was registered at, so
+`importScripts` and `self.location` resolve as they would in a browser.
 
 What the stand-in registration is honest about: `showNotification` and
 `getNotifications` are real and reach the same tray as everything else, and

@@ -229,11 +229,12 @@ await writeFile(join(OUT, "bench.html"), `<!doctype html>
       t = performance.now();
       for (var k = 0; k < 20; k++) await indexedDB.databases();
       line('databases(): ' + ((performance.now() - t) / 20).toFixed(3) + ' ms');
-      // The bridge itself: a message the store answers at once, on its own thread.
+      // The bridge itself: a message the store answers at once, on its own
+      // thread — the end of a realm it has never heard of.
       var handler = window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.tennaIDB;
       if (handler) {
         t = performance.now();
-        for (var m = 0; m < 500; m++) await handler.postMessage('[s9:migration]');
+        for (var m = 0; m < 500; m++) await handler.postMessage('[s3:byes6:nobody]');
         line('bare round trip: ' + ((performance.now() - t) / 500).toFixed(3) + ' ms');
       }
       db.close();

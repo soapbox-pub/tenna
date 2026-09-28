@@ -5,7 +5,7 @@
  * site's own code: at document start in a site's page and its same-origin
  * frames, and ahead of a site's workers. It replaces `indexedDB` and every
  * IndexedDB interface with ones whose records live in Tenna's store for the
- * site — one SQLite file per site in the App Group, which the page and the
+ * site — a SQLite file per database in the App Group, which the page and the
  * notification extension's copy of the site's service worker both open.
  * WebKit's own IndexedDB keeps each process's data to itself, and Lockdown
  * Mode takes it away entirely; this one is the same everywhere.
@@ -26,14 +26,11 @@
  */
 
 import { INTERNAL } from './keyRange';
-import { connect, disconnect, IDBFactory, INTERFACES, DOMStringList, send } from './engine';
-import { migrate, type Native } from './migrate';
+import { connect, disconnect, IDBFactory, INTERFACES, DOMStringList } from './engine';
 import type { Transport } from './protocol';
-import type { Wire } from './wire';
 
 interface Scope {
   __tennaIDBTransport?: Transport;
-  top?: unknown;
   importScripts?: unknown;
   Worker?: typeof Worker;
   origin?: string;
@@ -42,19 +39,18 @@ interface Scope {
   addEventListener?: (type: string, listener: () => void) => void;
 }
 
-/** The transport, and whether this is a page's top frame reaching the store itself. */
-function transportFor(scope: Scope): [Transport, boolean] | undefined {
+function transportFor(scope: Scope): Transport | undefined {
   const given = scope.__tennaIDBTransport;
   if (typeof given === 'function') {
     delete scope.__tennaIDBTransport;
-    return [given, false];
+    return given;
   }
   const handler = scope.webkit?.messageHandlers?.tennaIDB;
   if (handler) {
     const post = handler.postMessage.bind(handler);
-    return [(message) => post(message), isTop(scope)];
+    return (message) => post(message);
   }
-  if (typeof scope.importScripts === 'function') return [portTransport(scope as typeof globalThis & Scope), false];
+  if (typeof scope.importScripts === 'function') return portTransport(scope as typeof globalThis & Scope);
   return undefined;
 }
 
@@ -154,34 +150,8 @@ import ${JSON.stringify(target.href)};
   Object.defineProperty(scope, 'Worker', { value: Worker, writable: true, configurable: true, enumerable: false });
 }
 
-function isTop(scope: Scope): boolean {
-  try {
-    return scope.top === scope;
-  } catch {
-    return false;
-  }
-}
-
-function install(scope: typeof globalThis & Scope, transport: Transport, top: boolean): void {
-  // WebKit's own, before it is replaced: the page's old data is in it.
-  let native: Native | undefined;
-  try {
-    const indexedDB = (scope as unknown as { indexedDB?: Native['indexedDB'] }).indexedDB;
-    if (indexedDB && typeof scope.IDBKeyRange === 'function') native = { indexedDB, IDBKeyRange: scope.IDBKeyRange };
-  } catch {
-    native = undefined;
-  }
-
-  // A page's top frame moves the site's old data in before any request of
-  // the site's own is answered. Frames and workers have none of their own:
-  // what WebKit kept, it kept for the origin, which the page moves.
-  let release: () => void = () => {};
-  const ready = top ? new Promise<void>((resolve) => { release = resolve; }) : Promise.resolve();
-  connect(transport, ready);
-  if (top) {
-    migrate(native, new IDBFactory(INTERNAL, true), (message) => send(message as Wire)).then(release, release);
-  }
-
+function install(scope: typeof globalThis & Scope, transport: Transport): void {
+  connect(transport);
   const factory = new IDBFactory(INTERNAL);
   const get = function (this: unknown) {
     if (this !== undefined && this !== null && this !== scope) throw new TypeError('Illegal invocation');
@@ -204,5 +174,5 @@ function install(scope: typeof globalThis & Scope, transport: Transport, top: bo
 }
 
 const scope = globalThis as typeof globalThis & Scope;
-const found = transportFor(scope);
-if (found) install(scope, found[0], found[1]);
+const transport = transportFor(scope);
+if (transport) install(scope, transport);

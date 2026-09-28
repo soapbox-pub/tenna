@@ -978,15 +978,9 @@ It is the standard API and a site uses it unchanged: it passes the
 web-platform-tests IndexedDB suite, run inside Tenna on an iPhone, all but one
 test that needs the suite's own server and the Proxy below. Keep in mind:
 
-- **The first time a site opens after the update, its databases are moved
-  in** from WebKit's store before the site's first request is answered: every
-  database, store, index and record, each checked before WebKit's copy is
-  deleted. A copied store's key generator carries on after its largest numeric
-  key, since IndexedDB will not say where WebKit's had got to.
-- **A `CryptoKey` cannot be stored.** A key WebKit let a site keep
+- **A `CryptoKey` cannot be stored.** A key WebKit lets a site keep
   unextractable has no bytes a script can reach, and script is what writes a
-  value down here. Store the key's JWK, or derive it again. A database holding
-  one is left in WebKit's store by the move, where nothing reaches it.
+  value down here. Store the key's JWK, or derive it again.
 - **A Proxy of an Array is accepted as a key.** Browsers refuse one; script
   cannot tell it from the array it proxies.
 - **An upgrade in another process does not wait.** The extension's worker

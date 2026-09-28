@@ -53,9 +53,6 @@
  * Only committed changes count. The engine keeps one outstanding, and sends a
  * new one whenever what it has open changes.
  *
- * `['migration']` → 1 once the site's old data has been copied in, else 0.
- * `['migration', 1]` records that it has. See `migrate.ts`.
- *
  * `['end', realm, [txn, ...]]` ends readonly transactions. Ending a read
  * changes nothing a site can see, so the engine does not wait on it, and
  * rather than a message of its own that the site's next one would queue

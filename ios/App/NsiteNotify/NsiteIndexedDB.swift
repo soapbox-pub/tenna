@@ -245,15 +245,6 @@ final class NsiteIndexedDB {
             guard let realm = message[safe: 1]?.ascii, let open = message[safe: 2]?.list else { return reply(.failure(.corrupt)) }
             channel.realms.insert(realm)
             wait(realm: realm, open: open, reply: answer)
-        case "migration":
-            // A marker beside the databases: the move out of WebKit is the
-            // site's, once, whichever of its databases it touched.
-            let marker = directory.appendingPathComponent(".migrated")
-            if message.count > 1 {
-                try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-                FileManager.default.createFile(atPath: marker.path, contents: Data())
-            }
-            reply(.success(IDBWire.number(FileManager.default.fileExists(atPath: marker.path) ? 1 : 0).encoded))
         case "bye":
             if let realm = message[safe: 1]?.ascii { bye(realm) }
             reply(.success(IDBWire.number(0).encoded))
@@ -731,11 +722,23 @@ private final class IDBFile {
         if let conn = writerConnection { return conn }
         let conn = try IDBConnection(path: path)
         if !schemaReady {
+            try check(conn)
             try conn.exec(IDBSchema.create)
+            try conn.exec("PRAGMA user_version = \(IDBSchema.version)")
             schemaReady = true
         }
         writerConnection = conn
         return conn
+    }
+
+    /// Refuse a file a newer build made. One with no version yet is new.
+    private func check(_ conn: IDBConnection) throws {
+        let st = try conn.statement("PRAGMA user_version")
+        defer { st.reset() }
+        let version = try st.step() ? st.int(0) : 0
+        if version > IDBSchema.version {
+            throw IDBFailure("UnknownError", "This database was written by a newer Tenna (layout \(version)).")
+        }
     }
 
     func acquireReader() throws -> IDBConnection {
@@ -749,7 +752,9 @@ private final class IDBFile {
         do {
             // A file with no schema yet has nothing to read, and a read of it
             // fails with no such table, which each reader takes as "none".
-            return try IDBConnection(path: path)
+            let conn = try IDBConnection(path: path)
+            try check(conn)
+            return conn
         } catch {
             readersLock.lock()
             lent -= 1
@@ -1606,7 +1611,17 @@ struct IDBFailure: Error {
 
 // MARK: - SQLite
 
+/**
+ The tables every database file has.
+
+ A file carries the version of this layout it was made with as SQLite's
+ `user_version`. A change to the layout is a new version, and a file made
+ with an older one is brought up to date by the build that knows both; a
+ file made by a newer build than this one is refused rather than misread.
+ */
 private enum IDBSchema {
+    static let version: Int64 = 1
+
     static let create = """
     PRAGMA journal_mode = WAL;
     CREATE TABLE IF NOT EXISTS databases (

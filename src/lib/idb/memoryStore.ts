@@ -152,8 +152,6 @@ export class MemoryStore {
   private readonly transactions = new Map<string, MemoryTransaction>();
   private readonly writers = new Map<string, (() => void)[]>();
   private readonly busy = new Set<string>();
-  /** Whether a realm has recorded copying its old data in. */
-  migrated = false;
   private readonly waiters = new Map<string, { resolve: (notices: Wire[]) => void; open: [string, number, string][] }>();
 
   /**
@@ -191,9 +189,6 @@ export class MemoryStore {
         return 0;
       case 'wait':
         return this.wait(request[1] as string, request[2] as [string, number, string][]);
-      case 'migration':
-        if (request.length > 1) this.migrated = true;
-        return this.migrated ? 1 : 0;
       case 'bye':
         this.bye(request[1] as string);
         return 0;

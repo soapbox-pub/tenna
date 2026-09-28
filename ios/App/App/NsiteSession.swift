@@ -1,3 +1,4 @@
+import CryptoKit
 import UIKit
 import WebKit
 
@@ -388,12 +389,9 @@ final class NsiteSession: NSObject, WKNavigationDelegate, WKUIDelegate {
     /// A stable store identity per site, so a site's storage survives closing
     /// and reopening it the way its cache does.
     static func storeIdentifier(for siteId: String) -> UUID {
-        // A UUID is sixteen bytes and a site id is up to sixty-three, so the
-        // digest is what makes the mapping total rather than lossy.
-        var digest = [UInt8](repeating: 0, count: 16)
-        for (index, byte) in Array(siteId.utf8).enumerated() {
-            digest[index % 16] = digest[index % 16] &+ byte &+ UInt8(index & 0x1f)
-        }
+        // A UUID is sixteen bytes and a site id is up to sixty-three: the
+        // first sixteen of its SHA-256, so no two sites share a store.
+        var digest = Array(SHA256.hash(data: Data(siteId.utf8)).prefix(16))
         // Version 4 / variant bits, so the value is a well-formed UUID.
         digest[6] = (digest[6] & 0x0f) | 0x40
         digest[8] = (digest[8] & 0x3f) | 0x80

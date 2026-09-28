@@ -92,14 +92,12 @@ interface Realm {
   /** Readonly transactions to end, carried on the next message. */
   ends: string[];
   endTimer: ReturnType<typeof setTimeout> | undefined;
-  /** Settles once any one-time work before the first request is done. */
-  ready: Promise<void>;
 }
 
 let realm: Realm;
 
 /** Bind the engine to the transport it talks to. */
-export function connect(transport: Transport, ready: Promise<void> = Promise.resolve()): void {
+export function connect(transport: Transport): void {
   const id = Math.random().toString(36).slice(2) + Date.now().toString(36);
   realm = {
     id,
@@ -111,7 +109,6 @@ export function connect(transport: Transport, ready: Promise<void> = Promise.res
     waits: 0,
     ends: [],
     endTimer: undefined,
-    ready,
   };
 }
 
@@ -135,11 +132,6 @@ function takeEnds(): string[] | null {
   const ends = realm.ends;
   realm.ends = [];
   return ends;
-}
-
-/** Send a message of the engine's own to the store. */
-export function send(message: Wire): Promise<Wire> {
-  return realm.send(message);
 }
 
 /** Tell the store this realm is going away. */
@@ -2053,17 +2045,9 @@ export class IDBCursorWithValue extends IDBCursor {
 // ---------------------------------------------------------------------------
 // IDBFactory: open, deleteDatabase, databases, cmp
 
-/**
- * Run open and delete requests for one name one after another, once the
- * realm is ready. `bypass` is for the work that makes it ready — the copy of
- * a site's old data — which runs at once, before any of the site's own.
- */
-function enqueue(name: string, work: () => Promise<void>, bypass = false): void {
-  if (bypass) {
-    void work().catch(() => undefined);
-    return;
-  }
-  const before = realm.queues.get(name) ?? realm.ready;
+/** Run open and delete requests for one name one after another. */
+function enqueue(name: string, work: () => Promise<void>): void {
+  const before = realm.queues.get(name) ?? Promise.resolve();
   const next = before.then(work, work).catch(() => undefined);
   realm.queues.set(name, next);
 }
@@ -2272,8 +2256,6 @@ let isFactory: (value: unknown) => boolean;
 
 export class IDBFactory {
   #brand = true;
-  /** Skips the wait for the realm to be ready. Only `migrate.ts` makes one. */
-  #bypass: boolean;
 
   static {
     isFactory = (value) => {
@@ -2285,9 +2267,8 @@ export class IDBFactory {
     };
   }
 
-  constructor(token: symbol, bypass = false) {
+  constructor(token: symbol) {
     if (token !== INTERNAL) throw new TypeError('Illegal constructor');
-    this.#bypass = bypass;
   }
 
   open(name: string, version?: number): IDBOpenDBRequest {
@@ -2300,7 +2281,7 @@ export class IDBFactory {
       if (v === 0) throw new TypeError('The version must be at least 1.');
     }
     const request = new IDBOpenDBRequest(INTERNAL);
-    enqueue(name, () => guard(request, runOpen(request, name, v)), this.#bypass);
+    enqueue(name, () => guard(request, runOpen(request, name, v)));
     return request;
   }
 
@@ -2309,13 +2290,12 @@ export class IDBFactory {
     needArgs(1, arguments, 'deleteDatabase');
     name = domString(name);
     const request = new IDBOpenDBRequest(INTERNAL);
-    enqueue(name, () => guard(request, runDelete(request, name)), this.#bypass);
+    enqueue(name, () => guard(request, runDelete(request, name)));
     return request;
   }
 
   async databases(): Promise<IDBDatabaseInfo[]> {
     if (!isFactory(this)) throw new TypeError('Illegal invocation');
-    if (!this.#bypass) await realm.ready;
     const list = (await realm.send(['databases'])) as [string, number][];
     return list.map(([name, version]) => ({ name, version }));
   }

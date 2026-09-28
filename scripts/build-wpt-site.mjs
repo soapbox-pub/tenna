@@ -157,6 +157,12 @@ await writeFile(join(OUT, "index.html"), `<!doctype html>
   }
 
   (async function () {
+    // Each file expects the origin to itself, as it has on the WPT server.
+    summary.textContent = 'Clearing';
+    var existing = await indexedDB.databases();
+    for (var d = 0; d < existing.length; d++) {
+      await new Promise(function (ok) { var r = indexedDB.deleteDatabase(existing[d].name); r.onsuccess = r.onerror = ok; });
+    }
     for (var i = 0; i < PAGES.length; i++) {
       var page = PAGES[i];
       summary.textContent = 'Running ' + (i + 1) + ' of ' + PAGES.length + ': ' + page.file;
@@ -172,7 +178,15 @@ await writeFile(join(OUT, "index.html"), `<!doctype html>
       files++;
     }
     summary.textContent = 'WPT done: ' + files + ' files, ' + passed + ' passed, ' + failed + ' failed, ' +
-      Math.round((Date.now() - started) / 1000) + ' s';
+      Math.round((Date.now() - started) / 1000) + ' s, ' + existing.length + ' databases cleared first';
+
+    // Then the benchmarks, in a frame of their own, their lines reported back.
+    var bench = document.createElement('iframe');
+    window.addEventListener('message', function (event) {
+      if (event.source === bench.contentWindow && event.data && event.data.__bench) report('bench: ' + event.data.line);
+    });
+    bench.src = '/bench.html';
+    document.body.appendChild(bench);
   })();
 </script>
 `);
@@ -186,7 +200,12 @@ await writeFile(join(OUT, "bench.html"), `<!doctype html>
 <script>
   var out = document.getElementById('out');
   var lines = [];
-  function line(s) { lines.push(s); out.textContent = ''; lines.forEach(function (l) { var d = document.createElement('div'); d.textContent = l; out.appendChild(d); }); }
+  function line(s) {
+    lines.push(s);
+    out.textContent = '';
+    lines.forEach(function (l) { var d = document.createElement('div'); d.textContent = l; out.appendChild(d); });
+    if (parent !== window) parent.postMessage({ __bench: true, line: s }, '*');
+  }
   function p(r) { return new Promise(function (ok, no) { r.onsuccess = function () { ok(r.result); }; r.onerror = function () { no(r.error); }; }); }
   (async function () {
     try {
@@ -207,6 +226,16 @@ await writeFile(join(OUT, "bench.html"), `<!doctype html>
       t = performance.now();
       for (var j = 0; j < 500; j++) await p(db.transaction('s').objectStore('s').get(j));
       line('single get, own transaction: ' + ((performance.now() - t) / 500).toFixed(3) + ' ms');
+      t = performance.now();
+      for (var k = 0; k < 20; k++) await indexedDB.databases();
+      line('databases(): ' + ((performance.now() - t) / 20).toFixed(3) + ' ms');
+      // The bridge itself: a message the store answers at once, on its own thread.
+      var handler = window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.tennaIDB;
+      if (handler) {
+        t = performance.now();
+        for (var m = 0; m < 500; m++) await handler.postMessage('[s9:migration]');
+        line('bare round trip: ' + ((performance.now() - t) / 500).toFixed(3) + ' ms');
+      }
       db.close();
       line('bench done');
     } catch (e) { line('bench failed: ' + e); }

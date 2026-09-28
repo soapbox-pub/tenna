@@ -22,9 +22,11 @@
  * `['drop', realm, name]` → the version it had, or 0 when there was none.
  * Other realms with a connection hear of it through `wait`.
  *
- * `['tx', realm, txn, begin, ops]` → `[header, ...results]`, one result per
- * op. `txn` is an id unique to the realm; `begin` is null on every message
- * after a transaction's first. On the first it is one of:
+ * `['tx', realm, txn, begin, ops, ends?]` → `[header, ...results]`, one
+ * result per op. `txn` is an id unique to the realm; `begin` is null on
+ * every message after a transaction's first. `ends`, when there, lists
+ * readonly transactions of the realm's to end first, as `end` would. On a
+ * transaction's first message `begin` is one of:
  *
  * - `['r' | 'w', name, version, incarnation]`: a readonly or readwrite
  *   transaction on a connection that opened the database at this version
@@ -53,6 +55,12 @@
  *
  * `['migration']` → 1 once the site's old data has been copied in, else 0.
  * `['migration', 1]` records that it has. See `migrate.ts`.
+ *
+ * `['end', realm, [txn, ...]]` ends readonly transactions. Ending a read
+ * changes nothing a site can see, so the engine does not wait on it, and
+ * rather than a message of its own that the site's next one would queue
+ * behind, carries it on that next message as `ends`; this only goes when
+ * nothing else does.
  *
  * `['bye', realm]`: the realm is going away; abort its transactions.
  *

@@ -184,7 +184,11 @@ export class MemoryStore {
       case 'drop':
         return this.drop(request[1] as string, request[2] as string);
       case 'tx':
+        if (request[5]) this.endReads(request[1] as string, request[5] as string[]);
         return this.transaction(request[1] as string, request[2] as string, request[3] as Wire[] | null, request[4] as Wire[][]);
+      case 'end':
+        this.endReads(request[1] as string, request[2] as string[]);
+        return 0;
       case 'wait':
         return this.wait(request[1] as string, request[2] as [string, number, string][]);
       case 'migration':
@@ -260,6 +264,19 @@ export class MemoryStore {
     return new Promise((resolve) => {
       this.waiters.set(realm, { resolve, open });
     });
+  }
+
+  /** End readonly transactions, in their turn after what they already had. */
+  private endReads(realm: string, ids: string[]): void {
+    for (const id of ids) {
+      const key = realm + '\u0000' + id;
+      const txn = this.transactions.get(key);
+      if (!txn) continue;
+      txn.chain = txn.chain.then(() => {
+        this.end(txn, true);
+        this.transactions.delete(key);
+      });
+    }
   }
 
   private bye(realm: string): void {

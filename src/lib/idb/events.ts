@@ -247,6 +247,21 @@ function dispatchNow(target: EventTarget, event: Event): Dispatched {
   return { threw, canceled: event.defaultPrevented };
 }
 
+/**
+ * Whether dispatching an event of this type at a target would call anything:
+ * a listener on the target, or on a parent — a capturing one, or any if the
+ * event bubbles. An event nobody would hear need not be dispatched.
+ */
+export function hasListeners(target: EventTarget, type: string, bubbles: boolean): boolean {
+  const path = pathFrom(target);
+  for (let i = 0; i < path.length; i++) {
+    const list = targets.get(path[i])?.listeners.get(type);
+    if (!list || !list.length) continue;
+    if (i === 0 || bubbles || list.some((l) => l.capture)) return true;
+  }
+  return false;
+}
+
 let activity = 0;
 
 /** Note that a site called into IndexedDB, which keeps `drain` going. */
@@ -411,6 +426,49 @@ export const queueTask: (fn: () => void) => void = (() => {
   }
   return (fn: () => void) => {
     setTimeout(fn, 0);
+  };
+})();
+
+/**
+ * Run a function soon, without a task of its own: after the microtasks
+ * already queued. What carries a transaction from one event to the next.
+ *
+ * A task is what the spec gives each event, and what a MessageChannel gives
+ * `queueTask` — at a cost, in WebKit, of tens of microseconds a message,
+ * which a cursor pays per record. Going on in a microtask instead is only
+ * visible to a timer racing IndexedDB's own events; the transaction is still
+ * inactive before any other task runs, since each dispatch ends by making it
+ * so. A long run of these still yields a task every few milliseconds, so a
+ * cursor over a whole store cannot starve the page.
+ */
+export const soon: (fn: () => void) => void = (() => {
+  const queue: (() => void)[] = [];
+  let scheduled = false;
+  let sliceStart = 0;
+  let lastRun = 0;
+  const run = () => {
+    scheduled = false;
+    const fn = queue.shift();
+    if (fn) fn();
+    lastRun = performance.now();
+    if (queue.length) schedule();
+  };
+  const schedule = () => {
+    if (scheduled) return;
+    scheduled = true;
+    const now = performance.now();
+    // A run that stopped a while ago starts a fresh slice.
+    if (now - lastRun > 4) sliceStart = now;
+    if (now - sliceStart > 8) {
+      sliceStart = now;
+      queueTask(run);
+    } else {
+      queueMicrotask(run);
+    }
+  };
+  return (fn: () => void) => {
+    queue.push(fn);
+    schedule();
   };
 })();
 

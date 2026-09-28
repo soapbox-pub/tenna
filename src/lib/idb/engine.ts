@@ -22,7 +22,7 @@
 import { canInjectKey, convertKeyPath, extractKey, injectKey, isValidKeyPath, type KeyPath } from './keyPath';
 import { arrayMembers, keyToValue, toKey } from './keys';
 import { complete, completeNow, deserialize, deserializePending, serialize, type Serialized } from './clone';
-import { beforeNextTask, dispatch, defineHandlers, IDBVersionChangeEvent, makeEvent, noteActivity, onCheckpoint, queueTask, registerTarget } from './events';
+import { beforeNextTask, dispatch, defineHandlers, hasListeners, IDBVersionChangeEvent, makeEvent, noteActivity, onCheckpoint, queueTask, registerTarget, soon } from './events';
 import { INTERNAL, IDBKeyRange, isPotentiallyValidKeyRange, keyWireRange, toRange } from './keyRange';
 import { DOMStringList, nameList, webidl } from './domStringList';
 import { isWireError, type Schema, type Transport, type WireRange } from './protocol';
@@ -89,6 +89,9 @@ interface Realm {
   queues: Map<string, Promise<void>>;
   /** Which `wait` is the current one; an answer to any other is stale. */
   waits: number;
+  /** Readonly transactions to end, carried on the next message. */
+  ends: string[];
+  endTimer: ReturnType<typeof setTimeout> | undefined;
   /** Settles once any one-time work before the first request is done. */
   ready: Promise<void>;
 }
@@ -106,8 +109,32 @@ export function connect(transport: Transport, ready: Promise<void> = Promise.res
     schedulers: new Map(),
     queues: new Map(),
     waits: 0,
+    ends: [],
+    endTimer: undefined,
     ready,
   };
+}
+
+/**
+ * End a readonly transaction in the store. Not a message of its own, which
+ * would queue ahead of whatever the site does next: it goes on the next one,
+ * or alone after a moment if there is none.
+ */
+function endRead(txnId: string): void {
+  realm.ends.push(txnId);
+  realm.endTimer ??= setTimeout(() => {
+    realm.endTimer = undefined;
+    const ends = takeEnds();
+    if (ends) void realm.send(['end', realm.id, ends]).catch(() => undefined);
+  }, 20);
+}
+
+/** The readonly transactions waiting to be ended, now on their way. */
+function takeEnds(): string[] | null {
+  if (!realm.ends.length) return null;
+  const ends = realm.ends;
+  realm.ends = [];
+  return ends;
 }
 
 /** Send a message of the engine's own to the store. */
@@ -250,8 +277,8 @@ class Connection {
     const fire = () => {
       void dispatch(this.api, makeEvent('close', false, false));
     };
-    if (wasClosed || this.closed) queueTask(fire);
-    else void this.whenClosed().then(() => queueTask(fire));
+    if (wasClosed || this.closed) soon(fire);
+    else void this.whenClosed().then(() => soon(fire));
   }
 }
 
@@ -277,7 +304,7 @@ function listen(): void {
         for (const conn of [...(realm.connections.get(name) ?? [])]) {
           if (conn.closePending) continue;
           if (conn.version === version && conn.incarnation === incarnation) continue;
-          queueTask(async () => {
+          soon(async () => {
             if (conn.closePending) return;
             await dispatch(conn.api, new IDBVersionChangeEvent('versionchange', { oldVersion: conn.version, newVersion: version || null }));
             // The change has already happened elsewhere and cannot wait for
@@ -370,7 +397,7 @@ type Mode = 'readonly' | 'readwrite' | 'versionchange';
 const created = new Set<TxnState>();
 
 onCheckpoint(() => {
-  for (const txn of created) if (txn.state === 'active') txn.state = 'inactive';
+  for (const txn of created) txn.deactivate();
   created.clear();
 });
 
@@ -413,9 +440,17 @@ class TxnState {
 
   /** Go inactive before the next task, if still active then. */
   deactivateSoon(): void {
-    beforeNextTask(() => {
-      if (this.state === 'active') this.state = 'inactive';
-    });
+    beforeNextTask(() => this.deactivate());
+  }
+
+  /**
+   * Go inactive, and with nothing left to wait for, start committing there
+   * and then — not a task later, where a site's timer could still abort.
+   */
+  deactivate(): void {
+    if (this.state !== 'active') return;
+    this.state = 'inactive';
+    if (this.started && !this.entries.length && !this.firing) this.commit();
   }
 
   get active(): boolean {
@@ -454,7 +489,11 @@ class TxnState {
   local(request: IDBRequest, finish: () => Outcome): Entry {
     const entry: Entry = { request, op: null, local: true, answered: true, answer: null, finish };
     this.add(entry);
-    this.queueTask();
+    // Asked for in one of this transaction's own dispatches — a cursor
+    // stepping in its handler — the turn after that dispatch serves it. Asked
+    // for from a task of the site's, it waits for a task of its own, after
+    // that task's microtasks: a request never finishes inside the call.
+    if (!this.firing) queueTask(() => this.queueTask());
     return entry;
   }
 
@@ -504,12 +543,19 @@ class TxnState {
     if (!batch.length) return;
     const begin = this.begun ? null : this.beginSpec();
     this.begun = true;
-    const message: Wire = ['tx', realm.id, this.id, begin, batch.map((e) => e.op!)];
+    const ends = takeEnds();
+    const message: Wire = ends
+      ? ['tx', realm.id, this.id, begin, batch.map((e) => e.op!), ends]
+      : ['tx', realm.id, this.id, begin, batch.map((e) => e.op!)];
     realm.send(message).then(
       (answer) => {
         const results = answer as Wire[];
         if (begin && results[0] === 'stale') {
           this.conn.forceClose();
+          return;
+        }
+        if (begin && isWireError(results[0])) {
+          this.abort(domError(results[0][1], results[0][2]));
           return;
         }
         for (let i = 0; i < batch.length; i++) {
@@ -546,7 +592,7 @@ class TxnState {
   queueTask(): void {
     if (this.taskQueued) return;
     this.taskQueued = true;
-    queueTask(() => {
+    soon(() => {
       this.taskQueued = false;
       this.turn();
     });
@@ -559,7 +605,9 @@ class TxnState {
    */
   private turn(): void {
     if (this.firing) return;
-    if (this.state === 'active') this.state = 'inactive';
+    // Not made inactive here: a turn can come in the same microtask
+    // checkpoint as the transaction's creation, which it must outlive. That
+    // is `deactivate`'s, at the end of a dispatch or of the creating task.
     if (this.state === 'finished') return;
     while (this.entries.length) {
       const head = this.entries[0];
@@ -578,12 +626,21 @@ class TxnState {
         if (this.finished) return;
         continue;
       }
+      const outcome = this.outcome(head);
+      const type = 'error' in outcome ? 'error' : 'success';
+      if (!hasListeners(head.request, type, type === 'error')) {
+        // Nobody would hear it, so there is no event to dispatch and no task
+        // to spend on one — which is most of a bulk write.
+        this.settleQuietly(head.request, outcome);
+        if (this.finished) return;
+        continue;
+      }
       this.firing = true;
-      void this.fire(head).finally(() => {
+      void this.fire(head, outcome).finally(() => {
         this.firing = false;
         // The dispatch ended with a checkpoint; the spec's transaction goes
         // inactive right after it, before this task is over.
-        if (this.state === 'active') this.state = 'inactive';
+        this.deactivate();
         this.queueTask();
       });
       return;
@@ -591,30 +648,43 @@ class TxnState {
     if (this.started && (this.state === 'inactive' || this.state === 'committing')) this.commit();
   }
 
-  /** Fire a request's success or error event, with the transaction active. */
-  private async fire(entry: Entry): Promise<void> {
-    const request = entry.request!;
+  /** What an answered entry's request comes to. */
+  private outcome(entry: Entry): Outcome {
     const answer = entry.answer;
-    let outcome: Outcome;
-    if (isWireError(answer)) {
-      outcome = { error: domError(answer[1], answer[2]) };
-    } else {
-      // A value that cannot be read back — a type this realm cannot make —
-      // fails its request rather than the engine.
-      try {
-        outcome = entry.finish(answer);
-      } catch (error) {
-        outcome = { error: error instanceof DOMException ? error : domError('DataCloneError', String(error)) };
-      }
+    if (isWireError(answer)) return { error: domError(answer[1], answer[2]) };
+    // A value that cannot be read back — a type this realm cannot make —
+    // fails its request rather than the engine.
+    try {
+      return entry.finish(answer);
+    } catch (error) {
+      return { error: error instanceof DOMException ? error : domError('DataCloneError', String(error)) };
     }
+  }
+
+  /** A request nobody is listening to: its result, and an abort if it failed. */
+  private settleQuietly(request: IDBRequest, outcome: Outcome): void {
     const r = requestState(request);
     r.done = true;
-    if (this.state !== 'committing') {
-      this.state = 'active';
-      // Registered before the handlers run, so it comes ahead of any timer
-      // they set.
-      this.deactivateSoon();
+    if ('error' in outcome) {
+      r.result = undefined;
+      r.error = outcome.error;
+      this.abort(outcome.error);
+    } else {
+      r.result = outcome.result;
+      r.error = null;
     }
+  }
+
+  /**
+   * Fire a request's success or error event, with the transaction active. It
+   * goes inactive again when the dispatch ends, which is before any other
+   * task can run: the dispatch is all microtasks.
+   */
+  private async fire(entry: Entry, outcome: Outcome): Promise<void> {
+    const request = entry.request!;
+    const r = requestState(request);
+    r.done = true;
+    if (this.state !== 'committing') this.state = 'active';
     if ('error' in outcome) {
       r.result = undefined;
       r.error = outcome.error;
@@ -642,6 +712,12 @@ class TxnState {
       this.complete();
       return;
     }
+    if (this.mode === 'readonly') {
+      // Ending a read has nothing to fail and nothing to wait for.
+      endRead(this.id);
+      this.complete();
+      return;
+    }
     this.system(['commit'], (answer) => {
       if (isWireError(answer)) {
         this.commitSent = false;
@@ -655,7 +731,7 @@ class TxnState {
   /** The spec's "commit" finishing: fire `complete`. */
   private complete(): void {
     this.state = 'finished';
-    queueTask(async () => {
+    soon(async () => {
       if (this.conn.upgrade === this) this.conn.upgrade = null;
       await dispatch(this.api, makeEvent('complete', false, false));
       this.cleanUp();
@@ -677,6 +753,8 @@ class TxnState {
       this.undo.length = 0;
     }
     const pending = this.entries.splice(0).filter((e) => e.request);
+    // A task, not `soon`: `abort()` is the site's own call, and its events
+    // come after the promises that call's task left behind.
     queueTask(async () => {
       for (const entry of pending) {
         const r = requestState(entry.request!);
@@ -1999,7 +2077,7 @@ async function closeOthers(name: string, request: IDBOpenDBRequest, oldVersion: 
   const others = [...(realm.connections.get(name) ?? [])].filter((c) => c !== except && !c.closed);
   if (!others.length) return;
   await new Promise<void>((resolve) =>
-    queueTask(async () => {
+    soon(async () => {
       for (const c of others) {
         if (c.closePending) continue;
         await dispatch(c.api, new IDBVersionChangeEvent('versionchange', { oldVersion, newVersion }));
@@ -2009,7 +2087,7 @@ async function closeOthers(name: string, request: IDBOpenDBRequest, oldVersion: 
   );
   if (others.some((c) => !c.closed)) {
     await new Promise<void>((resolve) =>
-      queueTask(async () => {
+      soon(async () => {
         await dispatch(request, new IDBVersionChangeEvent('blocked', { oldVersion, newVersion }));
         resolve();
       }),
@@ -2020,7 +2098,7 @@ async function closeOthers(name: string, request: IDBOpenDBRequest, oldVersion: 
 
 function fireOpenError(request: IDBOpenDBRequest, error: DOMException): Promise<void> {
   return new Promise((resolve) =>
-    queueTask(async () => {
+    soon(async () => {
       const r = requestState(request);
       r.done = true;
       r.result = undefined;
@@ -2034,7 +2112,7 @@ function fireOpenError(request: IDBOpenDBRequest, error: DOMException): Promise<
 
 function fireOpenSuccess(request: IDBOpenDBRequest, conn: Connection): Promise<void> {
   return new Promise((resolve) =>
-    queueTask(async () => {
+    soon(async () => {
       const r = requestState(request);
       r.done = true;
       r.result = conn.api;
@@ -2077,6 +2155,10 @@ async function runOpen(request: IDBOpenDBRequest, name: string, requested: numbe
     await fireOpenError(request, domError('UnknownError', String(error)));
     return;
   }
+  if (isWireError(header)) {
+    await fireOpenError(request, domError(header[1], header[2]));
+    return;
+  }
   if (Array.isArray(header) && header[0] === 'skip') {
     // Another realm upgraded while this one waited.
     const now = header[1] as Schema;
@@ -2112,14 +2194,13 @@ async function runOpen(request: IDBOpenDBRequest, name: string, requested: numbe
   });
 
   await new Promise<void>((resolve) =>
-    queueTask(async () => {
+    soon(async () => {
       const r = requestState(request);
       r.done = true;
       r.result = conn.api;
       r.error = null;
       r.txn = txn;
       txn.state = 'active';
-      txn.deactivateSoon();
       const { threw } = await dispatch(request, new IDBVersionChangeEvent('upgradeneeded', { oldVersion: current, newVersion: version }));
       if (threw) txn.abort(domError('AbortError', 'The upgradeneeded handler threw.'));
       if (txn.state === 'active') txn.state = 'inactive';
@@ -2144,6 +2225,20 @@ async function runOpen(request: IDBOpenDBRequest, name: string, requested: numbe
   await fireOpenSuccess(request, conn);
 }
 
+/**
+ * An open or delete that went wrong somewhere unforeseen still ends with an
+ * event: a request left pending forever is a site waiting forever.
+ */
+async function guard(request: IDBOpenDBRequest, work: Promise<void>): Promise<void> {
+  try {
+    await work;
+  } catch (error) {
+    if (!requestState(request).done) {
+      await fireOpenError(request, domError('UnknownError', String(error)));
+    }
+  }
+}
+
 async function runDelete(request: IDBOpenDBRequest, name: string): Promise<void> {
   let schema: Schema | null;
   try {
@@ -2162,7 +2257,7 @@ async function runDelete(request: IDBOpenDBRequest, name: string): Promise<void>
     return;
   }
   await new Promise<void>((resolve) =>
-    queueTask(async () => {
+    soon(async () => {
       const r = requestState(request);
       r.done = true;
       r.result = undefined;
@@ -2205,7 +2300,7 @@ export class IDBFactory {
       if (v === 0) throw new TypeError('The version must be at least 1.');
     }
     const request = new IDBOpenDBRequest(INTERNAL);
-    enqueue(name, () => runOpen(request, name, v), this.#bypass);
+    enqueue(name, () => guard(request, runOpen(request, name, v)), this.#bypass);
     return request;
   }
 
@@ -2214,7 +2309,7 @@ export class IDBFactory {
     needArgs(1, arguments, 'deleteDatabase');
     name = domString(name);
     const request = new IDBOpenDBRequest(INTERNAL);
-    enqueue(name, () => runDelete(request, name), this.#bypass);
+    enqueue(name, () => guard(request, runDelete(request, name)), this.#bypass);
     return request;
   }
 

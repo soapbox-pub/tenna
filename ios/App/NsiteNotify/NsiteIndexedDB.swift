@@ -28,9 +28,12 @@ import SQLite3
  transactions on different databases run side by side and SQLite has one
  writer a file.
 
- **Deleting** a database empties its file rather than removing it: another
- process may have it open, and a file unlinked under an open connection is
- one that connection goes on writing to, unseen.
+ **Deleting** a database empties its file, and removes the file only once
+ nothing else has it open — another process may, and a file unlinked under an
+ open connection is one that connection goes on using, unseen. SQLite says
+ whether anyone does: an exclusive lock is only granted to the only
+ connection. A file that was still open when its database went is removed
+ the next time `databases()` comes across it empty.
 
  **Suspension.** iOS kills a suspended app holding a lock on a file in an App
  Group. The app ends transactions quickly anyway; `activity` tells it when any
@@ -109,6 +112,10 @@ final class NsiteIndexedDB {
 
     // Main thread only.
     private var transactions: [String: IDBTransaction] = [:]
+    /// What `databases()` last read from each file, and the modification
+    /// times of the file and its WAL then: any commit, in any process, moves
+    /// one or the other, so while both stand the rows do too.
+    private var listed: [String: (stamp: [Int], rows: [IDBWire])] = [:]
     private var waits: [String: IDBWait] = [:]
     private var closed = false
 
@@ -128,25 +135,62 @@ final class NsiteIndexedDB {
         return FileManager.default.fileExists(atPath: path) ? file(named: hex) : nil
     }
 
+    /**
+     Remove a database's file if it holds no database and nobody has it open.
+     Main thread. A transaction here — which holds the writer or a reader —
+     or a connection in another process keeps it.
+     */
+    private func remove(_ hex: String, _ file: IDBFile) {
+        // The file's object stays: it is the one lock there is for its path,
+        // and a transaction may already hold it to make the file again.
+        _ = file.removeIfUnused()
+    }
+
     private func hex(_ name: ArraySlice<UInt16>) -> String {
         let digest = name.withUnsafeBytes { SHA256.hash(data: $0) }
         return digest.map { String(format: "%02x", $0) }.joined()
     }
 
+    /// How many databases may have connections open at once. A connection
+    /// is three descriptors — the file, its WAL, its shared memory — and a
+    /// site can have any number of databases; iOS allows a process a few
+    /// hundred descriptors in all.
+    private static let openFiles = 8
+
     private func file(named hex: String) -> IDBFile {
         filesLock.lock()
         defer { filesLock.unlock() }
-        if let file = files[hex] { return file }
-        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        let file = IDBFile(path: directory.appendingPathComponent("\(hex).sqlite").path)
-        files[hex] = file
+        let file: IDBFile
+        if let known = files[hex] {
+            file = known
+        } else {
+            try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            file = IDBFile(path: directory.appendingPathComponent("\(hex).sqlite").path)
+            files[hex] = file
+        }
+        file.touch()
+        // Close what has gone longest unused, when too much is open. A file
+        // a transaction is using keeps what it is using.
+        let open = files.values.filter { $0 !== file && $0.isOpen }
+        if open.count >= Self.openFiles {
+            for idle in open.sorted(by: { $0.lastUsed < $1.lastUsed }).prefix(open.count - Self.openFiles + 1) {
+                idle.closeIdle()
+            }
+        }
         return file
     }
 
-    /// Every database file there is, whoever made it.
-    private func allFiles() -> [IDBFile] {
+    /// A file's modification time, to the nanosecond, or zeros if it is not there.
+    private static func stamp(_ path: String) -> [Int] {
+        var info = stat()
+        guard stat(path, &info) == 0 else { return [0, 0] }
+        return [Int(info.st_mtimespec.tv_sec), Int(info.st_mtimespec.tv_nsec)]
+    }
+
+    /// The name of every database file there is, whoever made it.
+    private func allFiles() -> [String] {
         let names = (try? FileManager.default.contentsOfDirectory(atPath: directory.path)) ?? []
-        return names.filter { $0.hasSuffix(".sqlite") }.map { file(named: String($0.dropLast(".sqlite".count))) }
+        return names.filter { $0.hasSuffix(".sqlite") }.map { String($0.dropLast(".sqlite".count)) }
     }
 
     // MARK: - Messages
@@ -191,7 +235,12 @@ final class NsiteIndexedDB {
             guard let realm = message[safe: 1]?.ascii, let id = message[safe: 2]?.ascii,
                   let ops = message[safe: 4]?.list else { return reply(.failure(.corrupt)) }
             channel.realms.insert(realm)
+            if let ends = message[safe: 5]?.list { endReads(realm, ends) }
             transaction(realm: realm, id: id, begin: message[safe: 3]?.list, ops: ops, reply: answer)
+        case "end":
+            guard let realm = message[safe: 1]?.ascii, let ends = message[safe: 2]?.list else { return reply(.failure(.corrupt)) }
+            endReads(realm, ends)
+            reply(.success(IDBWire.number(0).encoded))
         case "wait":
             guard let realm = message[safe: 1]?.ascii, let open = message[safe: 2]?.list else { return reply(.failure(.corrupt)) }
             channel.realms.insert(realm)
@@ -217,6 +266,13 @@ final class NsiteIndexedDB {
     func close(_ channel: NsiteIndexedDBChannel) {
         for realm in channel.realms { bye(realm) }
         channel.realms.removeAll()
+    }
+
+    /// End readonly transactions, each in its turn after what it already had.
+    private func endReads(_ realm: String, _ ids: [IDBWire]) {
+        for id in ids.compactMap(\.ascii) {
+            transaction(realm: realm, id: id, begin: nil, ops: [.list([.string(ArraySlice("commit".utf16))])]) { _ in }
+        }
     }
 
     private func bye(_ realm: String) {
@@ -247,7 +303,16 @@ final class NsiteIndexedDB {
 
     private func databases() -> Result<IDBWire, IDBFailure> {
         var out: [IDBWire] = []
-        for file in allFiles() {
+        // One at a time, each through `file(named:)`, so no more are open at
+        // once than it allows however many databases the site has made.
+        for hex in allFiles() {
+            let path = directory.appendingPathComponent("\(hex).sqlite").path
+            let stamp = Self.stamp(path) + Self.stamp(path + "-wal")
+            if let known = listed[hex], known.stamp == stamp {
+                out.append(contentsOf: known.rows)
+                continue
+            }
+            let file = file(named: hex)
             let found = file.withReader { conn -> IDBWire in
                 let st = try conn.statement("SELECT name, version FROM databases")
                 var rows: [IDBWire] = []
@@ -256,10 +321,14 @@ final class NsiteIndexedDB {
                 }
                 return .list(rows)
             }
-            switch found {
-            case let .success(.list(rows)): out.append(contentsOf: rows)
-            case let .failure(failure): return .failure(failure)
-            default: break
+            // A file with no schema yet — made by an upgrade that never got
+            // that far — holds no database, and neither does an emptied one.
+            if case let .success(.list(rows)) = found, !rows.isEmpty {
+                out.append(contentsOf: rows)
+                listed[hex] = (stamp, rows)
+            } else {
+                listed.removeValue(forKey: hex)
+                remove(hex, file)
             }
         }
         return .success(.list(out))
@@ -325,7 +394,10 @@ final class NsiteIndexedDB {
                     try st.run()
                 }
                 try conn.exec("COMMIT")
-                DispatchQueue.main.async { self.changed() }
+                DispatchQueue.main.async {
+                    self.changed()
+                    self.remove(self.hex(name), file)
+                }
                 return .success(.number(Double(version)))
             } catch {
                 try? conn.exec("ROLLBACK")
@@ -405,12 +477,19 @@ final class NsiteIndexedDB {
                 reply(.failure(IDBFailure("UnknownError", "Transaction \(id) has not begun.")))
                 return
             }
-            txn = IDBTransaction(realm: realm, id: id)
+            // Readonly transactions on one database share a queue: they take
+            // no locks, so none waits on another, and the order they were
+            // made in is the order they are answered in.
+            var queue: DispatchQueue?
+            if let begin, begin[safe: 0]?.ascii == "r", let name = begin[safe: 1]?.units {
+                queue = existingFile(for: name)?.readQueue
+            }
+            txn = IDBTransaction(realm: realm, id: id, queue: queue)
             transactions[key] = txn
             if Self.open == 0 { Self.activity?(true) }
             Self.open += 1
         }
-        txn.queue.async {
+        let work = {
             var results: [IDBWire] = []
             results.append(begin.map { self.begin(txn, $0) } ?? .null)
             for op in ops {
@@ -420,19 +499,53 @@ final class NsiteIndexedDB {
                     results.append(self.run(txn, op.list ?? []))
                 }
             }
+            return results
+        }
+        let finish = { (results: [IDBWire]) in
             let ended = txn.ended || txn.dead
-            DispatchQueue.main.async {
-                if ended, self.transactions[key] === txn {
-                    self.transactions.removeValue(forKey: key)
-                }
-                if ended, !txn.counted {
-                    txn.counted = true
-                    Self.open -= 1
-                    if Self.open == 0 { Self.activity?(false) }
-                }
-                if ended, txn.upgraded { self.changed() }
-                reply(.success(.list(results)))
+            if ended, self.transactions[key] === txn {
+                self.transactions.removeValue(forKey: key)
             }
+            if ended, !txn.counted {
+                txn.counted = true
+                Self.open -= 1
+                if Self.open == 0 { Self.activity?(false) }
+            }
+            if ended, txn.upgraded { self.changed() }
+            reply(.success(.list(results)))
+        }
+
+        // A small read, with nothing queued ahead of it on its database, is
+        // answered here and now: a point read is microseconds, and the two
+        // thread hops a queue costs are most of what a small transaction
+        // waits on. Order holds, because nothing is queued to overtake.
+        let queue = txn.queue
+        let reading = begin?[safe: 0]?.ascii.map { $0 == "r" } ?? (txn.mode == "r")
+        if reading, (pending[ObjectIdentifier(queue)] ?? 0) == 0, ops.allSatisfy(Self.small) {
+            finish(work())
+            return
+        }
+        pending[ObjectIdentifier(queue), default: 0] += 1
+        queue.async {
+            let results = work()
+            DispatchQueue.main.async {
+                self.pending[ObjectIdentifier(queue), default: 1] -= 1
+                finish(results)
+            }
+        }
+    }
+
+    /// Work queued and not yet answered, by queue. Main thread.
+    private var pending: [ObjectIdentifier: Int] = [:]
+
+    /// A read op cheap enough to answer on the main thread.
+    private static func small(_ op: IDBWire) -> Bool {
+        guard let list = op.list, let name = list.first?.ascii else { return false }
+        switch name {
+        case "commit", "abort": return true
+        case "get": return list[safe: 6]?.ascii != "c" && (1 ... 64).contains(list[safe: 4]?.number ?? 0)
+        case "iter": return (1 ... 64).contains(list[safe: 7]?.number ?? 0)
+        default: return false
         }
     }
 
@@ -527,6 +640,13 @@ final class NsiteIndexedDB {
             conn.resetAll()
             if commit {
                 do {
+                    for (store, generator) in txn.generators where generator.dirty {
+                        let bump = try conn.statement("UPDATE stores SET generator = ? WHERE db = ? AND id = ?")
+                        bump.bind(1, int: generator.value)
+                        bump.bind(2, int: txn.db)
+                        bump.bind(3, int: store)
+                        try bump.run()
+                    }
                     try conn.exec("COMMIT")
                     if txn.mode == "v" { txn.upgraded = true }
                 } catch {
@@ -580,10 +700,31 @@ private final class IDBFile {
     private let readersLock = NSLock()
     private var readers: [IDBConnection] = []
     private var schemaReady = false
+    /// Where readonly transactions on this database run, in order.
+    let readQueue = DispatchQueue(label: "pub.soapbox.tenna.idb.read", qos: .userInitiated)
+    /// Guarded by the site's `filesLock`.
+    private(set) var lastUsed: UInt64 = 0
+    private static var clock: UInt64 = 0
 
     init(path: String) {
         self.path = path
     }
+
+    /// Mark as just used. Under the site's `filesLock`.
+    func touch() {
+        Self.clock &+= 1
+        lastUsed = Self.clock
+    }
+
+    /// Whether any connection to the file is open, idle or not.
+    var isOpen: Bool {
+        readersLock.lock()
+        defer { readersLock.unlock() }
+        return !readers.isEmpty || writerConnection != nil || lent > 0
+    }
+
+    /// Readers out with a transaction.
+    private var lent = 0
 
     /// The writer, opened and the schema made on first use. Hold `writerLock`.
     func writer() throws -> IDBConnection {
@@ -599,18 +740,22 @@ private final class IDBFile {
 
     func acquireReader() throws -> IDBConnection {
         readersLock.lock()
+        lent += 1
         if let conn = readers.popLast() {
             readersLock.unlock()
             return conn
         }
         readersLock.unlock()
-        // A reader on a file with no schema yet needs the writer to make it.
-        if !schemaReady {
-            writerLock.wait()
-            defer { writerLock.signal() }
-            _ = try writer()
+        do {
+            // A file with no schema yet has nothing to read, and a read of it
+            // fails with no such table, which each reader takes as "none".
+            return try IDBConnection(path: path)
+        } catch {
+            readersLock.lock()
+            lent -= 1
+            readersLock.unlock()
+            throw error
         }
-        return try IDBConnection(path: path)
     }
 
     func releaseReader(_ conn: IDBConnection) {
@@ -618,7 +763,9 @@ private final class IDBFile {
         // a snapshot the next user of this connection would read.
         conn.resetAll()
         readersLock.lock()
-        readers.append(conn)
+        lent -= 1
+        // One idle reader is plenty to keep; the rest are closed.
+        if readers.isEmpty { readers.append(conn) }
         readersLock.unlock()
     }
 
@@ -640,6 +787,43 @@ private final class IDBFile {
             writerConnection = nil
             writerLock.signal()
         }
+    }
+
+    /**
+     Delete the file, if it holds no database and no connection anywhere has
+     it open. True if it was deleted.
+     */
+    func removeIfUnused() -> Bool {
+        guard writerLock.wait(timeout: .now()) == .success else { return false }
+        defer { writerLock.signal() }
+        readersLock.lock()
+        let busy = lent > 0
+        if !busy { readers.removeAll() }
+        readersLock.unlock()
+        guard !busy else { return false }
+        writerConnection = nil
+        guard FileManager.default.fileExists(atPath: path),
+              let conn = try? IDBConnection(path: path, busyTimeout: 0) else { return false }
+        do {
+            // Exclusive locking only succeeds for the one connection there is.
+            try conn.exec("PRAGMA locking_mode = EXCLUSIVE; BEGIN EXCLUSIVE")
+            let st = try conn.statement("SELECT count(*) FROM databases")
+            let count = try st.step() ? st.int(0) : 0
+            st.reset()
+            guard count == 0 else {
+                try? conn.exec("ROLLBACK")
+                return false
+            }
+        } catch let error as IDBSQLiteError where error.message.contains("no such table") {
+            // Never given a schema: nothing in it either.
+        } catch {
+            return false
+        }
+        for suffix in ["", "-wal", "-shm", "-journal"] {
+            try? FileManager.default.removeItem(atPath: path + suffix)
+        }
+        schemaReady = false
+        return true
     }
 }
 
@@ -714,11 +898,16 @@ private final class IDBTransaction {
     var counted = false
     /// Each store's indexes, `(id, unique)`, as read in this transaction.
     var indexes: [Int64: [(Int64, Bool)]] = [:]
+    /// Each store's key generator as this transaction has it: whether it has
+    /// one, its current number, and whether that is ahead of the file. The
+    /// transaction holds the writer, so nobody else can move it; it goes to
+    /// the file once, at commit.
+    var generators: [Int64: (auto: Bool, value: Int64, dirty: Bool)] = [:]
 
-    init(realm: String, id: String) {
+    init(realm: String, id: String, queue: DispatchQueue? = nil) {
         self.realm = realm
         self.id = id
-        queue = DispatchQueue(label: "pub.soapbox.tenna.idb.txn", qos: .userInitiated)
+        self.queue = queue ?? DispatchQueue(label: "pub.soapbox.tenna.idb.txn", qos: .userInitiated)
     }
 }
 
@@ -776,6 +965,7 @@ private struct IDBOps {
             try exec("DELETE FROM records WHERE db = ?1 AND store = ?2", db, store)
             try exec("DELETE FROM stores WHERE db = ?1 AND id = ?2", db, store)
             txn.indexes.removeValue(forKey: store)
+            txn.generators.removeValue(forKey: store)
             return .number(0)
         case "rs":
             let st = try conn.statement("UPDATE stores SET name = ? WHERE db = ? AND id = ?")
@@ -875,13 +1065,7 @@ private struct IDBOps {
         let entryLists = op[safe: 5]?.list ?? []
         let template = op[safe: 6]?.units
 
-        let gen = try conn.statement("SELECT auto_increment, generator FROM stores WHERE db = ? AND id = ?")
-        gen.bind(1, int: db)
-        gen.bind(2, int: store)
-        guard try gen.step() else { gen.reset(); throw IDBFailure("UnknownError", "No object store \(store).") }
-        let autoIncrement = gen.int(0) != 0
-        var generator = gen.int(1)
-        gen.reset()
+        let (autoIncrement, generator) = try self.generator(of: store)
 
         // Every check before any write, so a put that fails leaves nothing.
         let key: [UInt16]
@@ -897,6 +1081,26 @@ private struct IDBOps {
             generated = true
         }
 
+        let indexes = try self.indexes(of: store)
+
+        // A store with no indexes has no entries to clear for a record it
+        // replaces, and needs no look first: one statement does it.
+        if indexes.isEmpty {
+            let write = try conn.statement(overwrite
+                ? "INSERT OR REPLACE INTO records (db, store, key, value) VALUES (?, ?, ?, ?)"
+                : "INSERT OR IGNORE INTO records (db, store, key, value) VALUES (?, ?, ?, ?)")
+            write.bind(1, int: db)
+            write.bind(2, int: store)
+            write.bind(3, key: key[...])
+            write.bind(4, units: value)
+            try write.run()
+            if !overwrite, conn.changes == 0 {
+                throw IDBFailure("ConstraintError", "A record with this key already exists.")
+            }
+            advance(store, autoIncrement: autoIncrement, generator: generator, past: key)
+            return generated ? .string(key[...]) : .number(0)
+        }
+
         let exists = try conn.statement("SELECT 1 FROM records WHERE db = ? AND store = ? AND key = ?")
         exists.bind(1, int: db)
         exists.bind(2, int: store)
@@ -905,7 +1109,7 @@ private struct IDBOps {
         exists.reset()
         if there, !overwrite { throw IDBFailure("ConstraintError", "A record with this key already exists.") }
 
-        let unique = Dictionary(try indexes(of: store), uniquingKeysWith: { a, _ in a })
+        let unique = Dictionary(indexes, uniquingKeysWith: { a, _ in a })
         var entries: [(Int64, [[UInt16]])] = []
         for item in entryLists {
             guard let pair = item.list, let index = pair[safe: 0]?.number, let keys = pair[safe: 1]?.list else { continue }
@@ -948,16 +1152,29 @@ private struct IDBOps {
             }
         }
 
-        // The generator moves only for a put that got this far.
-        if autoIncrement, let n = IDBKeys.number(key[...]), n >= Double(generator) {
-            generator = n >= Double(IDBKeys.generatorLimit) ? IDBKeys.generatorLimit + 1 : Int64(n.rounded(.down)) + 1
-            let bump = try conn.statement("UPDATE stores SET generator = ? WHERE db = ? AND id = ?")
-            bump.bind(1, int: generator)
-            bump.bind(2, int: db)
-            bump.bind(3, int: store)
-            try bump.run()
-        }
+        advance(store, autoIncrement: autoIncrement, generator: generator, past: key)
         return generated ? .string(key[...]) : .number(0)
+    }
+
+    /// A store's key generator: whether it has one, and its current number.
+    private func generator(of store: Int64) throws -> (Bool, Int64) {
+        if let known = txn.generators[store] { return (known.auto, known.value) }
+        let gen = try conn.statement("SELECT auto_increment, generator FROM stores WHERE db = ? AND id = ?")
+        gen.bind(1, int: db)
+        gen.bind(2, int: store)
+        defer { gen.reset() }
+        guard try gen.step() else { throw IDBFailure("UnknownError", "No object store \(store).") }
+        let found = (gen.int(0) != 0, gen.int(1))
+        txn.generators[store] = (found.0, found.1, false)
+        return found
+    }
+
+    /// The generator moves only for a put that got this far: past the key it
+    /// made, or past an explicit number at or beyond it.
+    private func advance(_ store: Int64, autoIncrement: Bool, generator: Int64, past key: [UInt16]) {
+        guard autoIncrement, let n = IDBKeys.number(key[...]), n >= Double(generator) else { return }
+        let next = n >= Double(IDBKeys.generatorLimit) ? IDBKeys.generatorLimit + 1 : Int64(n.rounded(.down)) + 1
+        txn.generators[store] = (true, next, true)
     }
 
     /// `ia`: fill a new index, all or nothing.
@@ -1439,7 +1656,7 @@ final class IDBConnection {
     fileprivate let db: OpaquePointer
     private var statements: [String: IDBStatement] = [:]
 
-    init(path: String) throws {
+    init(path: String, busyTimeout: Int32 = 10_000) throws {
         var handle: OpaquePointer?
         let flags = SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_NOMUTEX
         let rc = sqlite3_open_v2(path, &handle, flags, nil)
@@ -1449,7 +1666,7 @@ final class IDBConnection {
             throw IDBSQLiteError(code: rc, message: message)
         }
         db = handle
-        sqlite3_busy_timeout(db, 10_000)
+        sqlite3_busy_timeout(db, busyTimeout)
         try exec("PRAGMA synchronous = NORMAL; PRAGMA temp_store = MEMORY;")
     }
 
@@ -1490,6 +1707,11 @@ final class IDBConnection {
             sqlite3_reset(handle)
             st = sqlite3_next_stmt(db, handle)
         }
+    }
+
+    /// Rows the last statement changed.
+    fileprivate var changes: Int32 {
+        sqlite3_changes(db)
     }
 
     fileprivate var lastInsertRowId: Int64 {

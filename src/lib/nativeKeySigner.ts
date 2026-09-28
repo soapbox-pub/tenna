@@ -8,8 +8,9 @@ import { TennaSigner } from '@/lib/tennaSignerPlugin';
 /**
  * A signer for a key this process does not have.
  *
- * The key is in the app process, sealed on disk under the Android Keystore and
- * unsealed only in Java memory — `TennaKeys.java` has the long version. What
+ * The key is in the app process: sealed on disk under the Android Keystore and
+ * unsealed only in Java memory, or in the Keychain on iOS and read only by
+ * Swift — `TennaKeys.java` and `TennaKeys.swift` have the long version. What
  * reaches here is a pubkey to name the account by, and every operation is a
  * bridge call that returns the answer rather than the means to compute it.
  *

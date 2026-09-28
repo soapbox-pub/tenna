@@ -15,7 +15,9 @@ Any account signed in to Tenna. Where its key actually lives decides how the
 answer is got, not whether there is one:
 
 - **A key Tenna holds.** Given to Tenna directly, it is sealed in the app
-  process on the first launch after signing in, and signing happens there.
+  process on the first launch after signing in, and signing happens there. On
+  iOS too: the key goes to the Keychain, readable by the app alone, and is
+  signed with in Swift rather than in the web layer that runs beside the sites.
 - **A signer app on the phone.** Tenna is a NIP-55 client as well as a NIP-55
   signer, so it asks that app the same way anything else would. Two sheets
   appear rather than one, and that is deliberate: only Tenna's knows which app

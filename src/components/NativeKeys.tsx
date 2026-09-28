@@ -7,7 +7,8 @@ import { TennaSigner, supportsNativeSigner } from '@/lib/tennaSignerPlugin';
 /**
  * Keeps the keys the app process holds in step with the accounts signed in.
  *
- * Renders nothing, and does nothing at all off Android. Two jobs:
+ * Renders nothing, and does nothing at all outside the Android and iOS apps.
+ * Two jobs:
  *
  * **Moving keys out of here.** An `nsec` login is the key itself, sitting in
  * this process — in web storage, and in the renderer's heap every time it is

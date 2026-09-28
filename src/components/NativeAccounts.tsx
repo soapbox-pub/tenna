@@ -7,7 +7,9 @@ import { supportsNativeSigner, TennaSigner } from '@/lib/tennaSignerPlugin';
 /**
  * Tells the app process who is signed in, and keeps telling it.
  *
- * Renders nothing, and does nothing at all off Android.
+ * Renders nothing, and does nothing at all outside the Android and iOS
+ * apps. On iOS the mirror is accepted and let go: nothing there runs
+ * without a WebView to read it.
  *
  * The login list lives here, in the web layer, which is the right place for it
  * — except that the three paths another application can reach Tenna through

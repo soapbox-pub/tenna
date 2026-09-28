@@ -39,8 +39,8 @@ export function useLoginActions() {
     },
     // Login with a secret key kept in the app process, not in this one.
     //
-    // The nsec goes across the bridge to be sealed under the Android Keystore
-    // and is not stored here at all — the login holds a pubkey and nothing
+    // The nsec goes across the bridge to be sealed under the Android Keystore,
+    // or put in the iOS Keychain, and is not stored here at all — the login holds a pubkey and nothing
     // else. Only available where `supportsNativeSigner()` says so; callers
     // fall back to `nsec` where it doesn't. See `nativeKeySigner.ts`.
     async nativeKey(nsec: string): Promise<void> {

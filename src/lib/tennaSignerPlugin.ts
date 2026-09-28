@@ -17,8 +17,8 @@ export interface TennaSignerPlugin {
   /**
    * Whether this device can hold a key natively.
    *
-   * False when libsecp256k1 didn't load, which means an ABI the APK wasn't
-   * built for. Callers fall back to a key in this process rather than
+   * False on Android when libsecp256k1 didn't load, which means an ABI the
+   * APK wasn't built for. Always true on iOS, where it is compiled in. Callers fall back to a key in this process rather than
    * refusing to sign anybody in.
    */
   isAvailable(): Promise<{ available: boolean }>;
@@ -71,9 +71,10 @@ export interface TennaSignerPlugin {
 
 export const TennaSigner = registerPlugin<TennaSignerPlugin>('TennaSigner');
 
-/** Whether the plugin is registered at all. Android, in the app. */
+/** Whether the plugin is registered at all. The Android and iOS apps. */
 function isPresent(): boolean {
-  return Capacitor.getPlatform() === 'android' && Capacitor.isPluginAvailable('TennaSigner');
+  const platform = Capacitor.getPlatform();
+  return (platform === 'android' || platform === 'ios') && Capacitor.isPluginAvailable('TennaSigner');
 }
 
 /**

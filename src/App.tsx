@@ -78,7 +78,7 @@ export function App() {
             localStorage on the web, where there is nowhere better to put it,
             and migrates a key it finds there on the first native read.
 
-            On Android there is no key here to store: an `x-native-key` login
+            In the apps there is no key here to store: an `x-native-key` login
             is a pubkey, and the key itself is in the app process. This still
             matters for the rest of it — the login list is who the user is,
             and a bunker login's client key is a real secret.

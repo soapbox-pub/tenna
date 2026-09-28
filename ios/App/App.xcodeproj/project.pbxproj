@@ -7,6 +7,11 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		5EC256000000000000000003 /* CSecp256k1 in Frameworks */ = {isa = PBXBuildFile; productRef = 5EC256000000000000000002 /* CSecp256k1 */; };
+		64B492D857E30B1B071C0290 /* TennaSignerPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = F08797FE756CD493F3BE1AD1 /* TennaSignerPlugin.swift */; };
+		2AB91A724E58EBDE5B1B641F /* TennaKeys.swift in Sources */ = {isa = PBXBuildFile; fileRef = 71657B6834AED007E461E3E9 /* TennaKeys.swift */; };
+		49303D94CDA1485D33B05342 /* NostrCipher.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB6507BC26D2E54B012BD29D /* NostrCipher.swift */; };
+		B392822370A5A6D03E699652 /* NostrCrypto.swift in Sources */ = {isa = PBXBuildFile; fileRef = F327FE403E3B93E19C7D52FC /* NostrCrypto.swift */; };
 		2FAD9763203C412B000D30F8 /* config.xml in Resources */ = {isa = PBXBuildFile; fileRef = 2FAD9762203C412B000D30F8 /* config.xml */; };
 		4D22ABE92AF431CB00220026 /* CapApp-SPM in Frameworks */ = {isa = PBXBuildFile; productRef = 4D22ABE82AF431CB00220026 /* CapApp-SPM */; };
 		50379B232058CBB4000EE86E /* capacitor.config.json in Resources */ = {isa = PBXBuildFile; fileRef = 50379B222058CBB4000EE86E /* capacitor.config.json */; };
@@ -64,6 +69,10 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		F08797FE756CD493F3BE1AD1 /* TennaSignerPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TennaSignerPlugin.swift; sourceTree = "<group>"; };
+		71657B6834AED007E461E3E9 /* TennaKeys.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TennaKeys.swift; sourceTree = "<group>"; };
+		EB6507BC26D2E54B012BD29D /* NostrCipher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NostrCipher.swift; sourceTree = "<group>"; };
+		F327FE403E3B93E19C7D52FC /* NostrCrypto.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NostrCrypto.swift; sourceTree = "<group>"; };
 		2FAD9762203C412B000D30F8 /* config.xml */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = config.xml; sourceTree = "<group>"; };
 		50379B222058CBB4000EE86E /* capacitor.config.json */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.json; path = capacitor.config.json; sourceTree = "<group>"; };
 		504EC3041FED79650016851F /* App.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = App.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -114,6 +123,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				4D22ABE92AF431CB00220026 /* CapApp-SPM in Frameworks */,
+				5EC256000000000000000003 /* CSecp256k1 in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -180,6 +190,10 @@
 		504EC3061FED79650016851F /* App */ = {
 			isa = PBXGroup;
 			children = (
+				F08797FE756CD493F3BE1AD1 /* TennaSignerPlugin.swift */,
+				71657B6834AED007E461E3E9 /* TennaKeys.swift */,
+				EB6507BC26D2E54B012BD29D /* NostrCipher.swift */,
+				F327FE403E3B93E19C7D52FC /* NostrCrypto.swift */,
 				9582B6822FE993A50072D4E8 /* SceneDelegate.swift */,
 				50379B222058CBB4000EE86E /* capacitor.config.json */,
 				504EC3071FED79650016851F /* AppDelegate.swift */,
@@ -233,6 +247,7 @@
 			name = App;
 			packageProductDependencies = (
 				4D22ABE82AF431CB00220026 /* CapApp-SPM */,
+				5EC256000000000000000002 /* CSecp256k1 */,
 			);
 			productName = App;
 			productReference = 504EC3041FED79650016851F /* App.app */;
@@ -304,6 +319,7 @@
 			mainGroup = 504EC2FB1FED79650016851F;
 			packageReferences = (
 				D4C12C0A2AAA248700AAC8A2 /* XCLocalSwiftPackageReference "CapApp-SPM" */,
+				5EC256000000000000000001 /* XCLocalSwiftPackageReference "Secp256k1" */,
 			);
 			productRefGroup = 504EC3051FED79650016851F /* Products */;
 			projectDirPath = "";
@@ -351,6 +367,10 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				64B492D857E30B1B071C0290 /* TennaSignerPlugin.swift in Sources */,
+				2AB91A724E58EBDE5B1B641F /* TennaKeys.swift in Sources */,
+				49303D94CDA1485D33B05342 /* NostrCipher.swift in Sources */,
+				B392822370A5A6D03E699652 /* NostrCrypto.swift in Sources */,
 				504EC3081FED79650016851F /* AppDelegate.swift in Sources */,
 				4D0AAC9DA39D65F84B5AD870 /* TennaBridgeViewController.swift in Sources */,
 				C4E64CFCB3DD051776028A28 /* NsiteWebViewPlugin.swift in Sources */,
@@ -666,6 +686,10 @@
 			isa = XCLocalSwiftPackageReference;
 			relativePath = "CapApp-SPM";
 		};
+		5EC256000000000000000001 /* XCLocalSwiftPackageReference "Secp256k1" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Secp256k1;
+		};
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -673,6 +697,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = D4C12C0A2AAA248700AAC8A2 /* XCLocalSwiftPackageReference "CapApp-SPM" */;
 			productName = "CapApp-SPM";
+		};
+		5EC256000000000000000002 /* CSecp256k1 */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 5EC256000000000000000001 /* XCLocalSwiftPackageReference "Secp256k1" */;
+			productName = CSecp256k1;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

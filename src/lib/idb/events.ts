@@ -480,12 +480,23 @@ export const soon: (fn: () => void) => void = (() => {
  * it.
  */
 export function beforeNextTask(fn: () => void): void {
-  let ran = false;
-  const once = () => {
-    if (ran) return;
-    ran = true;
-    fn();
-  };
-  setTimeout(once, 0);
-  queueTask(once);
+  // Everything asked for before the next task shares one timer and one
+  // message: a transaction made in each of a run of events would otherwise
+  // post a message apiece, and in WebKit a message is tens of microseconds.
+  waiting.push(fn);
+  if (armed) return;
+  armed = true;
+  setTimeout(runWaiting, 0);
+  queueTask(runWaiting);
+}
+
+let armed = false;
+let waiting: (() => void)[] = [];
+
+function runWaiting(): void {
+  if (!armed) return;
+  armed = false;
+  const run = waiting;
+  waiting = [];
+  for (let i = 0; i < run.length; i++) run[i]();
 }

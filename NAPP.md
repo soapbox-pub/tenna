@@ -998,9 +998,15 @@ test that needs the suite's own server and the Proxy below. Keep in mind:
   power, at the cost of a sync. `'default'` and `'relaxed'` do not wait.
 - **A `SharedWorker` has WebKit's IndexedDB**, not the site's.
 - **Transactions are best few and full.** Each one costs a round trip to the
-  store, about 0.7 ms on an iPhone 15 against WebKit's 0.08, while requests
+  store, about 0.16 ms on an iPhone 15 against WebKit's 0.08, while requests
   inside one stream: ten thousand puts in a transaction take 105 ms here and
   229 in Safari.
+- **A transaction its page stops talking to does not hold on.** A readonly
+  one idle for two seconds gives back its connection, and is begun again
+  where it began if its page carries on — unless its database was upgraded
+  or deleted meanwhile, which aborts it. A readwrite one idle for thirty
+  seconds is aborted: its page is gone, or frozen, and its database's one
+  writer is wanted elsewhere, the notification extension included.
 
 Removing a site from the wall forgets its IndexedDB, with its cookies,
 local storage, subscriptions and notifications, as it does on Android.

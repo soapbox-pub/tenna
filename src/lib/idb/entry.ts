@@ -27,9 +27,14 @@
  * CryptoKeys are kept through a vault (`cryptoKeys.ts`): a page's realm starts
  * one with the sealing key left for it in `self.__tennaIDBVaultKey`, and a
  * worker is handed a port to its starter's with the port to the store.
+ *
+ * And, riding along because this is the script that runs first in every one
+ * of a site's realms, the Cache API is taught the site's own URLs
+ * (`caches.ts`).
  */
 
 import { INTERNAL } from './keyRange';
+import { installCaches } from './caches';
 import { bindVault, expectVault, vaultPort, wrapSubtle } from './cryptoKeys';
 import { connect, disconnect, IDBFactory, INTERFACES, DOMStringList } from './engine';
 import type { Transport } from './protocol';
@@ -298,3 +303,4 @@ function install(scope: typeof globalThis & Scope, transport: Transport): void {
 const scope = globalThis as typeof globalThis & Scope;
 const transport = transportFor(scope);
 if (transport) install(scope, transport);
+installCaches(scope);

@@ -1016,6 +1016,19 @@ test that needs the suite's own server and the Proxy below. Keep in mind:
 Removing a site from the wall forgets its IndexedDB, with its cookies,
 local storage, subscriptions and notifications, as it does on Android.
 
+### The Cache API
+
+WebKit's, and it keeps a site's own URLs: `cache.put('/app.js', response)`,
+`cache.add`, `addAll` and the rest take and give back `nsite://` URLs as they
+would the site's `https://` ones in a browser. WebKit refuses to key anything
+but http and https, so Tenna keeps a site's own URL under a stand-in of the
+same host and turns it back on the way out; everybody else's URL is left alone.
+
+Unlike IndexedDB it is **not shared with the notification extension**. The
+page and its workers see one cache; the service worker a push wakes has an
+empty one of its own that lasts as long as that push. Keep what a push handler
+needs in IndexedDB.
+
 ### What is smaller here
 
 | | Android | iOS |
@@ -1029,6 +1042,7 @@ local storage, subscriptions and notifications, as it does on Android.
 | the row | a conversation, led by the site's icon | a thread; each notification led by its `icon`, or the site's icon, with Tenna's badged into its corner |
 | `self.napp.fetch` | in the worker | absent |
 | IndexedDB | Chromium's, the site's profile, shared by page and worker | Tenna's, shared by the page, its workers and the extension's worker — see [IndexedDB](#indexeddb) |
+| Cache API | shared by page and worker | shared by the page and its workers, not the extension's worker — see [The Cache API](#the-cache-api) |
 | `napp.fetch`, `share_target` | yes | no |
 
 Two of those are worth writing for rather than around:

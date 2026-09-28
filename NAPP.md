@@ -944,7 +944,9 @@ happens in a browser too.
 It runs at the path it was registered at, so `importScripts`, `import` and
 `self.location` resolve as they would in a browser, and as what it was
 registered as: `register('/sw.js', { type: 'module' })` starts it as a module,
-with its static imports, `import.meta` and top-level `await`.
+with its static imports, `import.meta` and top-level `await`. Its `fetch` of
+its own site's files is answered out of the manifest, as the page's is, and a
+file the site never published is a 404 rather than a network error.
 
 What the stand-in registration is honest about: `showNotification` and
 `getNotifications` are real and reach the same tray as everything else, and

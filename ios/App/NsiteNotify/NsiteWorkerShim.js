@@ -8,10 +8,12 @@
  * `registration`, `clients` and the whole event vocabulary have to be built.
  * See `NsiteOrigins.swift` for why there is no real one to have.
  *
- * Everything the worker wants from outside goes to the host page by
+ * Everything the worker wants from Tenna goes to the host page by
  * `postMessage`, which relays it to the extension. Android's shim reaches the
- * host with same-origin `fetch` instead, which is not open here: a worker's
- * fetches belong to no WebView, so no `WKURLSchemeHandler` ever sees them.
+ * host with same-origin `fetch` instead. A dedicated worker's fetches do reach
+ * the host page's `WKURLSchemeHandler` — that is how the site's own files are
+ * served to it — but only as requests for the site's paths, where there is no
+ * room for Tenna's own traffic and nothing comes back but a response.
  *
  * Loaded before the site's script rather than after it — the site reads
  * `self.registration` at the top of its own file — which is why the two are

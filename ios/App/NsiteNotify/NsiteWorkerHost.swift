@@ -302,7 +302,11 @@ final class NsiteWorkerHost: NSObject, WKScriptMessageHandler, WKNavigationDeleg
 
                     guard let (body, contentType) = answer else {
                         NSLog("[NsiteWorkerHost] 404 %@ (shimmed=%@)", path, shimmed ? "yes" : "no")
-                        self.fail(id, URLError(.fileDoesNotExist))
+                        // A response, as the site's own window gets: a worker
+                        // checking `response.ok` for a file it may not have
+                        // published should not have to catch a network error.
+                        self.finish(id, url: url, status: 404,
+                                    body: Data("Not Found".utf8), contentType: "text/plain; charset=utf-8")
                         return
                     }
                     NSLog("[NsiteWorkerHost] served %@ (%d bytes, shimmed=%@)",
@@ -333,12 +337,12 @@ final class NsiteWorkerHost: NSObject, WKScriptMessageHandler, WKNavigationDeleg
             task.didFailWithError(error)
         }
 
-        private func finish(_ id: UInt64, url: URL, body: Data, contentType: String) {
+        private func finish(_ id: UInt64, url: URL, status: Int = 200, body: Data, contentType: String) {
             guard let task = live[id] else { return }
             live.removeValue(forKey: id)
 
             guard let response = HTTPURLResponse(
-                url: url, statusCode: 200, httpVersion: "HTTP/1.1",
+                url: url, statusCode: status, httpVersion: "HTTP/1.1",
                 headerFields: [
                     "Content-Type": contentType,
                     "Content-Length": String(body.count),

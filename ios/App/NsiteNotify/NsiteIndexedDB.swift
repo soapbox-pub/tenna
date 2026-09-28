@@ -848,6 +848,11 @@ extension NsiteIndexedDB {
     static let script: String? = Bundle.main.url(forResource: "NsiteIndexedDB", withExtension: "js")
         .flatMap { try? String(contentsOf: $0, encoding: .utf8) }
 
+    /// The vault, which keeps a site's CryptoKeys: `src/lib/idb/vault.ts`,
+    /// served at `/.tenna/vault.js` in both.
+    static let vaultScript: String? = Bundle.main.url(forResource: "NsiteVault", withExtension: "js")
+        .flatMap { try? String(contentsOf: $0, encoding: .utf8) }
+
     /// A message body as its code units, never by way of a Swift `String`,
     /// which would repair a lone surrogate the site meant.
     static func units(of body: Any) -> [UInt16]? {

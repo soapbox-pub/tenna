@@ -41,6 +41,7 @@ yarn.lock
 
 # Tenna's IndexedDB for sites, bundled from src/lib/idb by `npm run idb`.
 /ios/App/NsiteNotify/NsiteIndexedDB.js
+/ios/App/NsiteNotify/NsiteVault.js
 
 # Secrets
 .env

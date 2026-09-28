@@ -21,7 +21,7 @@
 
 import { canInjectKey, convertKeyPath, extractKey, injectKey, isValidKeyPath, type KeyPath } from './keyPath';
 import { arrayMembers, keyToValue, toKey } from './keys';
-import { complete, completeNow, deserialize, deserializePending, serialize, type Serialized } from './clone';
+import { complete, completeNow, deserialize, deserializePending, hasKeys, prepare, serialize, type Prepared, type Serialized } from './clone';
 import { beforeNextTask, dispatch, defineHandlers, hasListeners, IDBVersionChangeEvent, makeEvent, noteActivity, onCheckpoint, queueTask, registerTarget, soon } from './events';
 import { INTERNAL, IDBKeyRange, isPotentiallyValidKeyRange, keyWireRange, toRange } from './keyRange';
 import { DOMStringList, nameList, webidl } from './domStringList';
@@ -550,18 +550,25 @@ class TxnState {
           this.abort(domError(results[0][1], results[0][2]));
           return;
         }
-        for (let i = 0; i < batch.length; i++) {
-          const entry = batch[i];
-          entry.answered = true;
-          entry.answer = results[i + 1];
-          if (!entry.request && entry.then && !this.inTurn(entry)) {
-            // Bookkeeping that later ops wait on acts as soon as it lands.
-            const then = entry.then;
-            entry.then = undefined;
-            then(entry.answer);
+        const land = () => {
+          for (let i = 0; i < batch.length; i++) {
+            const entry = batch[i];
+            entry.answered = true;
+            entry.answer = results[i + 1];
+            if (!entry.request && entry.then && !this.inTurn(entry)) {
+              // Bookkeeping that later ops wait on acts as soon as it lands.
+              const then = entry.then;
+              entry.then = undefined;
+              then(entry.answer);
+            }
           }
-        }
-        this.queueTask();
+          this.queueTask();
+        };
+        // Stored keys are opened before anything reads the values they are
+        // in, since reading is synchronous and opening is not.
+        const opening = openKeys(results, 1);
+        if (opening) void opening.then(land);
+        else land();
       },
       (error) => {
         this.abort(domError('UnknownError', `The database could not be reached: ${String(error)}`));
@@ -1154,12 +1161,39 @@ const GENERATED_KEY = toKey(GENERATED)!;
 const INJECT = 'K';
 
 /** A stored value as the site gets it back: its generated key written in. */
-function readValue(meta: StoreMeta, stored: string, primaryKey: string): unknown {
-  if (stored[0] !== INJECT) return deserialize(stored);
-  const value = deserialize(stored.slice(1));
+function readValue(meta: StoreMeta, stored: string | Prepared, primaryKey: string): unknown {
+  const text = typeof stored === 'string' ? stored : stored.text;
+  if (text[0] !== INJECT) return deserialize(stored);
+  const value = deserialize(stored, 1);
   injectKey(value, meta.keyPath as string, keyToValue(primaryKey));
   return value;
 }
+
+/**
+ * Replace every stored value in an answer that holds keys with its prepared
+ * form, the keys opened. Null when there are none, which is nearly always.
+ * Values are the only strings in an answer that can start with the key
+ * table's `z`: keys start with a type below a space, and errors are skipped.
+ */
+function openKeys(list: Wire[], from = 0): Promise<unknown> | null {
+  let waits: Promise<unknown>[] | null = null;
+  for (let i = from; i < list.length; i++) {
+    const item = list[i];
+    if (typeof item === 'string') {
+      const start = item.charCodeAt(0) === INJECT_CODE ? 1 : 0;
+      if (!hasKeys(item, start)) continue;
+      (waits ??= []).push(prepare(item, start).then((prepared) => {
+        list[i] = prepared as unknown as Wire;
+      }));
+    } else if (Array.isArray(item) && !isWireError(item)) {
+      const inner = openKeys(item);
+      if (inner) (waits ??= []).push(inner);
+    }
+  }
+  return waits ? Promise.all(waits) : null;
+}
+
+const INJECT_CODE = INJECT.charCodeAt(0);
 
 /** Whether a store's values may need their key written in on the way out. */
 function injects(meta: StoreMeta): boolean {

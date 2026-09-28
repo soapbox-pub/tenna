@@ -110,6 +110,15 @@ final class NsiteWorkerHost: NSObject, WKScriptMessageHandler, WKNavigationDeleg
         config.userContentController.add(self, name: "tenna")
         config.userContentController.addScriptMessageHandler(
             IndexedDBRelay(siteId: siteId, channel: indexedDB), contentWorld: .page, name: "tennaIDB")
+        // The site's sealing key, for the host page to hand the worker's
+        // vault. The page is Tenna's and none of the site's code runs in it.
+        if let key = NsiteCryptoKeys.sealingKey(for: siteId) {
+            config.userContentController.addUserScript(WKUserScript(
+                source: "window.__tennaVaultKey = \(Self.jsString(key));",
+                injectionTime: .atDocumentStart,
+                forMainFrameOnly: true
+            ))
+        }
         // Nothing WebKit keeps here will ever be looked at, and a store on
         // disk is a store to clean up. What the worker keeps, it keeps in
         // IndexedDB, which is Tenna's store and not this one.
@@ -340,11 +349,18 @@ final class NsiteWorkerHost: NSObject, WKScriptMessageHandler, WKNavigationDeleg
     /// Where the worker loads the IndexedDB engine from.
     static let indexedDBPath = "/.tenna/idb.js"
 
+    /// Where the host page starts the site's vault from. See `NsiteCryptoKeys`.
+    static let vaultPath = "/.tenna/vault.js"
+
     /// The host page, the shim and the engine are Tenna's; everything else is
     /// the site's.
     fileprivate func answer(path: String, shimmed: Bool) async -> (Data, String)? {
         if path == Self.indexedDBPath {
             guard let script = NsiteIndexedDB.script else { return nil }
+            return (Data(script.utf8), "text/javascript; charset=utf-8")
+        }
+        if path == Self.vaultPath {
+            guard let script = NsiteIndexedDB.vaultScript else { return nil }
             return (Data(script.utf8), "text/javascript; charset=utf-8")
         }
         if path == Self.hostPath {

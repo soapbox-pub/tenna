@@ -331,9 +331,14 @@ final class NsiteSession: NSObject, WKNavigationDelegate, WKUIDelegate {
     private static let indexedDBObject = "tennaIDB"
 
     /// The engine, for frames whose origin is this site's and no other.
+    ///
+    /// With it, the site's sealing key for the engine to hand its vault
+    /// (`NsiteCryptoKeys`). A user script's source is not the page's to read,
+    /// and the engine takes the key before any of the site's code runs.
     private static func indexedDBScript(siteId: String) -> String? {
         guard let script = NsiteIndexedDB.script, let origin = NsiteOrigins.originFor(siteId) else { return nil }
-        return "if (self.origin === \(jsString(origin))) {\n\(script)\n}"
+        let key = NsiteCryptoKeys.sealingKey(for: siteId).map { "self.__tennaIDBVaultKey = \(jsString($0));\n" } ?? ""
+        return "if (self.origin === \(jsString(origin))) {\n\(key)\(script)\n}"
     }
 
     /// Carries the engine's messages to the store, answering each in turn.

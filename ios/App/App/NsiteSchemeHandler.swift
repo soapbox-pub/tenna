@@ -121,6 +121,12 @@ final class NsiteSchemeHandler: NSObject, WKURLSchemeHandler {
             guard let script = NsiteIndexedDB.script else { return nil }
             return javascript(script)
         }
+        // Not a secret: the vault is nothing without the key its starter
+        // gives it, and that is never served.
+        if url.path == "/.tenna/vault.js" {
+            guard let script = NsiteIndexedDB.vaultScript else { return nil }
+            return javascript(script)
+        }
         guard var parts = URLComponents(url: url, resolvingAgainstBaseURL: false),
               let kind = parts.queryItems?.first(where: { $0.name == workerMarker })?.value else { return nil }
         parts.queryItems = parts.queryItems?.filter { $0.name != workerMarker }

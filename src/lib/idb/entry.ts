@@ -23,14 +23,24 @@
  *
  * A realm with a transport starts its workers with the engine loaded ahead of
  * them — see `wrapWorkers`.
+ *
+ * CryptoKeys are kept through a vault (`cryptoKeys.ts`): a page's realm starts
+ * one with the sealing key left for it in `self.__tennaIDBVaultKey`, and a
+ * worker is handed a port to its starter's with the port to the store.
  */
 
 import { INTERNAL } from './keyRange';
+import { bindVault, expectVault, vaultPort, wrapSubtle } from './cryptoKeys';
 import { connect, disconnect, IDBFactory, INTERFACES, DOMStringList } from './engine';
 import type { Transport } from './protocol';
 
 interface Scope {
   __tennaIDBTransport?: Transport;
+  /** The site's sealing key, base64: see `NsiteCryptoKeys.swift`. */
+  __tennaIDBVaultKey?: string;
+  /** A vault to use as it is: tests. */
+  __tennaIDBVault?: MessagePort;
+  SubtleCrypto?: { prototype: object };
   importScripts?: unknown;
   Worker?: typeof Worker;
   origin?: string;
@@ -54,6 +64,31 @@ function transportFor(scope: Scope): Transport | undefined {
   return undefined;
 }
 
+/**
+ * Start this realm's vault, if it was given what to start one with. The key is
+ * taken and deleted before any of the site's code can look, and goes straight
+ * to the vault, a worker the site never gets hold of.
+ */
+function startVault(scope: typeof globalThis & Scope, NativeWorker: typeof Worker | undefined): void {
+  const given = scope.__tennaIDBVault;
+  if (given) {
+    delete scope.__tennaIDBVault;
+    bindVault(given);
+    return;
+  }
+  const key = scope.__tennaIDBVaultKey;
+  if (typeof key !== 'string') return;
+  delete scope.__tennaIDBVaultKey;
+  if (typeof NativeWorker !== 'function' || !scope.origin) return;
+  const raw = atob(key);
+  const bytes = new Uint8Array(raw.length);
+  for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
+  const channel = new MessageChannel();
+  const worker = new NativeWorker(`${scope.origin}/.tenna/vault.js`);
+  worker.postMessage({ key: bytes, port: channel.port2 }, [bytes.buffer, channel.port2]);
+  bindVault(channel.port1, worker);
+}
+
 /** A relayed message, and its answer. */
 interface Relayed {
   id: number;
@@ -71,6 +106,7 @@ const PORT_MARKER = '__tennaIDBPort';
  */
 function portTransport(scope: typeof globalThis & Scope): Transport {
   let port: MessagePort | null = null;
+  const vaultCame = expectVault();
   const queue: Relayed[] = [];
   const pending = new Map<number, [(text: string) => void, (error: Error) => void]>();
   let next = 1;
@@ -79,6 +115,7 @@ function portTransport(scope: typeof globalThis & Scope): Transport {
     if (!message || typeof message !== 'object' || message[PORT_MARKER] !== true) return;
     event.stopImmediatePropagation();
     port = (event as MessageEvent).ports[0];
+    vaultCame((event as MessageEvent).ports[1] ?? null);
     port.onmessage = (reply) => {
       const answer = reply.data as Relayed;
       const waiter = pending.get(answer.id);
@@ -141,7 +178,8 @@ import ${JSON.stringify(target.href)};
         (error: unknown) => channel.port1.postMessage({ id: message.id, error: String((error as Error)?.message ?? error) }),
       );
     };
-    worker.postMessage({ [PORT_MARKER]: true }, [channel.port2]);
+    const vault = vaultPort();
+    worker.postMessage({ [PORT_MARKER]: true }, vault ? [channel.port2, vault] : [channel.port2]);
     return worker;
   };
   Worker.prototype = Native.prototype;
@@ -152,6 +190,10 @@ import ${JSON.stringify(target.href)};
 
 function install(scope: typeof globalThis & Scope, transport: Transport): void {
   connect(transport);
+  // The platform's Worker, before `wrapWorkers` replaces it: the vault is not
+  // a worker of the site's.
+  startVault(scope, scope.Worker);
+  wrapSubtle(scope);
   const factory = new IDBFactory(INTERNAL);
   const get = function (this: unknown) {
     if (this !== undefined && this !== null && this !== scope) throw new TypeError('Illegal invocation');

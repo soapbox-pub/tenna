@@ -978,9 +978,15 @@ It is the standard API and a site uses it unchanged: it passes the
 web-platform-tests IndexedDB suite, run inside Tenna on an iPhone, all but one
 test that needs the suite's own server and the Proxy below. Keep in mind:
 
-- **A `CryptoKey` cannot be stored.** A key WebKit lets a site keep
-  unextractable has no bytes a script can reach, and script is what writes a
-  value down here. Store the key's JWK, or derive it again.
+- **A `CryptoKey` is stored as WebKit stores one**, non-extractable keys
+  included, and comes back still non-extractable. Tenna makes every key a
+  site asks for in a worker of its own, which no site code runs in, keeps a
+  copy sealed with AES-GCM under a key held in the Keychain on this device,
+  and stores only that copy; the page never holds the key's material. A copy
+  that has been altered does not open, and neither does one moved to another
+  site. The one key it cannot store is a non-extractable one made in another
+  page or worker and passed in by `postMessage`, which it never saw made:
+  store keys in the realm that made them.
 - **A Proxy of an Array is accepted as a key.** Browsers refuse one; script
   cannot tell it from the array it proxies.
 - **An upgrade in another process does not wait.** The extension's worker

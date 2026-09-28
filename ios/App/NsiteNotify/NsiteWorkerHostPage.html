@@ -39,6 +39,8 @@
   // its own, its first message, relayed to the handler that answers each.
   // See `src/lib/idb/entry.ts`.
   var idb = window.webkit.messageHandlers.tennaIDB;
+  var vaultKey = window.__tennaVaultKey;
+  delete window.__tennaVaultKey;
   if (idb) {
     var channel = new MessageChannel();
     channel.port1.onmessage = function(event) {
@@ -49,7 +51,22 @@
         channel.port1.postMessage({ id: message.id, error: String((err && err.message) || err) });
       });
     };
-    worker.postMessage({ __tennaIDBPort: true }, [channel.port2]);
+    var ports = [channel.port2];
+    // The worker's vault, which keeps its CryptoKeys: started here with the
+    // site's sealing key, and reached by the worker through a port of its
+    // own. See `src/lib/idb/vault.ts`.
+    if (vaultKey) {
+      var raw = atob(vaultKey);
+      var bytes = new Uint8Array(raw.length);
+      for (var i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
+      var vaultChannel = new MessageChannel();
+      var vault = new Worker('/.tenna/vault.js');
+      vault.postMessage({ key: bytes, port: vaultChannel.port2 }, [bytes.buffer, vaultChannel.port2]);
+      ports.push(vaultChannel.port1);
+      // Held by something that lives as long as the page, so the vault does.
+      channel.port1.vault = vault;
+    }
+    worker.postMessage({ __tennaIDBPort: true }, ports);
   }
 
   worker.onmessage = function(event) {

@@ -36,20 +36,38 @@
  * | `U` + 4 `P` | DOMQuad |
  * | `O<s><s>` | DOMException: name, message |
  * | `H<count>;<value>*` | FileList, its Files |
+ * | `Z<index>;` | CryptoKey, from the key table |
  * | `r<id>;` | an object already written, by the order it was first seen |
  *
  * A stored value is `<count>;`, then that many blobs as `<s type><bytes>;
  * <units>`, then the value. Blob bytes can only be read asynchronously, so a
  * value is first serialized with its blobs by reference — synchronously, as
  * `put()` must — and completed once their bytes arrive.
+ *
+ * A value holding CryptoKeys starts with a key table before all that:
+ * `z<count>;`, then each key's sealed copy as `<bytes>;<units>`. A key is only
+ * ever stored sealed, and read back by having the vault open it — before the
+ * value is deserialized, which is synchronous. See `cryptoKeys.ts`.
  */
 
+import { open, seal, storable } from './cryptoKeys';
 import { isArrayBuffer, isDate, isSharedArrayBuffer, unitsToString } from './keys';
 
-/** A value serialized, its blobs still by reference. */
+/** A value serialized, its blobs and keys still by reference. */
 export interface Serialized {
   text: string;
   blobs: Blob[];
+  keys: CryptoKey[];
+}
+
+/**
+ * A stored value whose keys the vault has opened: the value as stored, and a
+ * key for each entry of its table — or why they could not be had.
+ */
+export interface Prepared {
+  text: string;
+  keys: CryptoKey[];
+  error?: DOMException;
 }
 
 interface Realm {
@@ -66,6 +84,7 @@ interface Realm {
   DOMQuad?: typeof DOMQuad;
   FileList?: typeof FileList;
   DataTransfer?: typeof DataTransfer;
+  CryptoKey?: typeof CryptoKey;
 }
 
 let realm: Realm = globalThis as unknown as Realm;
@@ -80,6 +99,7 @@ let matrixIs2D: ((this: never) => unknown) | undefined;
 let quadP1: ((this: never) => unknown) | undefined;
 let exceptionCode: ((this: never) => unknown) | undefined;
 let fileListLength: ((this: never) => unknown) | undefined;
+let keyExtractable: ((this: never) => unknown) | undefined;
 
 function getter<T>(ctor: { prototype: object } | undefined, name: string): T | undefined {
   if (!ctor) return undefined;
@@ -98,6 +118,7 @@ export function bindCloneRealm(target: Realm): void {
   matrixIs2D = getter(target.DOMMatrixReadOnly, 'is2D');
   quadP1 = getter(target.DOMQuad, 'p1');
   exceptionCode = getter(target.DOMException, 'code');
+  keyExtractable = getter(target.CryptoKey, 'extractable');
   fileListLength = getter(target.FileList, 'length');
 }
 
@@ -243,6 +264,7 @@ function num(n: number): string {
 export function serialize(value: unknown): Serialized {
   const memory = new Map<object, number>();
   const blobs: Blob[] = [];
+  const keys: CryptoKey[] = [];
   let out = '';
 
   const write = (v: unknown): void => {
@@ -352,6 +374,15 @@ export function serialize(value: unknown): Serialized {
       out += message && 'value' in message ? 'm' + str(String(message.value)) : 'x';
       return;
     }
+    if (brand(keyExtractable, object)) {
+      const extractable = Reflect.apply(keyExtractable!, object, []) as boolean;
+      if (!storable(object as CryptoKey, extractable)) {
+        throw dataCloneError('A non-extractable CryptoKey made where Tenna could not see it');
+      }
+      out += 'Z' + keys.length + ';';
+      keys.push(object as CryptoKey);
+      return;
+    }
     if (brand(blobSize, object)) {
       const index = blobs.length;
       blobs.push(object as Blob);
@@ -443,7 +474,7 @@ export function serialize(value: unknown): Serialized {
   };
 
   write(value);
-  return { text: out, blobs };
+  return { text: out, blobs, keys };
 }
 
 function isError(object: object, tag: string): boolean {
@@ -452,19 +483,53 @@ function isError(object: object, tag: string): boolean {
   return tag === '[object Error]';
 }
 
-/** A serialized value made whole: its blobs' bytes read and put in front. */
+function keyTable(sealed: ArrayBuffer[]): string {
+  if (!sealed.length) return '';
+  let out = 'z' + sealed.length + ';';
+  for (const copy of sealed) out += copy.byteLength + ';' + bytesToUnits(new Uint8Array(copy));
+  return out;
+}
+
+/**
+ * A serialized value made whole: its keys sealed and its blobs' bytes read,
+ * and both put in front.
+ */
 export async function complete(serialized: Serialized): Promise<string> {
-  if (serialized.blobs.length === 0) return '0;' + serialized.text;
+  const sealed = await Promise.all(serialized.keys.map(seal));
+  if (serialized.blobs.length === 0) return keyTable(sealed) + '0;' + serialized.text;
   const parts = await Promise.all(serialized.blobs.map(async (blob) => {
     const bytes = new Uint8Array(await blob.arrayBuffer());
     return str(blob.type) + bytes.length + ';' + bytesToUnits(bytes);
   }));
-  return serialized.blobs.length + ';' + parts.join('') + serialized.text;
+  return keyTable(sealed) + serialized.blobs.length + ';' + parts.join('') + serialized.text;
 }
 
-/** A serialized value made whole, when it has no blobs to wait for. */
+/** A serialized value made whole, when it has nothing to wait for. */
 export function completeNow(serialized: Serialized): string | undefined {
-  return serialized.blobs.length === 0 ? '0;' + serialized.text : undefined;
+  return serialized.blobs.length === 0 && serialized.keys.length === 0 ? '0;' + serialized.text : undefined;
+}
+
+/** Whether a stored value, as the store gives it back, has keys to open. */
+export function hasKeys(stored: string, from = 0): boolean {
+  return stored.charCodeAt(from) === 0x7a;
+}
+
+/**
+ * Open a stored value's keys, all of them, each a new key. Resolves to the
+ * value ready to deserialize; one whose keys do not open deserializes to the
+ * error that says so.
+ */
+export async function prepare(stored: string, from = 0): Promise<Prepared> {
+  const reader = new Reader(stored, []);
+  reader.at = from + 1;
+  const count = reader.int();
+  const sealed: ArrayBuffer[] = [];
+  for (let i = 0; i < count; i++) sealed.push(reader.bytes(reader.int()).buffer as ArrayBuffer);
+  try {
+    return { text: stored, keys: await Promise.all(sealed.map(open)) };
+  } catch (error) {
+    return { text: stored, keys: [], error: error as DOMException };
+  }
 }
 
 class Reader {
@@ -476,7 +541,7 @@ class Reader {
    * one given: the clone a key path is evaluated against must not carry the
    * original's expando properties.
    */
-  constructor(readonly text: string, readonly blobs: Blob[], readonly fresh = false) {}
+  constructor(readonly text: string, readonly blobs: Blob[], readonly fresh = false, readonly keys: CryptoKey[] = []) {}
 
   blob(index: number): Blob {
     const blob = this.blobs[index];
@@ -647,6 +712,11 @@ class Reader {
         return error;
       }
       case 'b': return this.remember(this.blob(this.int()));
+      case 'Z': {
+        const key = this.keys[this.int()];
+        if (!key) throw new realm.DOMException('A stored key is missing.', 'DataError');
+        return this.remember(key);
+      }
       case 'L': {
         const slot = this.reserve();
         const blob = this.blobs[this.int()];
@@ -759,12 +829,28 @@ function define(object: object, key: string, value: unknown): void {
  * reference — the clone a key path is evaluated against before storing.
  */
 export function deserializePending(serialized: Serialized): unknown {
-  return new Reader(serialized.text, serialized.blobs, true).value();
+  return new Reader(serialized.text, serialized.blobs, true, serialized.keys).value();
 }
 
-/** Deserialize a stored value: the blob table, then the value. */
-export function deserialize(stored: string): unknown {
-  const reader = new Reader(stored, []);
+/**
+ * Deserialize a stored value: the key table, the blob table, then the value.
+ * One with keys must have been through `prepare` first.
+ */
+export function deserialize(stored: string | Prepared, from = 0): unknown {
+  const prepared = typeof stored === 'string' ? null : stored;
+  if (prepared?.error) throw prepared.error;
+  const text = prepared ? prepared.text : (stored as string);
+  const reader = new Reader(text, [], false, prepared?.keys ?? []);
+  reader.at = from;
+  if (hasKeys(text, from)) {
+    if (!prepared) throw new realm.DOMException('A stored key was not opened.', 'DataError');
+    reader.at++;
+    const keys = reader.int();
+    for (let i = 0; i < keys; i++) {
+      const length = reader.int();
+      reader.at += (length + 1) >> 1;
+    }
+  }
   const count = reader.int();
   for (let i = 0; i < count; i++) {
     const type = reader.string();

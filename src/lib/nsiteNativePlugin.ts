@@ -200,6 +200,25 @@ export interface NsiteWebViewPlugin {
    * with no longer has it (`NsiteShortcuts.setWall`).
    */
   forget(options: { siteId: string }): Promise<void>;
+
+  /**
+   * How much a site has stored on the device, in bytes: everything it keeps
+   * for itself, measured on disk. Not its files, which are in a cache shared
+   * by every site and kept by hash.
+   */
+  getStorageUsage(options: { siteId: string }): Promise<{ bytes: number }>;
+
+  /**
+   * Wipe what a site stored for itself — cookies, local storage, IndexedDB,
+   * caches, service workers — and keep the site. Its window is closed first
+   * if it has one open. What Tenna holds about the site, its permissions
+   * included, is left alone.
+   *
+   * On Android the service worker registrations, which WebView has no call
+   * to remove, go at the next start with the rest of the site's profile.
+   * See `NsiteProfiles.clear`.
+   */
+  clearStorage(options: { siteId: string }): Promise<void>;
 }
 
 export const NsiteWebView = registerPlugin<NsiteWebViewPlugin>('NsiteWebView');

@@ -4,6 +4,7 @@ import android.animation.Animator;
 import android.animation.AnimatorListenerAdapter;
 import android.Manifest;
 import android.annotation.SuppressLint;
+import android.app.ActivityManager;
 import android.content.ActivityNotFoundException;
 import android.content.Context;
 import android.content.Intent;
@@ -752,6 +753,61 @@ public class NsiteWebViewPlugin extends Plugin {
 
             call.resolve();
         });
+    }
+
+    /** How much a site has stored, in bytes. See {@link NsiteProfiles#usage}. */
+    @PluginMethod
+    public void getStorageUsage(PluginCall call) {
+        String siteId = call.getString("siteId");
+        if (!NsiteOrigins.isSiteId(siteId)) {
+            call.reject("Not a site id");
+            return;
+        }
+
+        NsiteProfiles.usage(getContext(), siteId, bytes -> {
+            JSObject result = new JSObject();
+            result.put("bytes", bytes == null ? 0 : bytes);
+            call.resolve(result);
+        });
+    }
+
+    /**
+     * Wipe what a site stored for itself. See {@link NsiteProfiles#clear}.
+     *
+     * A window the site has open is closed first, the way the system's Clear
+     * storage stops an app: a page left running would go on holding what it
+     * had read into memory, and write some of it straight back.
+     */
+    @PluginMethod
+    public void clearStorage(PluginCall call) {
+        String siteId = call.getString("siteId");
+        if (!NsiteOrigins.isSiteId(siteId)) {
+            call.reject("Not a site id");
+            return;
+        }
+
+        closeWindow(siteId);
+        getActivity().runOnUiThread(() ->
+            NsiteProfiles.clear(getActivity(), siteId, call::resolve)
+        );
+    }
+
+    /** Close a site's window, if it has one open in a task of its own. */
+    private void closeWindow(@NonNull String siteId) {
+        ActivityManager manager =
+            (ActivityManager) getContext().getSystemService(Context.ACTIVITY_SERVICE);
+        if (manager == null) return;
+
+        try {
+            for (ActivityManager.AppTask task : manager.getAppTasks()) {
+                Intent base = task.getTaskInfo().baseIntent;
+                if (base == null) continue;
+                if (!siteId.equals(base.getStringExtra(NsiteAppActivity.EXTRA_SITE_ID))) continue;
+                task.finishAndRemoveTask();
+            }
+        } catch (RuntimeException e) {
+            Log.w(TAG, "Could not close " + siteId + " before clearing it", e);
+        }
     }
 
     /**

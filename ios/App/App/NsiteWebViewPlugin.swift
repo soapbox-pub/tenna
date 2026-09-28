@@ -43,6 +43,8 @@ public class NsiteWebViewPlugin: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "respondCapability", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "setIcon", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "forget", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "getStorageUsage", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "clearStorage", returnType: CAPPluginReturnPromise),
     ]
 
     /// The site on screen, if there is one. Only ever one at a time.
@@ -299,6 +301,83 @@ public class NsiteWebViewPlugin: CAPPlugin, CAPBridgedPlugin {
                 call.resolve()
             }
         }
+    }
+
+    /**
+     How much a site has stored, in bytes: its IndexedDB and its WebKit data
+     store, measured on disk. The store is WebKit's to lay out, and its
+     directory is found where WebKit puts an identified store — a WebKit that
+     puts it somewhere else is counted as the IndexedDB alone.
+     */
+    @objc func getStorageUsage(_ call: CAPPluginCall) {
+        guard let siteId = call.getString("siteId"), NsiteOrigins.isSiteId(siteId) else {
+            call.reject("Not a site")
+            return
+        }
+        DispatchQueue.main.async {
+            // Lowercase, as WebKit names the directory, on a filesystem that
+            // tells the two apart.
+            let store = NsiteSession.storeIdentifier(for: siteId).uuidString.lowercased()
+            DispatchQueue.global(qos: .utility).async {
+                call.resolve(["bytes": Self.usage(siteId, store: store)])
+            }
+        }
+    }
+
+    /// What `getStorageUsage` measures, off the main thread.
+    private static func usage(_ siteId: String, store: String) -> Int {
+        let manager = FileManager.default
+        var places = [NsiteIndexedDB.location(siteId)]
+        for base in [manager.urls(for: .libraryDirectory, in: .userDomainMask)[0],
+                     manager.urls(for: .cachesDirectory, in: .userDomainMask)[0]] {
+            places.append(base.appendingPathComponent("WebKit/WebsiteDataStore/\(store)", isDirectory: true))
+        }
+        return places.reduce(0) { $0 + size(of: $1) }
+    }
+
+    /**
+     Wipe what a site stored for itself, and keep the site: its IndexedDB, and
+     everything in its WebKit data store — cookies, localStorage, caches. What
+     Tenna holds about it — its record, its permissions, whether it is muted —
+     is left alone. `forget` is the one that takes those.
+
+     A site open on screen is closed first, as it is for `forget`: a page left
+     running would go on holding what it had read, and write it back.
+     */
+    @objc func clearStorage(_ call: CAPPluginCall) {
+        guard let siteId = call.getString("siteId"), NsiteOrigins.isSiteId(siteId) else {
+            call.reject("Not a site")
+            return
+        }
+        DispatchQueue.main.async { [weak self] in
+            if let self, self.site?.siteId == siteId {
+                self.site?.tearDown()
+                self.site = nil
+            }
+            NsiteIndexedDB.forget(siteId)
+            let store = WKWebsiteDataStore(forIdentifier: NsiteSession.storeIdentifier(for: siteId))
+            store.removeData(
+                ofTypes: WKWebsiteDataStore.allWebsiteDataTypes(),
+                modifiedSince: .distantPast
+            ) {
+                call.resolve()
+            }
+        }
+    }
+
+    /// Everything under a directory, in bytes, as allocated on disk.
+    private static func size(of url: URL) -> Int {
+        let keys: [URLResourceKey] = [.totalFileAllocatedSizeKey, .isRegularFileKey]
+        guard let files = FileManager.default.enumerator(
+            at: url, includingPropertiesForKeys: keys, options: [], errorHandler: { _, _ in true }
+        ) else { return 0 }
+        var total = 0
+        for case let file as URL in files {
+            guard let values = try? file.resourceValues(forKeys: Set(keys)),
+                  values.isRegularFile == true else { continue }
+            total += values.totalFileAllocatedSize ?? 0
+        }
+        return total
     }
 
     /// Deliver a JSON-RPC response for a call previously raised as `nsiteRpc`.

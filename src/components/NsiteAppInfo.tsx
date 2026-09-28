@@ -1,12 +1,23 @@
 import { App } from '@capacitor/app';
 import type { PluginListenerHandle } from '@capacitor/core';
 import type { NostrEvent } from '@nostrify/nostrify';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, Check, ExternalLink, SquarePlus, Trash2, X } from 'lucide-react';
 import { nip19 } from 'nostr-tools';
 import { useEffect, useMemo, useRef, useState, type ComponentType } from 'react';
 import { Link } from 'react-router-dom';
 
 import { TileArtwork, TileFrame } from '@/components/Tile';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import {
@@ -40,6 +51,7 @@ import {
   removeNsiteBrowserPermission,
   type NsiteBrowserPermission,
 } from '@/lib/nsiteBrowserPermissions';
+import { NsiteWebView, supportsNativeNsite } from '@/lib/nsiteNativePlugin';
 import { requestNsiteOpen } from '@/lib/nsiteOpenRequest';
 import { getNsiteSubdomain, NSITE_SNAPSHOT_KIND } from '@/lib/nsiteSubdomain';
 import { isNsiteUrl, nsiteUrl } from '@/lib/nsiteUrl';
@@ -190,6 +202,23 @@ function InfoAction({
       </span>
     </button>
   );
+}
+
+/**
+ * A size on disk the way the system's own App info writes one: decimal units,
+ * as storage is sold and as the device's settings count it, with a single
+ * decimal place once there is a unit big enough to need one.
+ */
+function formatBytes(bytes: number): string {
+  const units = ['B', 'kB', 'MB', 'GB'];
+  let value = bytes;
+  let unit = 0;
+  while (value >= 1000 && unit < units.length - 1) {
+    value /= 1000;
+    unit++;
+  }
+  const digits = unit === 0 || value >= 100 ? 0 : 1;
+  return `${value.toFixed(digits)} ${units[unit]}`;
 }
 
 /** How long a finger has to rest on an address before it is taken. */
@@ -418,6 +447,54 @@ export function NsiteAppInfo({
     });
   };
 
+  /**
+   * What the site has stored on the device, and the way to wipe it.
+   *
+   * Only where the site has a WebView of its own: in the iframe the site's
+   * storage belongs to a sandbox domain the page has no reach into, so there
+   * is nothing to measure and nothing this screen could clear.
+   *
+   * Measured each time the screen opens rather than remembered, since the
+   * site may have written a great deal since it was last looked at.
+   */
+  const measurable = supportsNativeNsite();
+  const queryClient = useQueryClient();
+  const usageKey = ['nsite-storage-usage', siteId];
+
+  const usage = useQuery({
+    queryKey: usageKey,
+    queryFn: async () => (await NsiteWebView.getStorageUsage({ siteId })).bytes,
+    enabled: open && measurable,
+    staleTime: 0,
+    gcTime: 0,
+  });
+
+  const [confirmingClear, setConfirmingClear] = useState(false);
+
+  // The site's subscriptions and background syncs go too: they were set up
+  // by the worker and the state being wiped, and a site starting fresh sets
+  // them up again. Whether it may is a permission, and that stays.
+  const clearStorage = useMutation({
+    mutationFn: async () => {
+      await NsiteWebView.clearStorage({ siteId });
+      forgetSubscriptions();
+      forgetPeriodicSync();
+    },
+    onSuccess: () => {
+      impactMedium();
+      toast({ title: 'Storage cleared', description: `${name} will start fresh the next time it opens.` });
+    },
+    onError: () => {
+      notificationError();
+      toast({
+        title: 'Could not clear storage',
+        description: 'Some of what it stored may still be there.',
+        variant: 'destructive',
+      });
+    },
+    onSettled: () => queryClient.invalidateQueries({ queryKey: usageKey }),
+  });
+
   const handleRemove = (perm: NsitePermission) => {
     if (!user) return;
     void removeNsitePermission(siteId, user.pubkey, perm.type, perm.kind);
@@ -491,12 +568,21 @@ export function NsiteAppInfo({
   // Tenna outright — on a page imitating a system page, the one wrong answer.
   // Radix answers Escape, which is the same gesture on a keyboard and not one
   // anybody makes here.
+  // Back from the confirmation is back to this screen, not out of it.
+  const confirmingRef = useRef(confirmingClear);
+  useEffect(() => {
+    confirmingRef.current = confirmingClear;
+  }, [confirmingClear]);
+
   useEffect(() => {
     if (!open) return;
     let handle: PluginListenerHandle | undefined;
     let disposed = false;
 
-    App.addListener('backButton', () => onOpenChange(false))
+    App.addListener('backButton', () => {
+      if (confirmingRef.current) setConfirmingClear(false);
+      else onOpenChange(false);
+    })
       .then((listener) => {
         if (disposed) void listener.remove();
         else handle = listener;
@@ -737,6 +823,42 @@ export function NsiteAppInfo({
             )}
           </section>
 
+          {/* Below the permissions, where the system's own screen keeps it.
+              Clearing is a question put again before it is done, unlike
+              everything else on this page: a permission taken back can be
+              given again, and what the site stored is gone for good — for
+              some sites that is the only copy of a key. */}
+          {measurable && (
+            <section className="rounded-2xl bg-foreground/[0.06] px-5 py-4">
+              <div className="flex min-h-9 items-center justify-between gap-3">
+                <h3 className="text-lg font-medium text-foreground">Storage</h3>
+                {usage.data !== undefined && usage.data > 0 && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-9 shrink-0 px-3 text-sm text-destructive hover:bg-foreground/10 hover:text-destructive"
+                    onClick={() => setConfirmingClear(true)}
+                    disabled={clearStorage.isPending}
+                  >
+                    {clearStorage.isPending ? 'Clearing…' : 'Clear storage'}
+                  </Button>
+                )}
+              </div>
+
+              {usage.isPending ? (
+                <Skeleton aria-hidden="true" className="mt-2 h-5 w-32 bg-foreground/10" />
+              ) : (
+                <p className="mt-1 text-base text-foreground/55">
+                  {usage.data === undefined
+                    ? 'Could not measure what this app has stored.'
+                    : usage.data > 0
+                      ? `${formatBytes(usage.data)} used on this device`
+                      : 'Nothing stored on this device yet.'}
+                </p>
+              )}
+            </section>
+          )}
+
           {/* Where a system screen keeps the package name and version: what
               the thing is called by everything that is not a person. Cut
               through the middle rather than wrapped, because whole they would
@@ -756,6 +878,25 @@ export function NsiteAppInfo({
           </section>
         </div>
       </DialogContent>
+
+      <AlertDialog open={confirmingClear} onOpenChange={setConfirmingClear}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Clear {name}'s storage?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Everything this app has saved on this device will be deleted, including
+              sign-ins, settings, offline data and its cache. If it is open, it will be
+              closed. Its permissions stay as they are. This can't be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction variant="destructive" onClick={() => clearStorage.mutate()}>
+              Clear storage
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </Dialog>
   );
 }

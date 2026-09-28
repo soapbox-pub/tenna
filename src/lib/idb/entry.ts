@@ -137,11 +137,94 @@ function portTransport(scope: typeof globalThis & Scope): Transport {
 }
 
 /**
+ * The Blob behind each `blob:` URL this realm has made and not revoked, so
+ * that a worker started on one can be started on a copy of it instead.
+ *
+ * A worker's own script may be a blob with no type at all — `new Blob([code])`,
+ * which bundlers and libraries write all the time — but a script it imports
+ * may not: WebKit refuses one whose type is not JavaScript's, and the worker
+ * fails with "Load failed". So the engine's wrapper imports a copy under
+ * JavaScript's type instead. The copy is made here, when the worker is
+ * constructed, because the usual next line is `URL.revokeObjectURL(url)`, and
+ * the wrapper runs later, in the worker. A Map rather than a WeakMap costs
+ * nothing: the platform holds each Blob until its URL is revoked anyway.
+ */
+const blobs = new Map<string, Blob>();
+
+/**
+ * Start recording, and hand back the platform's own `createObjectURL` and
+ * the record's own `get`, which a site replacing either later cannot reach.
+ */
+function recordBlobs(scope: typeof globalThis): { create: (blob: Blob) => string; lookup: (url: string) => Blob | undefined } {
+  const Url = scope.URL;
+  const create = Url.createObjectURL;
+  const revoke = Url.revokeObjectURL;
+  const mapGet = Map.prototype.get;
+  const recorder = {
+    create: (blob: Blob) => Reflect.apply(create, Url, [blob]) as string,
+    lookup: (url: string) => Reflect.apply(mapGet, blobs, [url]) as Blob | undefined,
+  };
+  const mapSet = Map.prototype.set;
+  const mapDelete = Map.prototype.delete;
+  const methods = {
+    createObjectURL(object: Blob | MediaSource): string {
+      const url = Reflect.apply(create, Url, [object]) as string;
+      if (object instanceof Blob) Reflect.apply(mapSet, blobs, [url, object]);
+      return url;
+    },
+    revokeObjectURL(url: string): void {
+      Reflect.apply(mapDelete, blobs, [String(url)]);
+      return Reflect.apply(revoke, Url, [url]) as void;
+    },
+  };
+  for (const name of ['createObjectURL', 'revokeObjectURL'] as const) {
+    Object.defineProperty(methods[name], 'length', { value: 1 });
+    Object.defineProperty(Url, name, { value: methods[name], writable: true, configurable: true, enumerable: true });
+  }
+  return recorder;
+}
+
+/**
+ * The script a `blob:` worker is really started with: the engine, then the
+ * site's blob. `typed` when `href` is this realm's JavaScript-typed copy of
+ * it; otherwise the blob was made somewhere else and is read and retyped in
+ * the worker — synchronously in a classic one, so the site's code still runs
+ * in the worker's first task, and with top-level await in a module.
+ */
+function blobWrapper(engine: string, href: string, module: boolean, typed: boolean): string {
+  if (typed) {
+    return module
+      ? `import ${JSON.stringify(engine)};
+import ${JSON.stringify(href)};
+`
+      : `importScripts(${JSON.stringify(engine)}, ${JSON.stringify(href)});
+`;
+  }
+  if (module) {
+    return `import ${JSON.stringify(engine)};
+const response = await fetch(${JSON.stringify(href)});
+const url = URL.createObjectURL(new Blob([await response.arrayBuffer()], { type: 'text/javascript' }));
+try { await import(url); } finally { URL.revokeObjectURL(url); }
+`;
+  }
+  return `importScripts(${JSON.stringify(engine)});
+(function () {
+  var request = new XMLHttpRequest();
+  request.open('GET', ${JSON.stringify(href)}, false);
+  request.responseType = 'arraybuffer';
+  request.send();
+  var url = URL.createObjectURL(new Blob([request.response], { type: 'text/javascript' }));
+  try { importScripts(url); } finally { URL.revokeObjectURL(url); }
+})();
+`;
+}
+
+/**
  * Start the site's workers with the engine ahead of them, reaching the store
  * through this realm. A script of the site's is started at its own URL with a
  * marker, which the scheme handler answers with the engine and then the
  * script (`NsiteSchemeHandler.indexedDB`); a `blob:` script through a
- * wrapper blob that does the same. Anybody else's script is started as it
+ * wrapper blob that does the same — see `recordBlobs`. Anybody else's script is started as it
  * is, and has WebKit's IndexedDB.
  */
 function wrapWorkers(scope: typeof globalThis & Scope, transport: Transport): void {
@@ -149,6 +232,7 @@ function wrapWorkers(scope: typeof globalThis & Scope, transport: Transport): vo
   if (typeof Native !== 'function' || !scope.location) return;
   const origin = scope.origin;
   const engine = `${origin}/.tenna/idb.js`;
+  const { create, lookup } = recordBlobs(scope);
 
   const Worker = function Worker(this: unknown, url: string | URL, options?: WorkerOptions) {
     if (!new.target) throw new TypeError("Failed to construct 'Worker': Please use the 'new' operator.");
@@ -156,13 +240,9 @@ function wrapWorkers(scope: typeof globalThis & Scope, transport: Transport): vo
     const module = options?.type === 'module';
     let start: string;
     if (target.protocol === 'blob:') {
-      const source = module
-        ? `import ${JSON.stringify(engine)};
-import ${JSON.stringify(target.href)};
-`
-        : `importScripts(${JSON.stringify(engine)}, ${JSON.stringify(target.href)});
-`;
-      start = URL.createObjectURL(new Blob([source], { type: 'text/javascript' }));
+      const blob = lookup(target.href);
+      const script = blob ? create(new Blob([blob], { type: 'text/javascript' })) : target.href;
+      start = create(new Blob([blobWrapper(engine, script, module, !!blob)], { type: 'text/javascript' }));
     } else if (target.origin === origin) {
       target.searchParams.append('__tenna_idb_worker', module ? 'module' : 'classic');
       start = target.href;

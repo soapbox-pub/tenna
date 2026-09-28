@@ -939,8 +939,12 @@ ever said, and Tenna writes it down: when a push arrives, **that file is
 fetched out of the site's own manifest and run**, with `registration`,
 `clients` and the push events shimmed around it, exactly as the same file runs
 on Android. A site that never calls `register()` gets nothing, which is what
-happens in a browser too. It runs at the path it was registered at, so
-`importScripts` and `self.location` resolve as they would in a browser.
+happens in a browser too.
+
+It runs at the path it was registered at, so `importScripts`, `import` and
+`self.location` resolve as they would in a browser, and as what it was
+registered as: `register('/sw.js', { type: 'module' })` starts it as a module,
+with its static imports, `import.meta` and top-level `await`.
 
 What the stand-in registration is honest about: `showNotification` and
 `getNotifications` are real and reach the same tray as everything else, and

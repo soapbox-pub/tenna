@@ -675,10 +675,18 @@ const SERVICE_WORKER_SOURCE = `
               'Failed to register a ServiceWorker: the origin of the provided ' +
               "scriptURL does not match the current page's origin."));
           }
+          var type = options && options.type !== undefined ? String(options.type) : 'classic';
+          if (type !== 'classic' && type !== 'module') {
+            return Promise.reject(new TypeError(
+              "Failed to register a ServiceWorker: The provided value '" + type +
+              "' is not a valid enum value of type WorkerType."));
+          }
 
           // The path only. A query string is the browser's cache-buster and
           // means nothing to a manifest, which files a script under its path.
-          return rpc('napp.sw.register', { path: url.pathname }).then(function() {
+          // The type is how the worker is started: a module worker's script
+          // is not a script importScripts could run.
+          return rpc('napp.sw.register', { path: url.pathname, type: type }).then(function() {
             var registration = makeRegistration(url, options);
             swRegistrations = [registration];
             swReadyResolve(registration);

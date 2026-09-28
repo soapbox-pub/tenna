@@ -56,6 +56,9 @@ final class NsiteWorkerHost: NSObject, WKScriptMessageHandler, WKNavigationDeleg
     /// there, so that its own URL — and every relative URL it resolves — is
     /// the one the site meant.
     private let worker: String
+    /// Whether the site registered it with `type: 'module'`, which decides
+    /// how it is started: a module is not a script `importScripts` can run.
+    private let module: Bool
     private let serve: Serve
     /// The site's periodic sync tags, for `registration.periodicSync.getTags()`
     /// in a worker that has no host to ask.
@@ -73,9 +76,11 @@ final class NsiteWorkerHost: NSObject, WKScriptMessageHandler, WKNavigationDeleg
     /// and the data the shim builds it from.
     private var pending: (kind: String, data: String)?
 
-    init(siteId: String, worker: String, periodicTags: [String] = [], serve: @escaping Serve) {
+    init(siteId: String, worker: String, module: Bool = false, periodicTags: [String] = [],
+         serve: @escaping Serve) {
         self.siteId = siteId
         self.worker = worker
+        self.module = module
         self.periodicTags = periodicTags
         self.serve = serve
         super.init()
@@ -357,6 +362,9 @@ final class NsiteWorkerHost: NSObject, WKScriptMessageHandler, WKNavigationDeleg
     /// Where the host page starts the site's vault from. See `NsiteCryptoKeys`.
     static let vaultPath = "/.tenna/vault.js"
 
+    /// Where the worker loads the shim from, ahead of the site's script.
+    static let shimPath = "/.tenna/sw-shim.js"
+
     /// The host page, the shim and the engine are Tenna's; everything else is
     /// the site's.
     fileprivate func answer(path: String, shimmed: Bool) async -> (Data, String)? {
@@ -368,36 +376,55 @@ final class NsiteWorkerHost: NSObject, WKScriptMessageHandler, WKNavigationDeleg
             guard let script = NsiteIndexedDB.vaultScript else { return nil }
             return (Data(script.utf8), "text/javascript; charset=utf-8")
         }
+        if path == Self.shimPath {
+            guard let shim = Self.resource("NsiteWorkerShim", "js") else { return nil }
+            let tags = (try? JSONSerialization.data(withJSONObject: periodicTags))
+                .flatMap { String(data: $0, encoding: .utf8) } ?? "[]"
+            return (
+                Data(shim.replacingOccurrences(of: "%%PERIODIC_TAGS%%", with: tags).utf8),
+                "text/javascript; charset=utf-8"
+            )
+        }
         if path == Self.hostPath {
             guard let page = Self.resource("NsiteWorkerHostPage", "html") else { return nil }
             // The worker's URL, carrying the marker that asks for the shim.
             let worker = "\(self.worker)?\(Self.shimQuery)=1"
             return (
-                Data(page.replacingOccurrences(of: "%%WORKER%%", with: Self.jsString(worker)).utf8),
+                Data(page
+                    .replacingOccurrences(of: "%%WORKER%%", with: Self.jsString(worker))
+                    .replacingOccurrences(of: "%%WORKER_TYPE%%", with: Self.jsString(module ? "module" : "classic"))
+                    .utf8),
                 "text/html; charset=utf-8"
             )
         }
 
-        guard let (body, contentType) = await serve(path) else { return nil }
-        guard shimmed, let shim = Self.resource("NsiteWorkerShim", "js") else {
-            return (body, contentType)
-        }
+        guard !shimmed else { return wrapper(path) }
+        return await serve(path)
+    }
 
-        // `importScripts` rather than concatenation, so a `'use strict'`
-        // prologue at the top of the site's script is still at the top of a
-        // script and still means what it says.
-        let tags = (try? JSONSerialization.data(withJSONObject: periodicTags))
-            .flatMap { String(data: $0, encoding: .utf8) } ?? "[]"
-        // The engine before the site, whose top-level code may open a
-        // database; it reaches the store through the port the host page sends.
-        let engine = NsiteIndexedDB.script == nil ? "" : "importScripts(\(Self.jsString(Self.indexedDBPath)));"
-        let source = """
-        self.__tennaPeriodicTags = \(tags);
-        \(shim)
-        \(engine)
-        importScripts(\(Self.jsString(path)));
-        self.__tennaWorker.boot();
-        """
+    /**
+     The script the worker is really started with: the shim, the IndexedDB
+     engine, then the site's own script, and then the lifecycle.
+
+     Each is loaded rather than concatenated, so a `'use strict'` prologue at
+     the top of the site's script is still at the top of a script and still
+     means what it says — and the site's script is loaded from the path it was
+     started at, so its own URL is the one it was published under. The engine
+     comes before the site, whose top-level code may open a database; it
+     reaches the store through the port the host page sends.
+
+     A module's static imports are evaluated in the order they are written, so
+     the module wrapper keeps the same order the classic one has.
+     */
+    private func wrapper(_ path: String) -> (Data, String) {
+        var scripts = [Self.shimPath]
+        if NsiteIndexedDB.script != nil { scripts.append(Self.indexedDBPath) }
+        scripts.append(path)
+
+        let load = module
+            ? scripts.map { "import \(Self.jsString($0));" }.joined(separator: "\n")
+            : "importScripts(\(scripts.map(Self.jsString).joined(separator: ", ")));"
+        let source = "\(load)\nself.__tennaWorker.boot();\n"
         return (Data(source.utf8), "text/javascript; charset=utf-8")
     }
 

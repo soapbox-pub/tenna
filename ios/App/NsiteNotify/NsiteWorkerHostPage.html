@@ -27,7 +27,9 @@
 
   var worker;
   try {
-    worker = new Worker(%%WORKER%%);
+    // As a module if the site registered one: its script is not a script
+    // `importScripts` could run.
+    worker = new Worker(%%WORKER%%, { type: %%WORKER_TYPE%% });
   } catch (err) {
     tell({ __tenna: 'error', message: 'new Worker: ' + String(err) });
     return;

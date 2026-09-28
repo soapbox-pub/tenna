@@ -463,7 +463,8 @@ export function useNsiteSignerRpc({
           if (!path.startsWith('/') || path.startsWith('//')) {
             throw new Error('The worker must be a file inside the site');
           }
-          await NappPush.registerWorker({ siteId, label: siteName, path });
+          const type = p.type === 'module' ? 'module' : 'classic';
+          await NappPush.registerWorker({ siteId, label: siteName, path, type });
           return undefined;
         }
 

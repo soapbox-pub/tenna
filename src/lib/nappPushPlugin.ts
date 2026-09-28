@@ -111,8 +111,11 @@ export interface NappPushPlugin {
    * which script the notification extension should run. The file is fetched
    * into the shared blob cache at the same time, because an extension woken by
    * a push should not have to reach the network to find out what to say.
+   *
+   * `type` is the `type` the site registered with, which decides whether the
+   * extension starts the script as a classic worker or a module.
    */
-  registerWorker(options: { siteId: string; label: string; path: string }): Promise<void>;
+  registerWorker(options: { siteId: string; label: string; path: string; type: 'classic' | 'module' }): Promise<void>;
 
   /**
    * `registration.periodicSync.register(tag, { minInterval })`, written down

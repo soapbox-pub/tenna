@@ -33,6 +33,8 @@ struct NsiteRecord {
     var servers: [String]
     /// What the site passed to `navigator.serviceWorker.register`, if it has.
     var worker: String?
+    /// Whether it registered that worker as a module. See `NsiteWorkerHost`.
+    var workerModule: Bool = false
     /// `NappSubscription[]` as the site set them, normalized.
     var subscriptions: [Any]
     /// The user's answer, which outlives whatever the site sets.
@@ -127,6 +129,7 @@ enum NsiteStore {
                 return text
             },
             worker: (object["worker"] as? String).flatMap { NsiteBlobs.isPath($0) ? $0 : nil },
+            workerModule: object["workerType"] as? String == "module",
             subscriptions: object["subscriptions"] as? [Any] ?? [],
             muted: object["muted"] as? Bool ?? false,
             periodicSync: (object["periodicSync"] as? [Any] ?? []).compactMap { NsitePeriodicTag($0) },
@@ -151,6 +154,7 @@ enum NsiteStore {
             "updatedAt": Date().timeIntervalSince1970,
         ]
         if let worker = record.worker { object["worker"] = worker }
+        if record.workerModule { object["workerType"] = "module" }
 
         guard JSONSerialization.isValidJSONObject(object),
               let data = try? JSONSerialization.data(withJSONObject: object) else {

@@ -142,6 +142,7 @@ public class NappPushPlugin: CAPPlugin, CAPBridgedPlugin {
 
         guard let record = NsiteStore.update(siteId, { record in
             record.worker = path
+            record.workerModule = call.getString("type") == "module"
             if let label = call.getString("label"), !label.isEmpty { record.label = label }
         }) else {
             call.reject("Could not store the worker")

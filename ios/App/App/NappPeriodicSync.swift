@@ -217,6 +217,7 @@ enum NappPeriodicSync {
             let host = NsiteWorkerHost(
                 siteId: site.siteId,
                 worker: site.worker ?? "/sw.js",
+                module: site.workerModule,
                 periodicTags: site.periodicSync.map(\.tag)
             ) { path in
                 await server.file(path)

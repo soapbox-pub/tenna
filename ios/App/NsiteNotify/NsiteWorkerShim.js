@@ -15,8 +15,11 @@
  *
  * Loaded before the site's script rather than after it — the site reads
  * `self.registration` at the top of its own file — which is why the two are
- * separate scripts joined by `importScripts` rather than one concatenation.
- * A `'use strict'` prologue is only a prologue at the top of a script.
+ * separate scripts, joined by `importScripts` or by `import` for a site that
+ * registered a module, rather than one concatenation. A `'use strict'`
+ * prologue is only a prologue at the top of a script. This file is written to
+ * mean the same thing as either: it declares nothing at its top level and
+ * reaches everything through `self`.
  */
 (function() {
   var ENVELOPE = '__tenna';
@@ -122,8 +125,8 @@
    * the site's window. A worker that re-registers from inside its own
    * `periodicsync` handler — which is common — keeps working.
    */
-  var periodicTags = Array.isArray(self.__tennaPeriodicTags) ? self.__tennaPeriodicTags.slice() : [];
-  try { delete self.__tennaPeriodicTags; } catch (err) {}
+  // Stamped in by `NsiteWorkerHost` when it serves this file.
+  var periodicTags = %%PERIODIC_TAGS%%;
 
   self.registration.periodicSync = {
     register: function() { return Promise.resolve(); },
@@ -230,8 +233,8 @@
   /**
    * Run the site's lifecycle, then say the worker is ready for a push.
    *
-   * Called from the tail of the generated script, after `importScripts` has
-   * run the site's own file, so that everything above is in place before the
+   * Called from the tail of the generated script, after the site's own file
+   * has run, so that everything above is in place before the
    * site's top-level code reads any of it — and so that nothing is delivered
    * until a listener added in `activate` would have been added.
    */

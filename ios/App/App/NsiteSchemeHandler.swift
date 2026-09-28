@@ -37,6 +37,8 @@ final class NsiteSchemeHandler: NSObject, WKURLSchemeHandler {
 
     private var nextId: UInt64 = 0
     private var live: [UInt64: WKURLSchemeTask] = [:]
+    /// What stops each `napp.fetch` still in flight, by task.
+    private var fetches: [UInt64: () -> Void] = [:]
 
     init(server: NsiteFileServer, host: String) {
         self.server = server
@@ -60,6 +62,11 @@ final class NsiteSchemeHandler: NSObject, WKURLSchemeHandler {
                 return
             }
 
+            if url.path == NappFetchRoute.path {
+                fetch(id, url: url)
+                return
+            }
+
             Task { [weak self] in
                 let response = await self?.server.serve(url)
                 guard let self, let response else { return }
@@ -74,6 +81,7 @@ final class NsiteSchemeHandler: NSObject, WKURLSchemeHandler {
             // object handed back here is the same instance that was started.
             if let id = live.first(where: { $0.value === urlSchemeTask })?.key {
                 live.removeValue(forKey: id)
+                fetches.removeValue(forKey: id)?()
             }
         }
     }
@@ -153,9 +161,36 @@ final class NsiteSchemeHandler: NSObject, WKURLSchemeHandler {
         return json
     }
 
+    // MARK: - napp.fetch
+
+    /// Collect a staged `napp.fetch` and stream its response into the task.
+    private func fetch(_ id: UInt64, url: URL) {
+        guard let siteId = NsiteOrigins.siteIdFor(host: host) else {
+            finish(id, with: .text(404, "Not Found"), url: url)
+            return
+        }
+        let ticket = NappFetchRoute.ticket(in: url)
+        let cancel = NappFetch.run(siteId: siteId, ticket: ticket, sink: NappFetchRoute.sink(
+            url: url,
+            task: { [weak self] in self?.live[id] },
+            done: { [weak self] in
+                self?.live.removeValue(forKey: id)
+                self?.fetches.removeValue(forKey: id)
+            }
+        ))
+        guard let cancel else {
+            NappFetchRoute.fail(live.removeValue(forKey: id), url: url, message: "No such request")
+            return
+        }
+        if live[id] != nil { fetches[id] = cancel }
+    }
+
     /// Refuse everything outstanding. Called when the site is torn down, so
     /// that nothing answers into a WebView that is on its way out.
     func cancelAll() {
         live.removeAll()
+        let stops = fetches.values
+        fetches.removeAll()
+        for stop in stops { stop() }
     }
 }

@@ -7,6 +7,8 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		892A056182D2691E4F0C72E3 /* NappFetch.swift in Sources */ = {isa = PBXBuildFile; fileRef = 606590BAD99B433A05F84763 /* NappFetch.swift */; };
+		C1AFE235824E7D5482E5F105 /* NappFetch.swift in Sources */ = {isa = PBXBuildFile; fileRef = 606590BAD99B433A05F84763 /* NappFetch.swift */; };
 		E5937A73ED866B660FA99B1E /* NappNotificationEvents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8628F39E91B567E9E6F119EB /* NappNotificationEvents.swift */; };
 		5EC256000000000000000003 /* CSecp256k1 in Frameworks */ = {isa = PBXBuildFile; productRef = 5EC256000000000000000002 /* CSecp256k1 */; };
 		64B492D857E30B1B071C0290 /* TennaSignerPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = F08797FE756CD493F3BE1AD1 /* TennaSignerPlugin.swift */; };
@@ -70,6 +72,7 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		606590BAD99B433A05F84763 /* NappFetch.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NappFetch.swift; sourceTree = "<group>"; };
 		8628F39E91B567E9E6F119EB /* NappNotificationEvents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NappNotificationEvents.swift; sourceTree = "<group>"; };
 		F08797FE756CD493F3BE1AD1 /* TennaSignerPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TennaSignerPlugin.swift; sourceTree = "<group>"; };
 		71657B6834AED007E461E3E9 /* TennaKeys.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TennaKeys.swift; sourceTree = "<group>"; };
@@ -192,6 +195,7 @@
 		504EC3061FED79650016851F /* App */ = {
 			isa = PBXGroup;
 			children = (
+				606590BAD99B433A05F84763 /* NappFetch.swift */,
 				8628F39E91B567E9E6F119EB /* NappNotificationEvents.swift */,
 				F08797FE756CD493F3BE1AD1 /* TennaSignerPlugin.swift */,
 				71657B6834AED007E461E3E9 /* TennaKeys.swift */,
@@ -370,6 +374,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				C1AFE235824E7D5482E5F105 /* NappFetch.swift in Sources */,
 				E5937A73ED866B660FA99B1E /* NappNotificationEvents.swift in Sources */,
 				64B492D857E30B1B071C0290 /* TennaSignerPlugin.swift in Sources */,
 				2AB91A724E58EBDE5B1B641F /* TennaKeys.swift in Sources */,
@@ -405,6 +410,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				892A056182D2691E4F0C72E3 /* NappFetch.swift in Sources */,
 				AA00000000000000000000B3 /* NotificationService.swift in Sources */,
 				AA00000000000000000000B4 /* NsiteWorkerHost.swift in Sources */,
 				AA0000000000000000000014 /* NsiteIndexedDB.swift in Sources */,

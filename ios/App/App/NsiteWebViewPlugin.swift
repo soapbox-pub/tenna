@@ -95,7 +95,8 @@ public class NsiteWebViewPlugin: CAPPlugin, CAPBridgedPlugin {
         let couldNotify = NappNotifications.enabled && !(NsiteStore.load(siteId)?.muted ?? false)
         let script = call.getString("providerScript").map { source in
             source
-                // No `napp.fetch` here, so nothing ever hands this WebView bytes.
+                // A script message carries text, so a `napp.fetch` body is
+                // handed over as base64url. See `NappFetch`.
                 .replacingOccurrences(of: "%%NAPP_BINARY%%", with: "false")
                 .replacingOccurrences(of: "%%NAPP_NOTIFY_DEVICE%%",
                                       with: couldNotify ? "true" : "false")

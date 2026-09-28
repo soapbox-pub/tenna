@@ -1,13 +1,12 @@
 # What Tenna gives an nsite
 
-Four things a site cannot get from a plain browser tab: notifications while it
-is closed, a signer inside its service worker, a place in the operating
-system's share menu, and an HTTP request that CORS does not stand in front of.
+Three things a site cannot get from a plain browser tab: notifications while
+it is closed, a place in the operating system's share menu, and an HTTP request
+that CORS does not stand in front of.
 Each is declared the way the web already declares them where the web has a way
 — a site written for Tenna is a site that still works anywhere else.
 
-Notifications are the app, on both platforms. The other three are Android
-only. What differs per platform is set out under
+All three are on both platforms. What differs per platform is set out under
 [On iOS](#on-ios); the short version is that a site writes the same code.
 
 ## `window.napp` — notifications
@@ -582,8 +581,8 @@ const res = await corsFetch('https://oauth.example.com/token', {
 const data = await res.json();
 ```
 
-On the web `window.napp` is absent and on iOS it carries no `fetch`, so the
-request goes through the proxy. On Android it leaves the phone directly. A
+On the web `window.napp` is absent, so the request goes through the proxy. On
+Android and iOS it leaves the phone directly. A
 third-party proxy sees the whole request, `Authorization` header included;
 Tenna's `napp.fetch` involves no third party.
 
@@ -735,7 +734,10 @@ There is still a clock. A worker woken by a push has five minutes on Android
 and twenty seconds on iOS — see [The delivery deadline](#the-delivery-deadline).
 
 Everything else is identical, including feature detection: `self.napp` is
-absent on the web and on iOS. On Android it arrives in the shim Tenna appends
+absent on the web. On iOS the worker a push wakes runs inside a notification
+extension with sixty-five megabytes for everything, so there a request body is
+capped at **4 MB** and a response at **8 MB**; a worker run by the app, for a
+tap or a periodic sync, has the window's ceilings. On Android it arrives in the shim Tenna appends
 when the worker's script is **fetched**, and the browser keeps that script for
 the life of the registration — so a worker installed before an older Tenna had
 it gets it the next time Chromium re-checks the script, on the next navigation
@@ -744,11 +746,19 @@ breaks in the meantime; the feature detection simply says no.
 
 ### Elsewhere
 
-Not on the web, where there is no host around the page to make the request,
-and not on iOS, where `WKURLSchemeHandler` cannot intercept `https` and is
-never handed a request body anyway. `window.napp.fetch` and `self.napp.fetch`
-are both simply absent there, and a site falls back to its own proxy. See
-[On iOS](#on-ios).
+Not on the web, where there is no host around the page to make the request.
+`window.napp.fetch` and `self.napp.fetch` are both simply absent there, and a
+site falls back to its own proxy.
+
+**On iOS** the same wire carries it: the request is staged over the site's
+message handler, and `/.napp/fetch` is a path on the site's own scheme, which
+Tenna's scheme handler answers by streaming the response. The request is made
+with an HTTP/1.1 client of Tenna's over `Network.framework` rather than with
+`URLSession`, because `URLSession` has nowhere to check the address it
+connects to: the name is resolved first, every address it has is checked, and
+the connection is made to that address with the name given to TLS. The body
+crosses as base64, so what a window can send is bounded by the 16 MB either
+way, and a response is asked for uncompressed.
 
 ## `registration.periodicSync` — waking up on a schedule
 
@@ -1048,10 +1058,11 @@ needs in IndexedDB.
 | `actions` | drawn, with their `icon` | drawn, without their `icon` |
 | `badge`, `vibrate` | drawn / honoured | accepted and ignored |
 | the row | a conversation, led by the site's icon | a thread; each notification led by its `icon`, or the site's icon, with Tenna's badged into its corner |
-| `self.napp.fetch` | in the worker | absent |
+| `self.napp.fetch` | in the worker | in the worker; 4 MB up and 8 MB down in the notification extension |
 | IndexedDB | Chromium's, the site's profile, shared by page and worker | Tenna's, shared by the page, its workers and the extension's worker — see [IndexedDB](#indexeddb) |
 | Cache API | shared by page and worker | shared by the page and its workers, not the extension's worker — see [The Cache API](#the-cache-api) |
-| `napp.fetch`, `share_target` | yes | no |
+| `napp.fetch` | yes | yes |
+| `share_target` | yes | no |
 
 A button's `icon` has nowhere to go: iOS draws an action's icon only from an SF
 Symbol or a picture in the app's own bundle. `badge` is the status bar's mark,

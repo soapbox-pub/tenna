@@ -253,17 +253,13 @@ export function forgetsRemovedSites(): boolean {
 /**
  * Whether this platform can make a site's HTTP request for it, without CORS.
  *
- * Android only, like the rest of `window.napp`. The request is staged over
- * the WebView's message channel and the response comes back through
- * `shouldInterceptRequest` — see `NappFetch` — and iOS has neither of those
- * in a shape that could carry it: `WKURLSchemeHandler` cannot intercept
- * `https`, and it is not handed a request body either.
- *
- * Checked rather than assumed from `supportsNativeNsite`, because a site on
- * iOS gets a native WebView too and would otherwise be told a lie it could
- * only discover by hanging.
+ * Android and iOS. On both the request is staged over the site's message
+ * channel and the response is collected with a same-origin GET of
+ * `/.napp/fetch`, which the host answers: `shouldInterceptRequest` on
+ * Android, the site's own `WKURLSchemeHandler` on iOS. See `NappFetch`.
  */
 export function supportsNappFetch(): boolean {
-  return Capacitor.getPlatform() === 'android'
+  const platform = Capacitor.getPlatform();
+  return (platform === 'android' || platform === 'ios')
     && Capacitor.isPluginAvailable('NsiteWebView');
 }

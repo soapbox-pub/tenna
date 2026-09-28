@@ -335,6 +335,26 @@ final class NsiteWorkerHost: NSObject, WKScriptMessageHandler, WKNavigationDeleg
         case "periodicTags":
             return NsitePeriodic.tags(siteId: siteId)
 
+        case "napp.fetch.begin":
+            do {
+                return try NappFetch.stage(siteId: siteId, params: params)
+            } catch {
+                throw CallFailure(message: error.localizedDescription)
+            }
+
+        case "napp.fetch.body":
+            do {
+                try NappFetch.body(siteId: siteId, ticket: params["ticket"] as? String ?? "",
+                                   encoded: params["body"] as? String ?? "")
+                return NSNull()
+            } catch {
+                throw CallFailure(message: error.localizedDescription)
+            }
+
+        case "napp.fetch.abort":
+            NappFetch.abort(siteId: siteId, ticket: params["ticket"] as? String ?? "")
+            return NSNull()
+
         case "open":
             guard let path = params["path"] as? String, path.hasPrefix("/"), !path.hasPrefix("//") else {
                 throw CallFailure(message: "A site can only open itself")
@@ -393,6 +413,8 @@ final class NsiteWorkerHost: NSObject, WKScriptMessageHandler, WKNavigationDeleg
         /// this handler only acquired by learning to answer late.
         private var nextId: UInt64 = 0
         private var live: [UInt64: WKURLSchemeTask] = [:]
+        /// What stops each `napp.fetch` still in flight, by task.
+        private var fetches: [UInt64: () -> Void] = [:]
 
         init(host: NsiteWorkerHost) {
             self.host = host
@@ -412,6 +434,26 @@ final class NsiteWorkerHost: NSObject, WKScriptMessageHandler, WKNavigationDeleg
                 }
 
                 let path = url.path.isEmpty ? "/" : url.path
+
+                // The worker collecting a `napp.fetch` it staged. See `NappFetch`.
+                if path == NappFetchRoute.path {
+                    let cancel = NappFetch.run(
+                        siteId: host.siteId, ticket: NappFetchRoute.ticket(in: url),
+                        sink: NappFetchRoute.sink(
+                            url: url,
+                            task: { [weak self] in self?.live[id] },
+                            done: { [weak self] in
+                                self?.live.removeValue(forKey: id)
+                                self?.fetches.removeValue(forKey: id)
+                            }))
+                    if let cancel {
+                        if live[id] != nil { fetches[id] = cancel }
+                    } else {
+                        NappFetchRoute.fail(live.removeValue(forKey: id), url: url, message: "No such request")
+                    }
+                    return
+                }
+
                 let shimmed = URLComponents(url: url, resolvingAgainstBaseURL: false)?
                     .queryItems?.contains { $0.name == NsiteWorkerHost.shimQuery } ?? false
 
@@ -441,6 +483,7 @@ final class NsiteWorkerHost: NSObject, WKScriptMessageHandler, WKNavigationDeleg
                 // the object handed back is the instance that was started.
                 if let id = live.first(where: { $0.value === task })?.key {
                     live.removeValue(forKey: id)
+                    fetches.removeValue(forKey: id)?()
                 }
             }
         }
@@ -449,6 +492,9 @@ final class NsiteWorkerHost: NSObject, WKScriptMessageHandler, WKNavigationDeleg
         /// tears its web view down.
         func cancelAll() {
             live.removeAll()
+            let stops = fetches.values
+            fetches.removeAll()
+            for stop in stops { stop() }
         }
 
         private func fail(_ id: UInt64, _ error: Error) {

@@ -280,11 +280,46 @@ final class NsiteSession: NSObject, WKNavigationDelegate, WKUIDelegate {
               let id = (request["id"] as? NSNumber)?.intValue,
               let method = request["method"] as? String else { return }
 
+        // `napp.fetch` is answered here rather than in the web layer, as on
+        // Android: it asks nobody anything, and its payload is the site's
+        // bytes, which have no business crossing Capacitor to arrive back
+        // where they started. See `NappFetch`.
+        if method.hasPrefix("napp.fetch.") {
+            answerFetch(id: id, method: method, params: request["params"] as? [String: Any] ?? [:])
+            return
+        }
+
         // Params travel on as JSON text. A signed event's tags are an
         // arbitrarily shaped array, and Capacitor's object coercion does not
         // keep them intact — the same reason Android does this.
         let params = request["params"].map { NappSubscriptions.text($0) } ?? "{}"
         onRpc(id, method, params)
+    }
+
+    private func answerFetch(id: Int, method: String, params: [String: Any]) {
+        switch method {
+        case "napp.fetch.begin":
+            do {
+                let ticket = try NappFetch.stage(siteId: siteId, params: params)
+                // A UUID, so quoting it is all it takes to make it JSON.
+                respond(id: id, result: "\"\(ticket)\"", error: nil)
+            } catch {
+                respond(id: id, result: nil, error: error.localizedDescription)
+            }
+        case "napp.fetch.body":
+            do {
+                try NappFetch.body(siteId: siteId, ticket: params["ticket"] as? String ?? "",
+                                   encoded: params["body"] as? String ?? "")
+                respond(id: id, result: "null", error: nil)
+            } catch {
+                respond(id: id, result: nil, error: error.localizedDescription)
+            }
+        case "napp.fetch.abort":
+            NappFetch.abort(siteId: siteId, ticket: params["ticket"] as? String ?? "")
+            respond(id: id, result: "null", error: nil)
+        default:
+            respond(id: id, result: nil, error: "Method not found: \(method)")
+        }
     }
 
     /// Write a JSON-RPC response back to the site's provider.

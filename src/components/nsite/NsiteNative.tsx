@@ -211,8 +211,7 @@ export function NsiteNative({
         // never needed: `napp.fetch` is a question about the device rather
         // than about a key, and a reader browsing a site still expects its
         // pictures to load. The script withholds `window.nostr` when there is
-        // no pubkey to put in it — and is withheld entirely when it would
-        // define nothing at all, which on iOS with nobody signed in it would.
+        // no pubkey to put in it.
         providerScript: nsiteProviderScript(pubkey, getNsiteSubdomain(event)),
         // The first URL, when the window was opened out of the share sheet.
         // Held in a ref like the callbacks: a share belongs to the open, and

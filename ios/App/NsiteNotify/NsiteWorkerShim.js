@@ -214,6 +214,98 @@
 
   self.skipWaiting = function() { return Promise.resolve(); };
 
+  // -------------------------------------------------------------------------
+  // napp.fetch
+  // -------------------------------------------------------------------------
+
+  /*
+   * `self.napp.fetch`, the page's `window.napp.fetch` in a worker: the same
+   * three steps on the same wire. The request is staged with the host over a
+   * `call`, its body handed over after it, and the response collected with a
+   * same-origin fetch of `/.napp/fetch`, which the host page's scheme handler
+   * answers by streaming the real one. See `NappFetch.swift` and NAPP.md.
+   *
+   * The originals are taken here, before the site's script runs, so a site
+   * that wraps `fetch` does not change what this does.
+   */
+  var nativeFetch = self.fetch.bind(self);
+  var NativeRequest = self.Request;
+
+  function abortError() {
+    try {
+      return new DOMException('The user aborted a request.', 'AbortError');
+    } catch (err) {
+      var error = new Error('The user aborted a request.');
+      error.name = 'AbortError';
+      return error;
+    }
+  }
+
+  function encodeBody(buffer) {
+    var bytes = new Uint8Array(buffer);
+    var binary = '';
+    for (var i = 0; i < bytes.length; i += 0x8000) {
+      binary += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+    }
+    return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  }
+
+  function nappFetch(input, init) {
+    var request;
+    try {
+      request = new NativeRequest(input, init);
+    } catch (err) {
+      return Promise.reject(err);
+    }
+
+    var signal = request.signal;
+    if (signal && signal.aborted) return Promise.reject(abortError());
+
+    var headers = [];
+    request.headers.forEach(function(value, name) { headers.push([name, value]); });
+
+    return request.arrayBuffer().then(function(buffer) {
+      var hasBody = buffer.byteLength > 0;
+      return call('napp.fetch.begin', {
+        url: request.url,
+        method: request.method,
+        headers: headers,
+        redirect: request.redirect,
+        hasBody: hasBody
+      }).then(function(ticket) {
+        var giveUp = function() { call('napp.fetch.abort', { ticket: ticket }).catch(function() {}); };
+        if (signal) signal.addEventListener('abort', giveUp, { once: true });
+
+        var staged = hasBody
+          ? call('napp.fetch.body', { ticket: ticket, body: encodeBody(buffer) })
+          : Promise.resolve();
+
+        return staged
+          .then(function() {
+            return nativeFetch('/.napp/fetch?t=' + encodeURIComponent(ticket), {
+              cache: 'no-store',
+              signal: signal
+            });
+          })
+          .then(function(response) {
+            if (signal) signal.removeEventListener('abort', giveUp);
+            var failure = response.headers.get('X-Napp-Error');
+            if (failure) throw new TypeError(failure);
+            return response;
+          }, function(err) {
+            if (signal) signal.removeEventListener('abort', giveUp);
+            throw err;
+          });
+      });
+    });
+  }
+
+  Object.defineProperty(self, 'napp', {
+    value: Object.freeze({
+      fetch: function(input, init) { return nappFetch(input, init); }
+    })
+  });
+
   if (!self.Notification) {
     self.Notification = { permission: 'granted' };
   }

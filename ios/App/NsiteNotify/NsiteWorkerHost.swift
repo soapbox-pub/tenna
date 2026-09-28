@@ -76,6 +76,19 @@ final class NsiteWorkerHost: NSObject, WKScriptMessageHandler, WKNavigationDeleg
     /// and the data the shim builds it from.
     private var pending: (kind: String, data: String)?
 
+    /**
+     What `clients.openWindow` does for this delivery: open the site at a
+     path and say whether it did. Nil — the default — refuses, which is right
+     for a push or a background run: nobody asked for a window. The app sets
+     it for a tap. See `NappNotificationEvents`.
+     */
+    var opener: ((String) -> Bool)?
+
+    /// Told when a worker changed its site's periodic sync tags. The app
+    /// schedules its background task from it; the extension cannot, and
+    /// leaves that to the app's next trip to the background.
+    static var periodicChanged: (() -> Void)?
+
     init(siteId: String, worker: String, module: Bool = false, periodicTags: [String] = [],
          serve: @escaping Serve) {
         self.siteId = siteId
@@ -84,6 +97,20 @@ final class NsiteWorkerHost: NSObject, WKScriptMessageHandler, WKNavigationDeleg
         self.periodicTags = periodicTags
         self.serve = serve
         super.init()
+    }
+
+    /// A host for a site as it is written down, serving its files out of its
+    /// manifest and the shared blob cache.
+    convenience init(site: NsiteRecord) {
+        let server = NsiteFileServer(files: site.files, servers: site.servers)
+        self.init(
+            siteId: site.siteId,
+            worker: site.worker ?? "/sw.js",
+            module: site.workerModule,
+            periodicTags: site.periodicSync.map(\.tag)
+        ) { path in
+            await server.file(path)
+        }
     }
 
     // MARK: - Delivery
@@ -120,6 +147,8 @@ final class NsiteWorkerHost: NSObject, WKScriptMessageHandler, WKNavigationDeleg
         config.userContentController.add(self, name: "tenna")
         config.userContentController.addScriptMessageHandler(
             IndexedDBRelay(siteId: siteId, channel: indexedDB), contentWorld: .page, name: "tennaIDB")
+        config.userContentController.addScriptMessageHandler(
+            CallRelay(host: self), contentWorld: .page, name: "tennaCall")
         // The site's sealing key, for the host page to hand the worker's
         // vault. The page is Tenna's and none of the site's code runs in it.
         if let key = NsiteCryptoKeys.sealingKey(for: siteId) {
@@ -166,6 +195,7 @@ final class NsiteWorkerHost: NSObject, WKScriptMessageHandler, WKNavigationDeleg
         scheme = nil
         webView?.configuration.userContentController.removeScriptMessageHandler(forName: "tenna")
         webView?.configuration.userContentController.removeScriptMessageHandler(forName: "tennaIDB", contentWorld: .page)
+        webView?.configuration.userContentController.removeScriptMessageHandler(forName: "tennaCall", contentWorld: .page)
         NsiteIndexedDB.site(siteId).close(indexedDB)
         webView?.navigationDelegate = nil
         webView?.stopLoading()
@@ -227,6 +257,95 @@ final class NsiteWorkerHost: NSObject, WKScriptMessageHandler, WKNavigationDeleg
             default:
                 break
             }
+        }
+    }
+
+    // MARK: - Questions from the worker
+
+    /// Answers the host page's relay of the worker's `call`s. See the shim.
+    private final class CallRelay: NSObject, WKScriptMessageHandlerWithReply {
+        private weak var host: NsiteWorkerHost?
+
+        init(host: NsiteWorkerHost) {
+            self.host = host
+            super.init()
+        }
+
+        nonisolated func userContentController(
+            _ controller: WKUserContentController,
+            didReceive message: WKScriptMessage,
+            replyHandler: @escaping @MainActor @Sendable (Any?, String?) -> Void
+        ) {
+            MainActor.assumeIsolated {
+                guard let host,
+                      let text = message.body as? String,
+                      let object = NappSubscriptions.object(text),
+                      let method = object["method"] as? String else {
+                    replyHandler(nil, "Malformed call")
+                    return
+                }
+                let params = object["params"] as? [String: Any] ?? [:]
+                Task { @MainActor in
+                    do {
+                        replyHandler(try await host.answer(method: method, params: params), nil)
+                    } catch {
+                        replyHandler(nil, error.localizedDescription)
+                    }
+                }
+            }
+        }
+    }
+
+    struct CallFailure: LocalizedError {
+        let message: String
+        var errorDescription: String? { message }
+    }
+
+    /// What the worker asked for, answered as the site and nobody else.
+    private func answer(method: String, params: [String: Any]) async throws -> Any {
+        switch method {
+        case "list":
+            let tag = params["tag"] as? String
+            let records = await withCheckedContinuation { continuation in
+                NappNotifications.list(siteId: siteId, tag: tag) { continuation.resume(returning: $0) }
+            }
+            return NappSubscriptions.text(records)
+
+        case "close":
+            guard let key = params["key"] as? String else { throw CallFailure(message: "key is required") }
+            NappNotifications.close(siteId: siteId, key: key)
+            return NSNull()
+
+        case "periodicRegister":
+            guard let tag = params["tag"] as? String, !tag.isEmpty else {
+                throw CallFailure(message: "tag is required")
+            }
+            // Milliseconds from the web, seconds here.
+            let minInterval = ((params["minInterval"] as? NSNumber)?.doubleValue ?? 0) / 1000
+            try NsitePeriodic.register(siteId: siteId, label: nil, tag: tag, minInterval: minInterval, existing: true)
+            Self.periodicChanged?()
+            return NSNull()
+
+        case "periodicUnregister":
+            guard let tag = params["tag"] as? String else { throw CallFailure(message: "tag is required") }
+            NsitePeriodic.unregister(siteId: siteId, tag: tag)
+            Self.periodicChanged?()
+            return NSNull()
+
+        case "periodicTags":
+            return NsitePeriodic.tags(siteId: siteId)
+
+        case "open":
+            guard let path = params["path"] as? String, path.hasPrefix("/"), !path.hasPrefix("//") else {
+                throw CallFailure(message: "A site can only open itself")
+            }
+            guard let opener, opener(path) else {
+                throw CallFailure(message: "Nothing asked for that window")
+            }
+            return NSNull()
+
+        default:
+            throw CallFailure(message: "Unknown call \(method)")
         }
     }
 

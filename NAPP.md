@@ -477,7 +477,6 @@ Android and twenty seconds on iOS — see [The delivery deadline](#the-delivery-
   do for gift wraps addressed to a user, will not deliver it.
 - **Web push on the web.** The iframe path used on the web does not define
   `window.napp`.
-- **Several notifications from one push, on iOS.** See [On iOS](#on-ios).
 
 ### Notifications from the page
 
@@ -782,8 +781,9 @@ rejects with the `NotAllowedError` Chrome would give.
 screen cancels every tag the site has.
 
 A worker registering from inside its own `periodicsync` handler asks nobody,
-because there is nobody to ask. On Android that only works for a site that
-already holds a tag; on iOS it resolves and does nothing. Register from the page.
+because there is nobody to ask, so it only works for a tag the site already
+holds — re-registering one, or changing its interval. A new tag from the
+worker rejects. Register from the page.
 
 ### Notifications
 
@@ -950,11 +950,14 @@ file the site never published is a 404 rather than a network error.
 
 What the stand-in registration is honest about: `showNotification` and
 `getNotifications` are real and reach the same tray as everything else, and
-`active` reports a worker, because one will run. Everything to do with
-*talking* to it is not — no `postMessage`, no `controller`, no `message`
-event — because the worker does not exist until a push arrives and the page is
-long gone by then. `update()` and `unregister()` resolve without doing
-anything.
+`active` reports a worker, because one will run. Inside the worker,
+`getNotifications()` lists what is in the shade — including what earlier pushes
+put there — `notification.close()` takes one down, `periodicSync` changes the
+site's tags as on Android, and `clients.openWindow()` moves the window a tap
+opened. Everything to do with *talking* to the worker from the page is not
+there — no `postMessage`, no `controller`, no `message` event — because the
+worker does not exist until a push arrives and the page is long gone by then.
+`update()` and `unregister()` resolve without doing anything.
 
 **Tenna does not hold the relays.** iOS will not let an app keep a socket open
 in the background, so the subscriptions a site sets are handed to a **push
@@ -1037,15 +1040,22 @@ needs in IndexedDB.
 | --- | --- | --- |
 | deadline for `waitUntil` | 5 minutes | 20 seconds |
 | payload | the whole event, always | about 4 KB; a long event arrives as `event_id` and `relays` |
-| notifications per push | as many as the worker asks for | the first |
-| `notificationclick` | raised in the worker | not raised; a tap routes by `data.url` |
+| notifications per push | as many as the worker asks for | as many as the worker asks for, within the twenty seconds |
+| an event two sites asked for | each site's worker runs | each site's worker runs, one after the other, within the twenty seconds |
+| `notificationclick`, `notificationclose` | raised in the worker | raised in the worker, run by the app; see [Taps](#taps) |
 | `icon` | drawn | drawn, as the face beside the notification |
-| `badge`, `image`, `actions` | drawn | accepted and ignored |
+| `image` | drawn | attached, and drawn when the notification is expanded |
+| `actions` | drawn, with their `icon` | drawn, without their `icon` |
+| `badge`, `vibrate` | drawn / honoured | accepted and ignored |
 | the row | a conversation, led by the site's icon | a thread; each notification led by its `icon`, or the site's icon, with Tenna's badged into its corner |
 | `self.napp.fetch` | in the worker | absent |
 | IndexedDB | Chromium's, the site's profile, shared by page and worker | Tenna's, shared by the page, its workers and the extension's worker — see [IndexedDB](#indexeddb) |
 | Cache API | shared by page and worker | shared by the page and its workers, not the extension's worker — see [The Cache API](#the-cache-api) |
 | `napp.fetch`, `share_target` | yes | no |
+
+A button's `icon` has nowhere to go: iOS draws an action's icon only from an SF
+Symbol or a picture in the app's own bundle. `badge` is the status bar's mark,
+and iOS has no status-bar mark per notification.
 
 Two of those are worth writing for rather than around:
 
@@ -1058,17 +1068,23 @@ real message and "New message". See
 fit, so `payload.event` may be absent and `payload.event_id` and
 `payload.relays` are what to fetch it with. See [The payload](#the-payload).
 
-And one to know about rather than handle: a worker that calls
-`showNotification` more than once for a single push gets the first shown and
-the rest dropped. An extension is handed one piece of content to replace, and
-that is all there is.
+And one to know about rather than handle: everything a push asks for shares the
+push's twenty seconds. A worker that shows several notifications, or an event
+several sites subscribed to, runs one worker after another inside that budget,
+oldest site first; a site whose turn does not come in time hears nothing about
+that event.
 
 ### Taps
 
-A tap reaches the app rather than the worker — running one takes a notification
-service extension, and iOS starts one of those only to mutate an arriving
-push, so there is nothing alive to raise `notificationclick` in. So **`data.url`
-is the whole of the routing on iOS**:
+A tap reaches the app rather than the notification extension — iOS starts one
+of those only to change a push on its way in. So the app runs the site's
+worker itself, the same way, and raises `notificationclick` in it, with
+`event.action` and `event.reply` for a button or a reply box, and
+`notificationclose` when the notification is swiped away. The worker gets the
+twenty seconds a push gets.
+
+A tap on the body opens the site at `data.url` first, as on Android, and the
+worker may then move it with `clients.openWindow()` for a minute afterwards:
 
 ```js
 await registration.showNotification('Alice', {
@@ -1077,9 +1093,9 @@ await registration.showNotification('Alice', {
 });
 ```
 
-which is the same line Android reads before it opens the window, and the same
-one every push service worker on Nostr already writes. A notification without
-it opens the site's front page.
+A button or a reply does not bring Tenna to the front: iOS starts it in the
+background, the worker answers, and anything it shows is posted. So
+`openWindow()` from a button press resolves `null`.
 
 ## How a site is served on Android
 

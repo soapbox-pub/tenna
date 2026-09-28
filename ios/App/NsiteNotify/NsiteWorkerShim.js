@@ -9,11 +9,14 @@
  * See `NsiteOrigins.swift` for why there is no real one to have.
  *
  * Everything the worker wants from Tenna goes to the host page by
- * `postMessage`, which relays it to the extension. Android's shim reaches the
- * host with same-origin `fetch` instead. A dedicated worker's fetches do reach
+ * `postMessage`, which relays it to the native side. Most of it is said and
+ * not answered — a notification to show, a lifecycle step — but a question
+ * such as `getNotifications()` is a `call`, which the page relays to a handler
+ * that replies, and the reply comes back to `answered` below. Android's shim
+ * does the same over a `MessagePort`. A dedicated worker's fetches do reach
  * the host page's `WKURLSchemeHandler` — that is how the site's own files are
  * served to it — but only as requests for the site's paths, where there is no
- * room for Tenna's own traffic and nothing comes back but a response.
+ * room for Tenna's own traffic.
  *
  * Loaded before the site's script rather than after it — the site reads
  * `self.registration` at the top of its own file — which is why the two are
@@ -30,6 +33,30 @@
     message[ENVELOPE] = message.kind;
     delete message.kind;
     self.postMessage(message);
+  }
+
+  var calls = {};
+  var nextCall = 1;
+
+  /** Ask the host something, and have the answer. */
+  function call(method, params) {
+    return new Promise(function(resolve, reject) {
+      var id = nextCall++;
+      calls[id] = { resolve: resolve, reject: reject };
+      tell({ kind: 'call', id: id, method: method, params: params || {} });
+    });
+  }
+
+  /** The page relaying the host's answer to a `call`. */
+  function answered(message) {
+    var pending = calls[message.__tennaReply];
+    if (!pending) return;
+    delete calls[message.__tennaReply];
+    if (message.error != null) {
+      pending.reject(new Error(String(message.error)));
+    } else {
+      pending.resolve(message.value);
+    }
   }
 
   // -------------------------------------------------------------------------
@@ -90,8 +117,21 @@
 
   NappNotification.prototype.close = function() {
     if (!this.__key) return;
-    tell({ kind: 'close', key: this.__key });
+    call('close', { key: this.__key }).catch(function() {});
   };
+
+  /**
+   * The site's notifications in the shade, including the ones pushes put
+   * there — which is what a worker reading back its own conversation before
+   * it adds to it wants to see.
+   */
+  function getNotifications(filter) {
+    var tag = filter && filter.tag != null ? String(filter.tag) : null;
+    return call('list', { tag: tag }).then(function(text) {
+      var records = JSON.parse(String(text || '[]'));
+      return records.map(function(record) { return new NappNotification(record); });
+    });
+  }
 
   var listeners = {};
 
@@ -102,9 +142,7 @@
     waiting: null,
     active: null,
     showNotification: showNotification,
-    // Nothing is on screen yet, so there is nothing to read back. Android
-    // answers this out of the shade; here the shade has not been written to.
-    getNotifications: function() { return Promise.resolve([]); },
+    getNotifications: getNotifications,
     update: function() { return Promise.resolve(); },
     unregister: function() { return Promise.resolve(true); },
     addEventListener: function(type, listener) {
@@ -119,30 +157,59 @@
   };
 
   /*
-   * `registration.periodicSync`, as far as a worker with no host can have it.
+   * `registration.periodicSync`, from inside the worker.
    *
-   * `getTags()` answers from the tags the host stamped in when it served this
-   * script. `register` and `unregister` resolve without doing anything: there
-   * is nobody here to ask or to tell, so a tag is registered and forgotten from
-   * the site's window. A worker that re-registers from inside its own
-   * `periodicsync` handler — which is common — keeps working.
+   * The permission is asked for in the site's window, so a worker may only
+   * change a tag it already holds — re-registering from its own `periodicsync`
+   * handler, which is common, or giving one up — as on Android. `getTags()`
+   * falls back to the tags the host stamped in when it served this script.
    */
   // Stamped in by `NsiteWorkerHost` when it serves this file.
   var periodicTags = %%PERIODIC_TAGS%%;
 
   self.registration.periodicSync = {
-    register: function() { return Promise.resolve(); },
-    unregister: function() { return Promise.resolve(); },
-    getTags: function() { return Promise.resolve(periodicTags.slice()); }
+    register: function(tag, options) {
+      var minInterval = options && typeof options.minInterval === 'number' ? options.minInterval : 0;
+      return call('periodicRegister', { tag: String(tag), minInterval: minInterval }).then(function() {});
+    },
+    unregister: function(tag) {
+      return call('periodicUnregister', { tag: String(tag) }).then(function() {});
+    },
+    getTags: function() {
+      return call('periodicTags').then(
+        function(tags) { return Array.isArray(tags) ? tags : periodicTags.slice(); },
+        function() { return periodicTags.slice(); });
+    }
   };
+
+  /**
+   * `clients.openWindow`, for a worker answering a tap.
+   *
+   * A site can open only itself, and only in answer to the user tapping one of
+   * its notifications; anything else resolves null, as a browser's does when
+   * it refuses. The host decides which it is.
+   */
+  function openWindow(url) {
+    var path;
+    try {
+      var resolved = new URL(url, self.location.href);
+      path = resolved.origin === self.location.origin
+        ? resolved.pathname + resolved.search + resolved.hash
+        : null;
+    } catch (err) {
+      path = null;
+    }
+    if (path === null) return Promise.resolve(null);
+    return call('open', { path: path }).then(function() { return null; }, function() { return null; });
+  }
 
   self.clients = {
     get: function() { return Promise.resolve(undefined); },
-    // There is no window. Saying so is better than inventing one for a site
-    // to try to focus or navigate.
+    // There is no window to hand over. The one a tap opens is Tenna's to
+    // move, which `openWindow` asks for.
     matchAll: function() { return Promise.resolve([]); },
     claim: function() { return Promise.resolve(); },
-    openWindow: function() { return Promise.resolve(null); }
+    openWindow: openWindow
   };
 
   self.skipWaiting = function() { return Promise.resolve(); };
@@ -225,7 +292,15 @@
 
   self.addEventListener('message', function(event) {
     var message = event.data;
+    if (message && typeof message === 'object' && message.__tennaReply != null) {
+      // Tenna's traffic, not the site's: registered before the site's script
+      // ran, so this listener is first and the site's never sees it.
+      event.stopImmediatePropagation();
+      answered(message);
+      return;
+    }
     if (!message || typeof message !== 'object' || !KINDS[message[ENVELOPE]]) return;
+    event.stopImmediatePropagation();
 
     dispatch(message[ENVELOPE], message.data).then(function() {
       tell({ kind: 'done', id: message.id });

@@ -72,20 +72,19 @@ import UserNotifications
  squeezed for being an extension's: `WebContent` is given 1536 MB soft,
  `Networking` 840, `GPU` 300, the ordinary numbers.
 
+ ## More than one
+
+ An extension is handed one piece of content to replace, so the first
+ notification a worker asks for becomes the push's own, and every one after it
+ — from the same worker, or from the next site's — is posted beside it with
+ `UNUserNotificationCenter.add`, all before the handler is called.
+
  ## What is still missing
 
- - **One notification per push.** A worker asking for several gets the first
-   shown and the rest dropped, because an extension is given one piece of
-   content to replace. `UNUserNotificationCenter.add` would lift that.
- - **`notificationclick` in the worker.** A tap gets the app, not an extension,
-   so routing is `data.url` and nothing else. See `AppDelegate`.
- - **Pictures and buttons.** An attachment wants a file on disk and an action
-   category has to be registered in advance; neither is a thing a worker can ask
-   for on the way past. See NAPP.md. The `icon` is the exception: it is drawn as
-   the face of a communication notification, not attached. See
-   `NappNotifications.speaking`.
  - **A push no site claims** keeps Tenna's face, and so does one the worker
    ran out of time on: there is no site to show, or no time left to show it.
+ - **A tap is not handled here.** It reaches the app, which runs the worker
+   again for `notificationclick`. See `NappNotificationEvents`.
  */
 class NotificationService: UNNotificationServiceExtension {
 
@@ -139,7 +138,8 @@ class NotificationService: UNNotificationServiceExtension {
 
             guard !Task.isCancelled else { return }
 
-            guard let event, let site = Self.site(for: event) else {
+            let sites = event.map { Self.sites(for: $0) } ?? []
+            guard let event, let first = sites.first else {
                 NSLog("[NsiteNotify] no site claims %@", String(eventId.prefix(8)))
                 self.deliver(content)
                 return
@@ -150,78 +150,75 @@ class NotificationService: UNNotificationServiceExtension {
                 return
             }
 
-            let server = NsiteFileServer(files: site.files, servers: site.servers)
-            let host = NsiteWorkerHost(
-                siteId: site.siteId,
-                worker: site.worker ?? "/sw.js",
-                module: site.workerModule,
-                periodicTags: site.periodicSync.map(\.tag)
-            ) { path in
-                await server.file(path)
+            // Every site that asked for this event hears about it, one worker
+            // after another, for as long as the budget lasts. The first
+            // notification any of them asks for replaces the push's own
+            // content; everything after it is posted beside it.
+            var primary: UNNotificationContent?
+            for (index, site) in sites.enumerated() {
+                let left = Self.budget - Date().timeIntervalSince(started)
+                if index > 0, left < 3 {
+                    NSLog("[NsiteNotify] no time left for %d more site(s)", sites.count - index)
+                    break
+                }
+
+                let host = NsiteWorkerHost(site: site)
+                let notifications = await host.deliver(push: push, timeout: max(left, 2))
+                guard !Task.isCancelled else { return }
+                NSLog("[NsiteNotify] %@ returned %d notification(s)", site.siteId, notifications.count)
+
+                for notification in notifications {
+                    guard !Task.isCancelled else { return }
+                    if primary == nil {
+                        NappNotifications.apply(
+                            to: content, siteId: site.siteId, label: site.label,
+                            title: notification.title, options: notification.options)
+                        primary = await NappNotifications.finished(
+                            content, siteId: site.siteId, label: site.label, options: notification.options)
+                    } else {
+                        let extra = NappNotifications.content(
+                            siteId: site.siteId, label: site.label,
+                            title: notification.title, options: notification.options)
+                        let finished = await NappNotifications.finished(
+                            extra, siteId: site.siteId, label: site.label, options: notification.options)
+                        _ = await NappNotifications.post(finished, siteId: site.siteId, tag: notification.tag)
+                    }
+                }
             }
-
-            let left = Self.budget - Date().timeIntervalSince(started)
-            let notifications = await host.deliver(push: push, timeout: max(left, 2))
-            guard !Task.isCancelled else { return }
-            NSLog("[NsiteNotify] %@ returned %d notification(s)", site.siteId, notifications.count)
-
-            // A worker with nothing to say is a worker that agrees with the
-            // server. More than one is a worker asking for more notifications
-            // than an extension is given: the first is shown and the rest are
-            // dropped.
-            if let first = notifications.first {
-                NappNotifications.apply(
-                    to: content,
-                    siteId: site.siteId,
-                    label: site.label,
-                    title: first.title,
-                    options: first.options
-                )
-            } else {
-                // Even without a sentence of its own, the notification is this
-                // site's: the row it lands in and the tap that opens it both
-                // need saying so.
-                content.threadIdentifier = site.siteId
-                content.userInfo["site"] = site.siteId
-            }
-
-            if notifications.count > 1 {
-                NSLog("[NsiteNotify] worker asked for %d notifications; showing the first",
-                      notifications.count)
-            }
-
-            // Whoever wrote the words, the notification is this site's, and it
-            // wears the site's face rather than Tenna's. See `speaking`.
-            let face = await NappFaces.face(
-                notifications.first?.options["icon"] as? String, siteId: site.siteId)
-            guard !Task.isCancelled else { return }
-            let spoken = await NappNotifications.speaking(content, label: site.label, face: face)
             guard !Task.isCancelled else { return }
 
-            self.deliver(spoken)
+            // No worker had anything to say: the server's words stand, but in
+            // the first site's row and wearing its face, so the row it lands
+            // in and the tap that opens it are that site's.
+            if primary == nil {
+                content.threadIdentifier = first.siteId
+                content.userInfo["site"] = first.siteId
+                content.categoryIdentifier = await NappActions.category(for: [:])
+                let face = await NappFaces.face(nil, siteId: first.siteId)
+                primary = await NappNotifications.speaking(content, label: first.label, face: face)
+            }
+            guard !Task.isCancelled, let primary else { return }
+
+            self.deliver(primary)
         }
     }
 
     // MARK: - Routing
 
     /**
-     Which site this event is for, or none.
+     Which sites this event is for, in the order their workers are run.
 
-     The first listening site whose own filters claim it. An event two sites
-     both subscribed to is shown once, for the first of them — a second
-     notification would need a second push, which is the cost the merged
-     registration exists to avoid. Oldest record first, so the answer does not
-     move around as sites are opened.
+     Every listening site whose own filters claim it. The push arrives once
+     however many sites asked — that is what the merged registration is for —
+     and is shared out here. Oldest record first, so the site that is run
+     first, and gets the most of the budget, does not move around as sites are
+     opened.
      */
-    private static func site(for event: NsiteEvent) -> NsiteRecord? {
-        let sites = NsiteStore.all()
+    private static func sites(for event: NsiteEvent) -> [NsiteRecord] {
+        NsiteStore.all()
             .filter { $0.listening }
             .sorted { $0.updatedAt < $1.updatedAt }
-
-        for site in sites where site.filters.contains(where: { $0.matches(event) }) {
-            return site
-        }
-        return nil
+            .filter { site in site.filters.contains(where: { $0.matches(event) }) }
     }
 
     // MARK: - The payload

@@ -71,9 +71,25 @@
     worker.postMessage({ __tennaIDBPort: true }, ports);
   }
 
+  // A question from the worker, to a handler that answers. See `call` in
+  // the shim.
+  var calls = window.webkit.messageHandlers.tennaCall;
+
   worker.onmessage = function(event) {
     var message = event.data;
     if (!message || typeof message !== 'object' || !message.__tenna) return;
+    if (message.__tenna === 'call') {
+      if (!calls) {
+        worker.postMessage({ __tennaReply: message.id, error: 'Nothing here answers that' });
+        return;
+      }
+      calls.postMessage(JSON.stringify(message)).then(function(value) {
+        worker.postMessage({ __tennaReply: message.id, value: value });
+      }, function(err) {
+        worker.postMessage({ __tennaReply: message.id, error: String((err && err.message) || err) });
+      });
+      return;
+    }
     tell(message);
   };
 

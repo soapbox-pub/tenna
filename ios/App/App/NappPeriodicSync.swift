@@ -23,62 +23,20 @@ enum NappPeriodicSync {
 
     static let identifier = "pub.soapbox.tenna.periodicsync"
 
-    /// The same floor as Android's, which is WorkManager's.
-    static let floor: TimeInterval = 15 * 60
-
-    /// How many tags one site may hold.
-    static let maxTags = 20
-
     /// The whole run, short of the thirty seconds or so iOS gives a refresh
     /// task, so the last worker is stopped by us and not by the watchdog.
     private static let budget: TimeInterval = 25
 
     // MARK: - Registering
 
-    enum Failure: LocalizedError {
-        case tooMany
-        case notStored
-
-        var errorDescription: String? {
-            switch self {
-            case .tooMany: return "Too many periodic sync tags"
-            case .notStored: return "Could not store the tag"
-            }
-        }
-    }
-
-    /**
-     Register or re-register a tag.
-
-     A tag the site already has keeps its last run, so a site that registers on
-     every page load does not push its own next run away. A new one starts its
-     clock now: the first run is a whole interval off, as it is in Chrome.
-     */
+    /// Register or re-register a tag, and ask for a run. See `NsitePeriodic`.
     static func register(siteId: String, label: String?, tag: String, minInterval: TimeInterval) throws {
-        let interval = max(floor, minInterval)
-        var failure: Failure?
-
-        let stored = NsiteStore.update(siteId) { record in
-            if let label, !label.isEmpty, record.label == record.siteId { record.label = label }
-
-            if let index = record.periodicSync.firstIndex(where: { $0.tag == tag }) {
-                record.periodicSync[index].minInterval = interval
-            } else if record.periodicSync.count >= maxTags {
-                failure = .tooMany
-            } else {
-                record.periodicSync.append(NsitePeriodicTag(
-                    tag: tag, minInterval: interval, lastRun: Date().timeIntervalSince1970))
-            }
-        }
-
-        if let failure { throw failure }
-        guard stored != nil else { throw Failure.notStored }
+        try NsitePeriodic.register(siteId: siteId, label: label, tag: tag, minInterval: minInterval)
         schedule()
     }
 
     static func unregister(siteId: String, tag: String) {
-        guard NsiteStore.load(siteId) != nil else { return }
-        NsiteStore.update(siteId) { $0.periodicSync.removeAll { $0.tag == tag } }
+        NsitePeriodic.unregister(siteId: siteId, tag: tag)
         schedule()
     }
 
@@ -89,7 +47,7 @@ enum NappPeriodicSync {
     }
 
     static func tags(siteId: String) -> [String] {
-        NsiteStore.load(siteId)?.periodicSync.map(\.tag) ?? []
+        NsitePeriodic.tags(siteId: siteId)
     }
 
     // MARK: - When
@@ -213,15 +171,7 @@ enum NappPeriodicSync {
                 }
             }
 
-            let server = NsiteFileServer(files: site.files, servers: site.servers)
-            let host = NsiteWorkerHost(
-                siteId: site.siteId,
-                worker: site.worker ?? "/sw.js",
-                module: site.workerModule,
-                periodicTags: site.periodicSync.map(\.tag)
-            ) { path in
-                await server.file(path)
-            }
+            let host = NsiteWorkerHost(site: site)
 
             for tag in due {
                 let left = deadline.timeIntervalSinceNow

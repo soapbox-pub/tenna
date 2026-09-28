@@ -19,6 +19,9 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
         // Before this returns, or iOS has nobody to hand the task to. See
         // `NappPeriodicSync`.
         NappPeriodicSync.registerHandler()
+        // A worker that re-registers a tag from inside an event wants the
+        // next run asked for, which only the app can do.
+        NsiteWorkerHost.periodicChanged = { NappPeriodicSync.schedule() }
 
         // A transaction is a lock on a file in the App Group, and iOS kills a
         // suspended app holding one. So while any is open the app asks for a
@@ -87,18 +90,19 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
     }
 
     /**
-     A tap, which opens the site where the notification pointed.
+     A tap, a button, a reply or a swipe on one of a site's notifications.
 
+     A tap on the body opens the site where the notification pointed first.
      `data.url` is a convention rather than anything the standard says, but it
-     is what every push service worker on Nostr already writes and the only
-     thing that can route a tap with no worker alive to route it — the same
+     is what every push service worker on Nostr already writes, and it puts the
+     window up at once rather than after a worker has started — the same
      reading Android takes. See NAPP.md.
 
-     There is no `notificationclick` in the worker to follow it with. Running
-     one takes a `UNNotificationServiceExtension`, and iOS starts one of those
-     only to mutate an arriving push; a tap gets the app instead. So a site that
-     does its routing in the worker gets its front page here, and one that
-     declares `data.url` gets the page it named.
+     Then the site's worker hears about it — `notificationclick`, with the
+     button and any reply, or `notificationclose` — and may move the window it
+     has just been given. A button or a swipe starts Tenna in the background,
+     so the worker gets a background task's worth of time and the system is
+     told only once it is done. See `NappNotificationEvents`.
      */
     func userNotificationCenter(
         _ center: UNUserNotificationCenter,
@@ -109,14 +113,27 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
         let site = info["site"] as? String
             ?? response.notification.request.content.threadIdentifier
 
-        if NsiteOrigins.isSiteId(site) {
+        if response.actionIdentifier == UNNotificationDefaultActionIdentifier, NsiteOrigins.isSiteId(site) {
             let path = (info["url"] as? String).flatMap {
                 $0.hasPrefix("/") && !$0.hasPrefix("//") ? $0 : nil
             }
             NappPushPlugin.current?.opened(siteId: site, path: path)
         }
 
-        completionHandler()
+        let application = UIApplication.shared
+        var task: UIBackgroundTaskIdentifier = .invalid
+        task = application.beginBackgroundTask(withName: "Notification event") {
+            application.endBackgroundTask(task)
+            task = .invalid
+        }
+        Task { @MainActor in
+            await NappNotificationEvents.handle(response)
+            completionHandler()
+            if task != .invalid {
+                application.endBackgroundTask(task)
+                task = .invalid
+            }
+        }
     }
 
     func applicationWillResignActive(_ application: UIApplication) {

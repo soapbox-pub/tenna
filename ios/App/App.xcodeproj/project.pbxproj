@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		E5937A73ED866B660FA99B1E /* NappNotificationEvents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8628F39E91B567E9E6F119EB /* NappNotificationEvents.swift */; };
 		5EC256000000000000000003 /* CSecp256k1 in Frameworks */ = {isa = PBXBuildFile; productRef = 5EC256000000000000000002 /* CSecp256k1 */; };
 		64B492D857E30B1B071C0290 /* TennaSignerPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = F08797FE756CD493F3BE1AD1 /* TennaSignerPlugin.swift */; };
 		2AB91A724E58EBDE5B1B641F /* TennaKeys.swift in Sources */ = {isa = PBXBuildFile; fileRef = 71657B6834AED007E461E3E9 /* TennaKeys.swift */; };
@@ -69,6 +70,7 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		8628F39E91B567E9E6F119EB /* NappNotificationEvents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NappNotificationEvents.swift; sourceTree = "<group>"; };
 		F08797FE756CD493F3BE1AD1 /* TennaSignerPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TennaSignerPlugin.swift; sourceTree = "<group>"; };
 		71657B6834AED007E461E3E9 /* TennaKeys.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TennaKeys.swift; sourceTree = "<group>"; };
 		EB6507BC26D2E54B012BD29D /* NostrCipher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NostrCipher.swift; sourceTree = "<group>"; };
@@ -190,6 +192,7 @@
 		504EC3061FED79650016851F /* App */ = {
 			isa = PBXGroup;
 			children = (
+				8628F39E91B567E9E6F119EB /* NappNotificationEvents.swift */,
 				F08797FE756CD493F3BE1AD1 /* TennaSignerPlugin.swift */,
 				71657B6834AED007E461E3E9 /* TennaKeys.swift */,
 				EB6507BC26D2E54B012BD29D /* NostrCipher.swift */,
@@ -367,6 +370,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				E5937A73ED866B660FA99B1E /* NappNotificationEvents.swift in Sources */,
 				64B492D857E30B1B071C0290 /* TennaSignerPlugin.swift in Sources */,
 				2AB91A724E58EBDE5B1B641F /* TennaKeys.swift in Sources */,
 				49303D94CDA1485D33B05342 /* NostrCipher.swift in Sources */,

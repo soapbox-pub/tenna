@@ -282,3 +282,77 @@ enum NsiteStore {
         return text
     }
 }
+
+/**
+ A site's `registration.periodicSync` tags, as written down.
+
+ Here rather than in `NappPeriodicSync` because two processes change them: the
+ app, for the site's window, and the notification extension, for a worker that
+ re-registers from inside an event. Only the app can schedule the background
+ task that runs them, so after a change the extension leaves that to the next
+ time the app goes to the background.
+ */
+enum NsitePeriodic {
+
+    /// The same floor as Android's, which is WorkManager's.
+    static let floor: TimeInterval = 15 * 60
+
+    /// How many tags one site may hold.
+    static let maxTags = 20
+
+    enum Failure: LocalizedError {
+        case tooMany
+        case notStored
+        case notHeld
+
+        var errorDescription: String? {
+            switch self {
+            case .tooMany: return "Too many periodic sync tags"
+            case .notStored: return "Could not store the tag"
+            case .notHeld: return "A worker may only re-register a tag its site already holds"
+            }
+        }
+    }
+
+    /**
+     Register or re-register a tag.
+
+     A tag the site already has keeps its last run, so a site that registers on
+     every page load does not push its own next run away. A new one starts its
+     clock now: the first run is a whole interval off, as it is in Chrome.
+     `existing` refuses a tag the site does not hold yet, which is the rule for
+     a worker: the permission is asked for in the site's window.
+     */
+    static func register(siteId: String, label: String?, tag: String, minInterval: TimeInterval,
+                         existing: Bool = false) throws {
+        let interval = max(floor, minInterval)
+        var failure: Failure?
+
+        let stored = NsiteStore.update(siteId) { record in
+            if let label, !label.isEmpty, record.label == record.siteId { record.label = label }
+
+            if let index = record.periodicSync.firstIndex(where: { $0.tag == tag }) {
+                record.periodicSync[index].minInterval = interval
+            } else if existing {
+                failure = .notHeld
+            } else if record.periodicSync.count >= maxTags {
+                failure = .tooMany
+            } else {
+                record.periodicSync.append(NsitePeriodicTag(
+                    tag: tag, minInterval: interval, lastRun: Date().timeIntervalSince1970))
+            }
+        }
+
+        if let failure { throw failure }
+        guard stored != nil else { throw Failure.notStored }
+    }
+
+    static func unregister(siteId: String, tag: String) {
+        guard NsiteStore.load(siteId) != nil else { return }
+        NsiteStore.update(siteId) { $0.periodicSync.removeAll { $0.tag == tag } }
+    }
+
+    static func tags(siteId: String) -> [String] {
+        NsiteStore.load(siteId)?.periodicSync.map(\.tag) ?? []
+    }
+}

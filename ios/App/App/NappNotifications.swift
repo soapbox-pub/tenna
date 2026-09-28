@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import ImageIO
 import Intents
@@ -25,12 +26,19 @@ import UserNotifications
  beside it is the notification's `icon`, or the site's own when it names none,
  rather than Tenna's. See `speaking`.
 
- Android goes further — the badge, pictures, buttons, replies. None of that has
- an iOS equivalent worth pretending to: `UNNotificationAttachment` wants a file
- on disk and reads nothing from a URL, and an action category has to be
- registered before the notification is posted rather than named by it. So
- `badge`, `image`, `actions`, `vibrate` and `renotify` are accepted and ignored
- here, and `NAPP.md` says so.
+ The `image` is fetched and attached, and drawn when the notification is
+ expanded. The `actions` become buttons and reply boxes: a category has to be
+ registered before a notification can name it, so one is registered on the way
+ past for every distinct set of buttons — see `NappActions`. `renotify` is
+ honoured by posting a quiet replacement. `badge` and `vibrate` have nothing to
+ map to: iOS draws no per-notification mark in a status bar, and a vibration
+ pattern is the system's. `NAPP.md` says so.
+
+ A notification a push put in the shade is filed under the identifier APNs
+ gave it, not `site|tag`, because the extension can only replace the content of
+ the request it was handed. So everything that finds a site's notifications —
+ listing, closing, replacing by tag — goes by the `site` and `tag` in its
+ `userInfo`, which every notification of a site's carries whoever posted it.
  */
 enum NappNotifications {
 
@@ -103,21 +111,77 @@ enum NappNotifications {
                 siteId: siteId, label: label, title: title, options: options)
 
             Task {
-                let face = await NappFaces.face(options["icon"] as? String, siteId: siteId)
-                let spoken = await speaking(content, label: label, face: face)
-
-                let request = UNNotificationRequest(
-                    identifier: key(siteId: siteId, tag: tag),
-                    content: spoken,
-                    trigger: nil
-                )
-
-                UNUserNotificationCenter.current().add(request) { error in
-                    if let error { NSLog("[NappPush] could not post: %@", error.localizedDescription) }
-                    completion(error == nil)
-                }
+                let spoken = await finished(content, siteId: siteId, label: label, options: options)
+                completion(await post(spoken, siteId: siteId, tag: tag))
             }
         }
+    }
+
+    /// Put finished content in the shade, filed under the site and its tag.
+    static func post(_ content: UNNotificationContent, siteId: String, tag: String) async -> Bool {
+        let request = UNNotificationRequest(identifier: key(siteId: siteId, tag: tag), content: content, trigger: nil)
+        do {
+            try await UNUserNotificationCenter.current().add(request)
+            return true
+        } catch {
+            NSLog("[NappPush] could not post: %@", error.localizedDescription)
+            return false
+        }
+    }
+
+    /**
+     Everything about a notification that takes a moment: its buttons, its
+     picture, its face, and whether it quietly replaces one already there.
+
+     The one path every notification of a site's goes through, from its window,
+     from a push, from a background run, so they are the same kind of thing.
+     */
+    static func finished(
+        _ content: UNMutableNotificationContent,
+        siteId: String,
+        label: String,
+        options: [String: Any]
+    ) async -> UNNotificationContent {
+        content.categoryIdentifier = await NappActions.category(for: options)
+
+        if let image = options["image"] as? String, !image.isEmpty,
+           let attachment = await NappFaces.attachment(image, siteId: siteId) {
+            content.attachments = [attachment]
+        }
+
+        // The standard's `tag`: a later notification replaces the earlier one,
+        // and says nothing about it unless it was asked to `renotify`.
+        let tag = options["tag"] as? String ?? ""
+        if !tag.isEmpty, await replace(siteId: siteId, tag: tag),
+           !((options["renotify"] as? Bool) ?? false) {
+            content.sound = nil
+            content.interruptionLevel = .passive
+        }
+
+        let face = await NappFaces.face(options["icon"] as? String, siteId: siteId)
+        return await speaking(content, label: label, face: face)
+    }
+
+    /**
+     Take down the site's notifications with this tag, and say whether there
+     were any.
+
+     `show` would replace one it posted itself by identifier anyway; this is
+     for the ones it did not, which a push filed under APNs's identifier.
+     */
+    static func replace(siteId: String, tag: String) async -> Bool {
+        let delivered = await UNUserNotificationCenter.current().deliveredNotifications()
+        let keys = delivered
+            .filter { belongs($0, to: siteId) && $0.request.content.userInfo["tag"] as? String == tag }
+            .map { $0.request.identifier }
+        guard !keys.isEmpty else { return false }
+        UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: keys)
+        return true
+    }
+
+    private static func belongs(_ notification: UNNotification, to siteId: String) -> Bool {
+        let content = notification.request.content
+        return content.threadIdentifier == siteId || content.userInfo["site"] as? String == siteId
     }
 
     /**
@@ -227,6 +291,10 @@ enum NappNotifications {
 
         var info: [String: Any] = [
             "site": siteId,
+            // As the site gave it. The content's own title is rewritten on the
+            // way to the shade — see `speaking` — and a worker handed this
+            // notification back on a tap should see what it wrote.
+            "title": title,
             "tag": options["tag"] as? String ?? "",
             // As text, because `userInfo` takes property-list values only and
             // a site's `data` is whatever JSON it liked.
@@ -246,7 +314,7 @@ enum NappNotifications {
     static func list(siteId: String, tag: String?, completion: @escaping ([[String: Any]]) -> Void) {
         UNUserNotificationCenter.current().getDeliveredNotifications { delivered in
             let records = delivered
-                .filter { $0.request.content.threadIdentifier == siteId }
+                .filter { belongs($0, to: siteId) }
                 .compactMap { record($0) }
                 .filter { tag == nil || $0["tag"] as? String == tag }
             completion(records)
@@ -269,7 +337,7 @@ enum NappNotifications {
 
         return [
             "key": notification.request.identifier,
-            "title": content.title,
+            "title": content.userInfo["title"] as? String ?? content.title,
             "tag": content.userInfo["tag"] as? String ?? "",
             "options": options,
         ]
@@ -280,14 +348,22 @@ enum NappNotifications {
     static func close(siteId: String, key: String) {
         // Its own only. The key came from the site, and a site must not be able
         // to clear a neighbour's row by guessing one.
-        guard self.siteId(ofKey: key) == siteId else { return }
-        UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: [key])
+        if self.siteId(ofKey: key) == siteId {
+            UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: [key])
+            return
+        }
+        // One a push posted, under APNs's identifier: the site's if the
+        // notification says so, which is the site's own claim to it.
+        UNUserNotificationCenter.current().getDeliveredNotifications { delivered in
+            guard delivered.contains(where: { $0.request.identifier == key && belongs($0, to: siteId) }) else { return }
+            UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: [key])
+        }
     }
 
     static func closeAll(siteId: String) {
         UNUserNotificationCenter.current().getDeliveredNotifications { delivered in
             let keys = delivered
-                .filter { $0.request.content.threadIdentifier == siteId }
+                .filter { belongs($0, to: siteId) }
                 .map { $0.request.identifier }
             guard !keys.isEmpty else { return }
             UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: keys)
@@ -373,6 +449,14 @@ enum NappFaces {
 
     /// Decoded and drawn again at `size`, as a PNG, or nil if it is no picture.
     private static func redrawn(_ bytes: Data) -> Data? {
+        redrawn(bytes, size: size)?.data
+    }
+
+    /**
+     Decoded and drawn again no larger than `size` on its longer side: a PNG
+     if it has any transparency to keep, a JPEG if it has none.
+     */
+    private static func redrawn(_ bytes: Data, size: Int) -> (data: Data, type: UTType)? {
         guard let source = CGImageSourceCreateWithData(bytes as CFData, nil),
               let image = CGImageSourceCreateThumbnailAtIndex(source, 0, [
                   kCGImageSourceCreateThumbnailFromImageAlways: true,
@@ -380,11 +464,46 @@ enum NappFaces {
                   kCGImageSourceThumbnailMaxPixelSize: size,
               ] as CFDictionary) else { return nil }
 
+        let opaque = [.none, .noneSkipFirst, .noneSkipLast].contains(image.alphaInfo)
+        let type: UTType = opaque ? .jpeg : .png
         let out = NSMutableData()
         guard let destination = CGImageDestinationCreateWithData(
-            out, UTType.png.identifier as CFString, 1, nil) else { return nil }
-        CGImageDestinationAddImage(destination, image, nil)
-        return CGImageDestinationFinalize(destination) ? out as Data : nil
+            out, type.identifier as CFString, 1, nil) else { return nil }
+        CGImageDestinationAddImage(destination, image, opaque
+            ? [kCGImageDestinationLossyCompressionQuality: 0.85] as CFDictionary
+            : nil)
+        return CGImageDestinationFinalize(destination) ? (out as Data, type) : nil
+    }
+
+    /// The notification's `image`, drawn larger than a face and shown when
+    /// it is expanded.
+    private static let pictureSize = 1024
+
+    /**
+     The notification's `image`, as a file the system can attach, or nil.
+
+     The same three kinds of reference as a face, fetched the same careful way
+     and redrawn the same way, so what reaches the notification is a picture
+     Tenna drew and not bytes a stranger chose. The system moves the file into
+     its own store when the notification is posted.
+     */
+    static func attachment(_ reference: String, siteId: String) async -> UNNotificationAttachment? {
+        guard let bytes = await within(patience, { await picture(reference, siteId: siteId) }),
+              let (data, type) = redrawn(bytes, size: pictureSize),
+              let ext = type.preferredFilenameExtension else { return nil }
+
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("napp-\(UUID().uuidString).\(ext)")
+        do {
+            try data.write(to: url)
+            return try UNNotificationAttachment(identifier: "image", url: url, options: [
+                UNNotificationAttachmentOptionsTypeHintKey: type.identifier,
+            ])
+        } catch {
+            NSLog("[NappPush] could not attach the image: %@", error.localizedDescription)
+            try? FileManager.default.removeItem(at: url)
+            return nil
+        }
     }
 
     /// Whatever `work` answers within `seconds`, or nil.
@@ -487,4 +606,138 @@ enum NappTokens {
 
         return tail[open.upperBound..<close.lowerBound] == "development" ? "sandbox" : "production"
     }()
+}
+
+/**
+ A notification's `actions`, as the buttons under it.
+
+ On Android a button is part of the notification. Here it belongs to a
+ *category*, registered with the notification center before the notification
+ that names it is posted — and a site's buttons are whatever its worker says
+ they are this time. So a category is registered on the way past for each
+ distinct set, named by a hash of what is in it, and every later notification
+ with the same buttons reuses it.
+
+ Every category also asks for the dismiss action, so a swipe reaches the app
+ and the worker gets `notificationclose`. A notification with no buttons gets
+ the plain one for that alone.
+
+ A button's `icon` has nowhere to go: `UNNotificationActionIcon` takes an SF
+ Symbol or a picture in the app bundle, not one from a site.
+ */
+enum NappActions {
+
+    /// The category of a notification with no buttons.
+    static let plain = "napp"
+
+    /// What a button's identifier starts with, so no site's action can be
+    /// mistaken for the system's default and dismiss identifiers.
+    static let actionPrefix = "napp.action:"
+
+    private static let categoryPrefix = "napp.buttons."
+
+    /// As many as Android draws.
+    private static let maxActions = 3
+    private static let maxId = 128
+    private static let maxName = 64
+
+    /// Categories of buttons kept registered at once. Past this, the least
+    /// recently wanted give way; a notification still in the shade whose
+    /// category went keeps its words and loses its buttons.
+    private static let maxCategories = 32
+
+    struct Action: Equatable {
+        let action: String
+        let title: String
+        let input: Bool
+        let placeholder: String?
+    }
+
+    static func actions(in options: [String: Any]) -> [Action] {
+        var out: [Action] = []
+        for entry in options["actions"] as? [Any] ?? [] {
+            guard out.count < maxActions,
+                  let entry = entry as? [String: Any],
+                  let action = (entry["action"] as? String).map({ String($0.prefix(maxId)) }), !action.isEmpty,
+                  let title = (entry["title"] as? String).map({ String($0.prefix(maxName)) }), !title.isEmpty
+            else { continue }
+            let input = entry["type"] as? String == "text"
+            out.append(Action(
+                action: action,
+                title: title,
+                input: input,
+                placeholder: input ? (entry["placeholder"] as? String).map { String($0.prefix(maxName)) } : nil
+            ))
+        }
+        return out
+    }
+
+    /// The site's own name for a button pressed, or nil for a system action.
+    static func action(fromIdentifier identifier: String) -> String? {
+        identifier.hasPrefix(actionPrefix) ? String(identifier.dropFirst(actionPrefix.count)) : nil
+    }
+
+    /// The category to post a notification with these options under,
+    /// registered by the time this returns.
+    static func category(for options: [String: Any]) async -> String {
+        let actions = actions(in: options)
+        guard !actions.isEmpty else {
+            await registry.ensure(plain, UNNotificationCategory(
+                identifier: plain, actions: [], intentIdentifiers: [], options: [.customDismissAction]))
+            return plain
+        }
+
+        var fingerprint = ""
+        for action in actions {
+            fingerprint += "\(action.action)\u{0}\(action.title)\u{0}\(action.input)\u{0}\(action.placeholder ?? "")\u{1}"
+        }
+        let identifier = categoryPrefix + SHA256.hash(data: Data(fingerprint.utf8))
+            .prefix(12).map { String(format: "%02x", $0) }.joined()
+
+        let buttons: [UNNotificationAction] = actions.map { action in
+            let id = actionPrefix + action.action
+            // No `.foreground`: pressing a button is answered by the worker,
+            // as on Android, and does not bring Tenna up over what the user
+            // was doing.
+            if action.input {
+                return UNTextInputNotificationAction(
+                    identifier: id, title: action.title, options: [],
+                    textInputButtonTitle: "Send",
+                    textInputPlaceholder: action.placeholder ?? "")
+            }
+            return UNNotificationAction(identifier: id, title: action.title, options: [])
+        }
+        await registry.ensure(identifier, UNNotificationCategory(
+            identifier: identifier, actions: buttons, intentIdentifiers: [], options: [.customDismissAction]))
+        return identifier
+    }
+
+    private static let registry = Registry()
+
+    /// One at a time, because registering is a read and a write of the whole set.
+    private actor Registry {
+        /// Most recently wanted last.
+        private var recent: [String] = []
+
+        func ensure(_ identifier: String, _ category: UNNotificationCategory) async {
+            recent.removeAll { $0 == identifier }
+            recent.append(identifier)
+
+            let center = UNUserNotificationCenter.current()
+            var categories = await center.notificationCategories()
+            if categories.contains(where: { $0.identifier == identifier }) { return }
+
+            categories.insert(category)
+            let ours = categories.filter { $0.identifier.hasPrefix(categoryPrefix) }
+            if ours.count > maxCategories {
+                // Oldest first: ones this process has not wanted, then the
+                // least recently wanted.
+                let order = ours.sorted { (recent.firstIndex(of: $0.identifier) ?? -1) < (recent.firstIndex(of: $1.identifier) ?? -1) }
+                for stale in order.prefix(ours.count - maxCategories) where stale.identifier != identifier {
+                    categories.remove(stale)
+                }
+            }
+            center.setNotificationCategories(categories)
+        }
+    }
 }

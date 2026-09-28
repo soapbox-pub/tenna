@@ -575,8 +575,10 @@ class TxnState {
   }
 
   private beginSpec(): Wire {
-    const m = this.mode === 'readonly' ? 'r' : 'w';
-    return [m, this.conn.name, this.conn.version, this.conn.incarnation];
+    if (this.mode === 'readonly') return ['r', this.conn.name, this.conn.version, this.conn.incarnation];
+    const spec: Wire[] = ['w', this.conn.name, this.conn.version, this.conn.incarnation];
+    if (this.durability === 'strict') spec.push('s');
+    return spec;
   }
 
   // -- Delivering answers, one task at a time --------------------------------

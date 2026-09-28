@@ -563,6 +563,13 @@ final class NsiteIndexedDB {
                 txn.writer = true
                 let conn = try file.writer()
                 txn.conn = conn
+                // `durability: 'strict'`: the WAL is synced at commit, not
+                // only when it is checkpointed. Set outside the transaction,
+                // where SQLite takes it, and put back when it ends.
+                if mode == "w", spec[safe: 4]?.ascii == "s" {
+                    try conn.exec("PRAGMA synchronous = FULL")
+                    txn.strict = true
+                }
                 try conn.exec("BEGIN IMMEDIATE")
             }
             let conn = txn.conn!
@@ -647,6 +654,7 @@ final class NsiteIndexedDB {
             } else {
                 try? conn.exec("ROLLBACK")
             }
+            if txn.strict { try? conn.exec("PRAGMA synchronous = NORMAL") }
             if txn.reader { txn.file?.releaseReader(conn) }
         }
         txn.conn = nil
@@ -898,6 +906,8 @@ private final class IDBTransaction {
     /// Never began, or began and was found stale or already upgraded.
     var dead = false
     var upgraded = false
+    /// `durability: 'strict'`, with the writer synced at commit.
+    var strict = false
     var failed: IDBFailure?
     /// Counted out of `NsiteIndexedDB.open`. Main thread.
     var counted = false

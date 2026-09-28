@@ -987,6 +987,9 @@ test that needs the suite's own server and the Proxy below. Keep in mind:
   opening a newer version than the page has open finishes its upgrade at once,
   and the page's connection gets `versionchange` and then, if it has not
   closed itself, `close`. Close on `versionchange`, as on the web, and reopen.
+- **`durability` is honoured.** A commit always survives the app crashing;
+  `'strict'` also waits for it to be on disk, so it survives the phone losing
+  power, at the cost of a sync. `'default'` and `'relaxed'` do not wait.
 - **A `SharedWorker` has WebKit's IndexedDB**, not the site's.
 - **Transactions are best few and full.** Each one costs a round trip to the
   store, about 0.7 ms on an iPhone 15 against WebKit's 0.08, while requests

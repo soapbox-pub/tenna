@@ -32,7 +32,10 @@
  *   transaction on a connection that opened the database at this version
  *   and incarnation. The header is `'ok'`, or `'stale'` when the database
  *   has since been upgraded or deleted, in which case the transaction has
- *   not begun and every result is null.
+ *   not begun and every result is null. A readwrite begin may end with
+ *   `'s'`, for `durability: 'strict'`: its commit is on disk, not merely in
+ *   the log the OS will write, before it is answered. Without it a commit
+ *   survives the app crashing but may be lost to the phone losing power.
  * - `['v', name, version]`: an upgrade to `version`. The header is the
  *   `Schema` as it was when the upgrade began — the version in it is the old
  *   version, 0 for a database that did not exist. The store creates the

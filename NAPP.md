@@ -963,6 +963,45 @@ when something matches. Three things follow from that:
   about; it is not told whose device it is. Requests are signed with a key
   generated once per install and never with the reader's own.
 
+### IndexedDB
+
+On iOS a site's IndexedDB is Tenna's rather than WebKit's, and it is **one
+IndexedDB**: the page, its same-origin frames, the workers it starts, and the
+service worker the notification extension runs all open the same databases.
+WebKit's could not give them that — the extension is another process, with a
+store of its own — and it is what lets a worker read what the page wrote: who
+the reader is, whom they mute, what has already been shown. It is also what
+Lockdown Mode leaves alone; WebKit's IndexedDB is one of the things it takes
+away.
+
+It is the standard API and a site uses it unchanged: it passes the
+web-platform-tests IndexedDB suite, run inside Tenna on an iPhone, all but one
+test that needs the suite's own server and the Proxy below. Keep in mind:
+
+- **The first time a site opens after the update, its databases are moved
+  in** from WebKit's store before the site's first request is answered: every
+  database, store, index and record, each checked before WebKit's copy is
+  deleted. A copied store's key generator carries on after its largest numeric
+  key, since IndexedDB will not say where WebKit's had got to.
+- **A `CryptoKey` cannot be stored.** A key WebKit let a site keep
+  unextractable has no bytes a script can reach, and script is what writes a
+  value down here. Store the key's JWK, or derive it again. A database holding
+  one is left in WebKit's store by the move, where nothing reaches it.
+- **A Proxy of an Array is accepted as a key.** Browsers refuse one; script
+  cannot tell it from the array it proxies.
+- **An upgrade in another process does not wait.** The extension's worker
+  opening a newer version than the page has open finishes its upgrade at once,
+  and the page's connection gets `versionchange` and then, if it has not
+  closed itself, `close`. Close on `versionchange`, as on the web, and reopen.
+- **A `SharedWorker` has WebKit's IndexedDB**, not the site's.
+- **Transactions are best few and full.** Each one costs a round trip to the
+  store, about 0.7 ms on an iPhone 15 against WebKit's 0.08, while requests
+  inside one stream: ten thousand puts in a transaction take 105 ms here and
+  229 in Safari.
+
+Removing a site from the wall forgets its IndexedDB, with its cookies,
+local storage, subscriptions and notifications, as it does on Android.
+
 ### What is smaller here
 
 | | Android | iOS |
@@ -975,6 +1014,7 @@ when something matches. Three things follow from that:
 | `badge`, `image`, `actions` | drawn | accepted and ignored |
 | the row | a conversation, led by the site's icon | a thread; each notification led by its `icon`, or the site's icon, with Tenna's badged into its corner |
 | `self.napp.fetch` | in the worker | absent |
+| IndexedDB | Chromium's, the site's profile, shared by page and worker | Tenna's, shared by the page, its workers and the extension's worker — see [IndexedDB](#indexeddb) |
 | `napp.fetch`, `share_target` | yes | no |
 
 Two of those are worth writing for rather than around:

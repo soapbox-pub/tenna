@@ -280,3 +280,17 @@ export const NsiteShortcuts = registerPlugin<NsiteShortcutsPlugin>('NsiteShortcu
 export function supportsNsiteWindows(): boolean {
   return Capacitor.getPlatform() === 'android' && Capacitor.isPluginAvailable('NsiteShortcuts');
 }
+
+/**
+ * Whether a site can be offered in the OS share sheet.
+ *
+ * Android and iOS. On Android each site is an entry of its own; on iOS Tenna
+ * has the one entry, its share extension, and the wall asks which site the
+ * share is for. Either way the wall tells the native side which sites take
+ * shares, through {@link NsiteShortcutsPlugin.syncSite}, and a share sent to
+ * Tenna arrives through {@link NsiteShortcutsPlugin.getPendingShare}.
+ */
+export function supportsShareSheet(): boolean {
+  const platform = Capacitor.getPlatform();
+  return (platform === 'android' || platform === 'ios') && Capacitor.isPluginAvailable('NsiteShortcuts');
+}

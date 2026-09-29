@@ -6,7 +6,7 @@ import type { NsiteApp } from '@/hooks/useNsiteApp';
 import { renderAppBadgePng } from '@/lib/appBadgeBitmap';
 import { renderAppIconPng } from '@/lib/appIconBitmap';
 import { impactLight, notificationError } from '@/lib/haptics';
-import { NsiteShortcuts, supportsNsiteWindows } from '@/lib/nsiteShortcutsPlugin';
+import { NsiteShortcuts, supportsNsiteWindows, supportsShareSheet } from '@/lib/nsiteShortcutsPlugin';
 import { shareCategories } from '@/lib/nsiteShareTarget';
 import { getNsiteSubdomain } from '@/lib/nsiteSubdomain';
 import { APP_ID } from '@/lib/tenna';
@@ -185,7 +185,7 @@ export function useNsitePin(
   // declines pinned shortcuts still has a share sheet, and the site still
   // needs a record for its notifications to be served from.
   useEffect(() => {
-    if (!supportsNsiteWindows()) return;
+    if (!supportsShareSheet()) return;
 
     void sync().catch(() => {
       // The share sheet is a bonus; failing to update it is not worth a toast.

@@ -7,6 +7,7 @@ import { AddAppTile, AppIcon, AppIconPending } from '@/components/AppIcon';
 import { LoginArea } from '@/components/auth/LoginArea';
 import { NativeAppIcon } from '@/components/NativeAppIcon';
 import { NsiteSharePicker } from '@/components/NsiteSharePicker';
+import type { NsiteShareDelivery } from '@/lib/nsiteShareTarget';
 import { NsiteViewer } from '@/components/NsiteViewer';
 import { WallSearch } from '@/components/WallSearch';
 import { useActiveTheme } from '@/hooks/useActiveTheme';
@@ -59,7 +60,7 @@ const Index = () => {
   // its own. On Android pressing a tile launches one instead and nothing here
   // ever fills — see `useNsiteWindow`.
   const [active, setActive] = useState<
-    { event: NostrEvent; channel?: number; path?: string } | null
+    { event: NostrEvent; channel?: number; path?: string; share?: NsiteShareDelivery } | null
   >(null);
   const [adding, setAdding] = useState(false);
 
@@ -264,13 +265,20 @@ const Index = () => {
         onAdd={wall.add}
       />
 
-      <NsiteSharePicker share={share} onDismiss={dismiss} onHandOff={handOff} />
+      <NsiteSharePicker
+        share={share}
+        onDismiss={dismiss}
+        onHandOff={handOff}
+        // iOS, where a site has no window of its own to be shared to.
+        onDeliver={(event, delivery) => setActive({ event, share: delivery })}
+      />
 
       {active && (
         <NsiteViewer
           event={active.event}
           channel={active.channel}
           openPath={active.path}
+          share={active.share}
           onClose={() => setActive(null)}
         />
       )}

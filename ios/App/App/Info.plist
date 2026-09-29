@@ -42,6 +42,18 @@
 			</array>
 		</dict>
 		<dict>
+			<!-- Tenna's own: the share extension opening the app on a share
+			     it has staged. See NsiteShares.swift. -->
+			<key>CFBundleURLName</key>
+			<string>pub.soapbox.tenna.share</string>
+			<key>CFBundleTypeRole</key>
+			<string>Viewer</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>tenna-share</string>
+			</array>
+		</dict>
+		<dict>
 			<key>CFBundleURLName</key>
 			<string>pub.soapbox.tenna.nsite</string>
 			<key>CFBundleTypeRole</key>

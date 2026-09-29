@@ -57,6 +57,21 @@ final class NsiteSchemeHandler: NSObject, WKURLSchemeHandler {
                 return
             }
 
+            // What a site's worker answered a share with, shown once at its
+            // action. See `NsiteShareDelivery`.
+            if let siteId = NsiteOrigins.siteIdFor(host: host),
+               let shared = NsiteShareDelivery.take(siteId: siteId, url: url) {
+                var headers = shared.headers.filter {
+                    !["content-type", "content-length", "set-cookie"].contains($0.key.lowercased())
+                }
+                headers["Cache-Control"] = "no-store"
+                let type = shared.headers.first { $0.key.lowercased() == "content-type" }?.value
+                    ?? "application/octet-stream"
+                finish(id, with: NsiteFileServer.Response(
+                    status: shared.status, contentType: type, headers: headers, body: shared.body), url: url)
+                return
+            }
+
             if let answer = Self.indexedDB(url) {
                 finish(id, with: answer, url: url)
                 return

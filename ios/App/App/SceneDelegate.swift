@@ -16,11 +16,26 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         window?.rootViewController = TennaBridgeViewController()
         window?.makeKeyAndVisible()
 
+        // A cold launch out of the share sheet. Taken here and not passed on:
+        // it names a staged share, not a route. See `NsiteShares`.
+        for context in connectionOptions.urlContexts {
+            if let token = NsiteShares.token(in: context.url) { NsiteShortcutsPlugin.received(token: token) }
+        }
+
         SceneDelegateProxy.shared.scene(scene, willConnectTo: session, options: connectionOptions)
     }
 
     func scene(_ scene: UIScene, openURLContexts URLContexts: Set<UIOpenURLContext>) {
-        SceneDelegateProxy.shared.scene(scene, openURLContexts: URLContexts)
+        var others = Set<UIOpenURLContext>()
+        for context in URLContexts {
+            if let token = NsiteShares.token(in: context.url) {
+                NsiteShortcutsPlugin.received(token: token)
+            } else {
+                others.insert(context)
+            }
+        }
+        guard !others.isEmpty else { return }
+        SceneDelegateProxy.shared.scene(scene, openURLContexts: others)
     }
 
     func scene(_ scene: UIScene, continue userActivity: NSUserActivity) {

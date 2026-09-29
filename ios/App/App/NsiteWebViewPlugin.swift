@@ -57,10 +57,13 @@ public class NsiteWebViewPlugin: CAPPlugin, CAPBridgedPlugin {
             call.reject("Not a site id")
             return
         }
-        guard let url = NsiteOrigins.indexURL(siteId) else {
+        guard let front = NsiteOrigins.indexURL(siteId) else {
             call.reject("Not a site id")
             return
         }
+        // Where the window opens: the front page, or where a notification or
+        // a share pointed. See `entry`.
+        let share = call.getObject("share")
 
         // Re-filtered on this side of the bridge as well as the other: the
         // manifest is a stranger's event either way, and this is the process
@@ -132,8 +135,13 @@ public class NsiteWebViewPlugin: CAPPlugin, CAPBridgedPlugin {
             self.site = session
 
             session.attach(to: container, frame: frame ?? container.bounds)
-            session.load(url)
             call.resolve()
+            Task { @MainActor [weak self] in
+                let url = await Self.entry(share, siteId: siteId) ?? front
+                // Closed, or replaced, while a share's worker ran.
+                guard self?.site === session else { return }
+                session.load(url)
+            }
         }
     }
 
@@ -144,23 +152,38 @@ public class NsiteWebViewPlugin: CAPPlugin, CAPBridgedPlugin {
             call.reject("Not a site id")
             return
         }
-        // Only a `get` delivery means anything here. A `post` one is a share
-        // target, which needs a service worker to claim the navigation, and a
-        // document under a custom scheme has none — so iOS never offers share
-        // targets and never receives one. See NsiteOrigins.
-        guard let share = call.getObject("share"),
-              share["kind"] as? String == "get",
-              let path = share["path"] as? String,
-              path.hasPrefix("/"), !path.hasPrefix("//"),
-              let origin = NsiteOrigins.originFor(siteId),
-              let url = URL(string: origin + path) else {
+        guard let share = call.getObject("share") else {
             call.reject("Not a path inside the site")
             return
         }
-
-        DispatchQueue.main.async { [weak self] in
+        Task { @MainActor [weak self] in
+            guard let url = await Self.entry(share, siteId: siteId) else {
+                call.reject("Not a path inside the site")
+                return
+            }
             self?.site?.load(url)
             call.resolve()
+        }
+    }
+
+    /**
+     The URL a delivery opens the site at: a `get` is a path inside the site —
+     a notification's `data.url`, or a GET share — and a `post` is a share the
+     site's worker is handed first. See `NsiteShareDelivery`.
+     */
+    @MainActor
+    private static func entry(_ share: JSObject?, siteId: String) async -> URL? {
+        guard let share, let origin = NsiteOrigins.originFor(siteId) else { return nil }
+        switch share["kind"] as? String {
+        case "get":
+            guard let path = share["path"] as? String, path.hasPrefix("/"), !path.hasPrefix("//") else { return nil }
+            return URL(string: origin + path)
+        case "post":
+            guard let token = share["token"] as? String, NsiteShares.isToken(token),
+                  let plan = share["plan"] as? String else { return nil }
+            return await NsiteShareDelivery.deliver(siteId: siteId, token: token, plan: plan)
+        default:
+            return nil
         }
     }
 

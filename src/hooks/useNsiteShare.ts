@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import {
   NsiteShortcuts,
   supportsNsiteWindows,
+  supportsShareSheet,
   type NsitePendingShare,
 } from '@/lib/nsiteShortcutsPlugin';
 import {
@@ -152,14 +153,14 @@ export function usePendingShare(): {
   const [share, setShare] = useState<NsitePendingShare | null>(null);
 
   useEffect(() => {
-    if (!supportsNsiteWindows()) return;
-
     let disposed = false;
     let listener: { remove: () => Promise<void> } | undefined;
 
     const take = (pending: NsitePendingShare) => {
       if (!disposed && pending.token && pending.payload) setShare(pending);
     };
+
+    if (!supportsShareSheet()) return;
 
     void (async () => {
       listener = await NsiteShortcuts.addListener('nsiteShare', take);

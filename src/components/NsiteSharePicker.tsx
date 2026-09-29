@@ -1,3 +1,4 @@
+import type { NostrEvent } from '@nostrify/nostrify';
 import { useQuery } from '@tanstack/react-query';
 import { useMemo } from 'react';
 
@@ -15,14 +16,24 @@ import { getTileGradient, getTileInitial } from '@/lib/iconTile';
 import {
   NsiteShortcuts,
   supportsNsiteWindows,
+  supportsShareSheet,
   type NsitePendingShare,
 } from '@/lib/nsiteShortcutsPlugin';
-import { planShareDelivery, type NsiteSharePayload } from '@/lib/nsiteShareTarget';
+import {
+  planShareDelivery,
+  type NsiteShareDelivery,
+  type NsiteSharePayload,
+} from '@/lib/nsiteShareTarget';
 
 interface NsiteSharePickerProps {
   share: NsitePendingShare | null;
   onDismiss: () => void;
   onHandOff: () => void;
+  /**
+   * Open the site over the wall, delivering the share. Where a site cannot be
+   * given a window of its own — iOS — this is how it is shared to.
+   */
+  onDeliver?: (event: NostrEvent, delivery: NsiteShareDelivery) => void;
 }
 
 /** One site the share could go to, with the tile to press. */
@@ -60,12 +71,12 @@ function destinations(
  * simply absent. So Tenna takes shares under its own name too and asks here,
  * which is the way in that never depends on that ranking.
  */
-export function NsiteSharePicker({ share, onDismiss, onHandOff }: NsiteSharePickerProps) {
+export function NsiteSharePicker({ share, onDismiss, onHandOff, onDeliver }: NsiteSharePickerProps) {
   const { toast } = useToast();
 
   const { data: sites, isPending } = useQuery({
     queryKey: ['nsite-share-targets'],
-    enabled: !!share && supportsNsiteWindows(),
+    enabled: !!share && supportsShareSheet(),
     queryFn: async () => (await NsiteShortcuts.listShareTargets()).sites,
     staleTime: 0,
     gcTime: 0,
@@ -79,17 +90,36 @@ export function NsiteSharePicker({ share, onDismiss, onHandOff }: NsiteSharePick
   );
 
   const send = (destination: Destination) => {
-    if (!share?.token) return;
+    const token = share?.token;
+    if (!token) return;
 
     void (async () => {
       try {
         impactLight();
+
+        // No window to give the site: it is opened over the wall instead, on
+        // the share. The plan is made here rather than in a window of its own.
+        if (!supportsNsiteWindows()) {
+          const site = sites?.find(({ siteId }) => siteId === destination.siteId);
+          const target = readShareTarget(site?.shareTarget);
+          const delivery = target && payload ? planShareDelivery(target, payload, token) : null;
+          if (!delivery || !onDeliver) throw new Error('That app cannot take this');
+          // A GET share is spent once its URL is built; a POST one is read
+          // back when it is delivered, and let go of then.
+          if (delivery.kind === 'get') {
+            await NsiteShortcuts.releaseShare({ token }).catch(() => {});
+          }
+          onDeliver(JSON.parse(destination.event) as NostrEvent, delivery);
+          onHandOff();
+          return;
+        }
+
         await NsiteShortcuts.open({
           siteId: destination.siteId,
           label: destination.label,
           event: destination.event,
           icon: destination.icon,
-          shareToken: share.token,
+          shareToken: token,
         });
         // The site's window owns the share from here; releasing it is that
         // window's business, once it has read what is in it.

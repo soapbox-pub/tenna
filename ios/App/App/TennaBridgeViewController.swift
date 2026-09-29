@@ -28,5 +28,6 @@ class TennaBridgeViewController: CAPBridgeViewController {
         bridge?.registerPluginInstance(NsiteWebViewPlugin())
         bridge?.registerPluginInstance(NappPushPlugin())
         bridge?.registerPluginInstance(TennaSignerPlugin())
+        bridge?.registerPluginInstance(NsiteShortcutsPlugin())
     }
 }

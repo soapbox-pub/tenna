@@ -923,10 +923,35 @@ when the sheet is built: the sheet matches on `text/*`, `image/*`, `video/*`,
 takes only PNGs will be offered any image and can refuse the rest. This is the
 same bargain a PWA makes.
 
+### On iOS
+
+iOS gives an app one entry in the share sheet, not one per site, so **Tenna**
+is the entry. Picking it opens Tenna, which asks which app to share to, listing
+every site on the wall that can take what was shared — the second of the two
+ways in above, and the only one. The fields are filled as on Android: the
+subject, when the sending app gave one, is `title`, and a lone link goes to
+`url`.
+
+A GET target is opened at its URL, as on Android. A POST one has no service
+worker to claim it, since a site on iOS has none (see [On iOS](#on-ios)), so
+Tenna runs the site's worker the way a push runs it and dispatches the form to
+it as a **`fetch` event**: `event.request` is the POST, `formData()` works,
+and `respondWith()` is how it answers. The code above works unchanged. What it
+answers with is put in the site's window — a redirect is followed, anything
+else is shown at the action. Two things differ:
+
+- The worker is the push one, so `clients.matchAll()` finds no window, a
+  message posted to one reaches nobody, and the Cache API it writes to is not
+  the page's. **Keep the share in IndexedDB**, which the page and the worker
+  share, and read it when the redirect lands.
+- It has twenty seconds, as a push does.
+
+Ten files and 100 MB per share are the ceilings.
+
 ### Elsewhere
 
-Not on the web and not on iOS. Neither offers a third-party app any way to
-put an arbitrary site in the OS share menu, so the member is read and ignored.
+Not on the web, which offers no page a way into the OS share menu, so the
+member is read and ignored there.
 
 ## On iOS
 
@@ -1062,7 +1087,7 @@ needs in IndexedDB.
 | IndexedDB | Chromium's, the site's profile, shared by page and worker | Tenna's, shared by the page, its workers and the extension's worker — see [IndexedDB](#indexeddb) |
 | Cache API | shared by page and worker | shared by the page and its workers, not the extension's worker — see [The Cache API](#the-cache-api) |
 | `napp.fetch` | yes | yes |
-| `share_target` | yes | no |
+| `share_target` | a sharing shortcut per site, and Tenna | Tenna, which asks which site; a POST is a `fetch` event in the push worker |
 
 A button's `icon` has nowhere to go: iOS draws an action's icon only from an SF
 Symbol or a picture in the app's own bundle. `badge` is the status bar's mark,

@@ -77,6 +77,9 @@ export function DeepLinkHandler() {
           // relaunching it (a shortcut press, a notification tap) delivers
           // that URI here as if it were a link. It names no route.
           if (url.protocol === 'tenna-nsite:') return;
+          // The iOS share extension handing over a staged share. Taken
+          // natively, before it gets here; it names no route either.
+          if (url.protocol === 'tenna-share:') return;
 
           // An app somewhere else asking to be connected. It goes to the
           // screen for connecting one, carrying the link — and stops there,

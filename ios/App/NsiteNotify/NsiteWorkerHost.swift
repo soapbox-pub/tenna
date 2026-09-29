@@ -84,6 +84,14 @@ final class NsiteWorkerHost: NSObject, WKScriptMessageHandler, WKNavigationDeleg
      */
     var opener: ((String) -> Bool)?
 
+    /// The staged share this delivery may read, at `/.tenna/share/<index>`.
+    /// Set only for a `share_target` POST. See `NsiteShareDelivery`.
+    var shareToken: String?
+
+    /// What the worker's `fetch` handler answered a share with: `status`,
+    /// `headers` and base64 `body`, or `none` when it did not answer.
+    private(set) var response: [String: Any]?
+
     /// Told when a worker changed its site's periodic sync tags. The app
     /// schedules its background task from it; the extension cannot, and
     /// leaves that to the app's next trip to the background.
@@ -243,6 +251,9 @@ final class NsiteWorkerHost: NSObject, WKScriptMessageHandler, WKNavigationDeleg
                     title: String(describing: object["title"] ?? ""),
                     options: object["options"] as? [String: Any] ?? [:]
                 ))
+
+            case "response":
+                response = object
 
             case "done":
                 finish(reason: nil)
@@ -531,6 +542,9 @@ final class NsiteWorkerHost: NSObject, WKScriptMessageHandler, WKNavigationDeleg
     /// Where the host page starts the site's vault from. See `NsiteCryptoKeys`.
     static let vaultPath = "/.tenna/vault.js"
 
+    /// Where a share's files are read back from, by index.
+    static let sharePrefix = "/.tenna/share/"
+
     /// Where the worker loads the shim from, ahead of the site's script.
     static let shimPath = "/.tenna/sw-shim.js"
 
@@ -553,6 +567,13 @@ final class NsiteWorkerHost: NSObject, WKScriptMessageHandler, WKNavigationDeleg
                 Data(shim.replacingOccurrences(of: "%%PERIODIC_TAGS%%", with: tags).utf8),
                 "text/javascript; charset=utf-8"
             )
+        }
+        if path.hasPrefix(Self.sharePrefix) {
+            guard let token = shareToken,
+                  let index = Int(path.dropFirst(Self.sharePrefix.count)),
+                  let (url, type) = NsiteShares.file(token, index: index),
+                  let data = try? Data(contentsOf: url) else { return nil }
+            return (data, type)
         }
         if path == Self.hostPath {
             guard let page = Self.resource("NsiteWorkerHostPage", "html") else { return nil }

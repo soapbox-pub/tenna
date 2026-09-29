@@ -7,6 +7,14 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		5AEC76CD9045E494D1C92F1E /* ShareViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A1DB85B022215C90CB015AA /* ShareViewController.swift */; };
+		5A959B3E520CB5956CE45145 /* NsiteShares.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0031EF8D8CA86FA97748116A /* NsiteShares.swift */; };
+		5AE8A5BA01CE9613D201C1FF /* NsiteGroup.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB0000000000000000000001 /* NsiteGroup.swift */; };
+		5AA18F7A37E798DF5EE5890F /* TennaShare.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 5A9B6DA04AC072F2E8081490 /* TennaShare.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		4CF3F11B783B3FABC80775B3 /* NsiteShares.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0031EF8D8CA86FA97748116A /* NsiteShares.swift */; };
+		0CC7C67142EEBDB0AB5E2175 /* NsiteShares.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0031EF8D8CA86FA97748116A /* NsiteShares.swift */; };
+		34449B4A38056D3BEB072ED4 /* NsiteShareDelivery.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A3FE363A09A21F1FD4B0CA3 /* NsiteShareDelivery.swift */; };
+		859DCEE87D9F1B6169EEAAEB /* NsiteShortcutsPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = 61D8401EF835A87E53862D8D /* NsiteShortcutsPlugin.swift */; };
 		892A056182D2691E4F0C72E3 /* NappFetch.swift in Sources */ = {isa = PBXBuildFile; fileRef = 606590BAD99B433A05F84763 /* NappFetch.swift */; };
 		C1AFE235824E7D5482E5F105 /* NappFetch.swift in Sources */ = {isa = PBXBuildFile; fileRef = 606590BAD99B433A05F84763 /* NappFetch.swift */; };
 		E5937A73ED866B660FA99B1E /* NappNotificationEvents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8628F39E91B567E9E6F119EB /* NappNotificationEvents.swift */; };
@@ -72,6 +80,13 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		5A9B6DA04AC072F2E8081490 /* TennaShare.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = TennaShare.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		5A1DB85B022215C90CB015AA /* ShareViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareViewController.swift; sourceTree = "<group>"; };
+		5A6B89EEAA9E9ED833F28CC3 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		5AA662894B5E5E61A89ED430 /* TennaShare.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = TennaShare.entitlements; sourceTree = "<group>"; };
+		0031EF8D8CA86FA97748116A /* NsiteShares.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NsiteShares.swift; sourceTree = "<group>"; };
+		4A3FE363A09A21F1FD4B0CA3 /* NsiteShareDelivery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NsiteShareDelivery.swift; sourceTree = "<group>"; };
+		61D8401EF835A87E53862D8D /* NsiteShortcutsPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NsiteShortcutsPlugin.swift; sourceTree = "<group>"; };
 		606590BAD99B433A05F84763 /* NappFetch.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NappFetch.swift; sourceTree = "<group>"; };
 		8628F39E91B567E9E6F119EB /* NappNotificationEvents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NappNotificationEvents.swift; sourceTree = "<group>"; };
 		F08797FE756CD493F3BE1AD1 /* TennaSignerPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TennaSignerPlugin.swift; sourceTree = "<group>"; };
@@ -123,6 +138,13 @@
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
+		5A0A7E3354DA2361F2B99D7A /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		504EC3011FED79650016851F /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
@@ -148,6 +170,7 @@
 			dstPath = "";
 			dstSubfolderSpec = 13;
 			files = (
+				5AA18F7A37E798DF5EE5890F /* TennaShare.appex in Embed Foundation Extensions */,
 				AA00000000000000000000C9 /* NsiteNotify.appex in Embed Foundation Extensions */,
 			);
 			name = "Embed Foundation Extensions";
@@ -156,12 +179,23 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXGroup section */
+		5AE4315A5AC3B93DC369FB40 /* TennaShare */ = {
+			isa = PBXGroup;
+			children = (
+				5A1DB85B022215C90CB015AA /* ShareViewController.swift */,
+				5AA662894B5E5E61A89ED430 /* TennaShare.entitlements */,
+				5A6B89EEAA9E9ED833F28CC3 /* Info.plist */,
+			);
+			path = TennaShare;
+			sourceTree = "<group>";
+		};
 		504EC2FB1FED79650016851F = {
 			isa = PBXGroup;
 			children = (
 				958DCC722DB07C7200EA8C5F /* debug.xcconfig */,
 				504EC3061FED79650016851F /* App */,
 				AA00000000000000000000A1 /* NsiteNotify */,
+				5AE4315A5AC3B93DC369FB40 /* TennaShare */,
 				504EC3051FED79650016851F /* Products */,
 			);
 			sourceTree = "<group>";
@@ -171,6 +205,7 @@
 			children = (
 				504EC3041FED79650016851F /* App.app */,
 				AA00000000000000000000A2 /* NsiteNotify.appex */,
+				5A9B6DA04AC072F2E8081490 /* TennaShare.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -195,6 +230,9 @@
 		504EC3061FED79650016851F /* App */ = {
 			isa = PBXGroup;
 			children = (
+				0031EF8D8CA86FA97748116A /* NsiteShares.swift */,
+				4A3FE363A09A21F1FD4B0CA3 /* NsiteShareDelivery.swift */,
+				61D8401EF835A87E53862D8D /* NsiteShortcutsPlugin.swift */,
 				606590BAD99B433A05F84763 /* NappFetch.swift */,
 				8628F39E91B567E9E6F119EB /* NappNotificationEvents.swift */,
 				F08797FE756CD493F3BE1AD1 /* TennaSignerPlugin.swift */,
@@ -237,6 +275,23 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
+		5A0736C948E12F366994229A /* TennaShare */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 5A165449CCBF25C76E30D4D0 /* Build configuration list for PBXNativeTarget "TennaShare" */;
+			buildPhases = (
+				5AF71DF1EF177C3A4B30508C /* Sources */,
+				5A0A7E3354DA2361F2B99D7A /* Frameworks */,
+				5A4466C0F519F03CB716AE42 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = TennaShare;
+			productName = TennaShare;
+			productReference = 5A9B6DA04AC072F2E8081490 /* TennaShare.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
 		504EC3031FED79650016851F /* App */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = 504EC3161FED79650016851F /* Build configuration list for PBXNativeTarget "App" */;
@@ -250,6 +305,7 @@
 			);
 			dependencies = (
 				AA00000000000000000000D1 /* PBXTargetDependency */,
+				5A1BE20567BAE035EE07EC81 /* PBXTargetDependency */,
 			);
 			name = App;
 			packageProductDependencies = (
@@ -280,6 +336,11 @@
 /* End PBXNativeTarget section */
 
 /* Begin PBXTargetDependency section */
+		5A1BE20567BAE035EE07EC81 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 5A0736C948E12F366994229A /* TennaShare */;
+			targetProxy = 5ABE258BFBF04FBFAB97BCF1 /* PBXContainerItemProxy */;
+		};
 		AA00000000000000000000D1 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
 			target = AA00000000000000000000C4 /* NsiteNotify */;
@@ -288,6 +349,13 @@
 /* End PBXTargetDependency section */
 
 /* Begin PBXContainerItemProxy section */
+		5ABE258BFBF04FBFAB97BCF1 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 504EC2FC1FED79650016851F /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 5A0736C948E12F366994229A;
+			remoteInfo = TennaShare;
+		};
 		AA00000000000000000000D2 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = 504EC2FC1FED79650016851F /* Project object */;
@@ -313,6 +381,10 @@
 						CreatedOnToolsVersion = 26.0;
 						ProvisioningStyle = Automatic;
 					};
+					5A0736C948E12F366994229A = {
+						CreatedOnToolsVersion = 26.0;
+						ProvisioningStyle = Automatic;
+					};
 				};
 			};
 			buildConfigurationList = 504EC2FF1FED79650016851F /* Build configuration list for PBXProject "App" */;
@@ -334,11 +406,19 @@
 			targets = (
 				504EC3031FED79650016851F /* App */,
 				AA00000000000000000000C4 /* NsiteNotify */,
+				5A0736C948E12F366994229A /* TennaShare */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
+		5A4466C0F519F03CB716AE42 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		504EC3021FED79650016851F /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -370,10 +450,23 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
+		5AF71DF1EF177C3A4B30508C /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				5AEC76CD9045E494D1C92F1E /* ShareViewController.swift in Sources */,
+				5A959B3E520CB5956CE45145 /* NsiteShares.swift in Sources */,
+				5AE8A5BA01CE9613D201C1FF /* NsiteGroup.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		504EC3001FED79650016851F /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				0CC7C67142EEBDB0AB5E2175 /* NsiteShares.swift in Sources */,
+				34449B4A38056D3BEB072ED4 /* NsiteShareDelivery.swift in Sources */,
+				859DCEE87D9F1B6169EEAAEB /* NsiteShortcutsPlugin.swift in Sources */,
 				C1AFE235824E7D5482E5F105 /* NappFetch.swift in Sources */,
 				E5937A73ED866B660FA99B1E /* NappNotificationEvents.swift in Sources */,
 				64B492D857E30B1B071C0290 /* TennaSignerPlugin.swift in Sources */,
@@ -410,6 +503,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				4CF3F11B783B3FABC80775B3 /* NsiteShares.swift in Sources */,
 				892A056182D2691E4F0C72E3 /* NappFetch.swift in Sources */,
 				AA00000000000000000000B3 /* NotificationService.swift in Sources */,
 				AA00000000000000000000B4 /* NsiteWorkerHost.swift in Sources */,
@@ -451,6 +545,55 @@
 /* End PBXVariantGroup section */
 
 /* Begin XCBuildConfiguration section */
+		5A7FD5D7B56D61A9B0FC3805 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = TennaShare/TennaShare.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = GZLTTH5DLM;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = TennaShare/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = pub.soapbox.tenna.share;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		5AD5BA5F3D4A873C016E4997 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = TennaShare/TennaShare.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = GZLTTH5DLM;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = TennaShare/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = pub.soapbox.tenna.share;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
 		504EC3141FED79650016851F /* Debug */ = {
 			isa = XCBuildConfiguration;
 			baseConfigurationReference = 958DCC722DB07C7200EA8C5F /* debug.xcconfig */;
@@ -662,6 +805,15 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
+		5A165449CCBF25C76E30D4D0 /* Build configuration list for PBXNativeTarget "TennaShare" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				5A7FD5D7B56D61A9B0FC3805 /* Debug */,
+				5AD5BA5F3D4A873C016E4997 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 		504EC2FF1FED79650016851F /* Build configuration list for PBXProject "App" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (

@@ -380,7 +380,97 @@
     return Promise.allSettled(promises);
   }
 
-  var KINDS = { push: true, notificationclick: true, notificationclose: true, periodicsync: true };
+  var KINDS = {
+    push: true, notificationclick: true, notificationclose: true, periodicsync: true, sharepost: true
+  };
+
+  /**
+   * A `share_target` POST, as the `fetch` event a browser raises for it.
+   *
+   * A browser delivers a POST share as a form navigation that the site's
+   * service worker claims, and there is no navigation here for one to claim.
+   * So the form is built in the worker instead, out of the plan the web layer
+   * made and the files the host serves back at `/.tenna/share/<index>`, and
+   * handed to the site's `fetch` listeners as the request it would have been.
+   * What it answers with goes back to the host, which shows it in the site's
+   * window — or follows it, when it is a redirect. See `NsiteShareDelivery`.
+   */
+  var MAX_SHARE_RESPONSE = 16 * 1024 * 1024;
+
+  function sharePost(text) {
+    var plan;
+    try {
+      plan = JSON.parse(String(text));
+    } catch (err) {
+      tell({ kind: 'response', none: true, error: 'Malformed plan' });
+      return Promise.resolve();
+    }
+
+    return Promise.all((plan.files || []).map(function(file) {
+      return nativeFetch('/.tenna/share/' + file.index, { cache: 'no-store' })
+        .then(function(res) { return res.ok ? res.blob() : null; })
+        .then(function(blob) {
+          return blob && { field: file.field, file: new File([blob], file.name, { type: file.type || blob.type }) };
+        }, function() { return null; });
+    })).then(function(files) {
+      var body;
+      if (plan.enctype === 'multipart/form-data') {
+        body = new FormData();
+        (plan.fields || []).forEach(function(field) { body.append(field[0], field[1]); });
+        files.forEach(function(entry) { if (entry) body.append(entry.field, entry.file); });
+      } else {
+        body = new URLSearchParams();
+        (plan.fields || []).forEach(function(field) { body.append(field[0], field[1]); });
+      }
+
+      var request = new NativeRequest(new URL(plan.action, self.location.href).href, { method: 'POST', body: body });
+      var promises = [];
+      var responded = null;
+      var event = new Event('fetch', { cancelable: true });
+      Object.defineProperties(event, {
+        request: { value: request },
+        clientId: { value: '' },
+        resultingClientId: { value: '' },
+        preloadResponse: { value: Promise.resolve(undefined) },
+        handled: { value: Promise.resolve() },
+        respondWith: { value: function(answer) {
+          if (responded) throw new DOMException('respondWith() was already called', 'InvalidStateError');
+          responded = Promise.resolve(answer);
+        } },
+        waitUntil: { value: function(p) { promises.push(Promise.resolve(p)); } }
+      });
+
+      try {
+        self.dispatchEvent(event);
+      } catch (err) {
+        setTimeout(function() { throw err; }, 0);
+      }
+      if (typeof self.onfetch === 'function') {
+        try { self.onfetch.call(self, event); } catch (err) { setTimeout(function() { throw err; }, 0); }
+      }
+
+      var answered = responded
+        ? responded.then(function(response) {
+            if (!(response instanceof Response)) throw new TypeError('respondWith() was not given a Response');
+            return response.arrayBuffer().then(function(buffer) {
+              if (buffer.byteLength > MAX_SHARE_RESPONSE) throw new TypeError('The response is too large');
+              var headers = {};
+              response.headers.forEach(function(value, name) { headers[name] = value; });
+              var bytes = new Uint8Array(buffer);
+              var binary = '';
+              for (var i = 0; i < bytes.length; i += 0x8000) {
+                binary += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+              }
+              tell({ kind: 'response', status: response.status, headers: headers, body: btoa(binary) });
+            });
+          }).catch(function(err) {
+            tell({ kind: 'response', none: true, error: String((err && err.message) || err) });
+          })
+        : Promise.resolve(tell({ kind: 'response', none: true }));
+
+      return answered.then(function() { return Promise.allSettled(promises); });
+    });
+  }
 
   self.addEventListener('message', function(event) {
     var message = event.data;
@@ -394,7 +484,9 @@
     if (!message || typeof message !== 'object' || !KINDS[message[ENVELOPE]]) return;
     event.stopImmediatePropagation();
 
-    dispatch(message[ENVELOPE], message.data).then(function() {
+    var kind = message[ENVELOPE];
+    var run = kind === 'sharepost' ? sharePost(message.data) : dispatch(kind, message.data);
+    run.then(function() {
       tell({ kind: 'done', id: message.id });
     });
   });

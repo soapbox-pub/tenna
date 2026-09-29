@@ -42,6 +42,11 @@ struct NsiteRecord {
     /// What the site passed to `registration.periodicSync.register`.
     var periodicSync: [NsitePeriodicTag] = []
     var updatedAt: Double
+    /// Its manifest's `share_target` as JSON text, while it is on the wall
+    /// and takes shares. See `NsiteShortcutsPlugin`.
+    var shareTarget: String?
+    /// The manifest event as JSON text, for the share picker to open it by.
+    var event: String?
 
     /// Every filter the site is listening on, for routing a push.
     var filters: [NsiteFilter] { NsiteFilter.all(in: subscriptions) }
@@ -133,7 +138,9 @@ enum NsiteStore {
             subscriptions: object["subscriptions"] as? [Any] ?? [],
             muted: object["muted"] as? Bool ?? false,
             periodicSync: (object["periodicSync"] as? [Any] ?? []).compactMap { NsitePeriodicTag($0) },
-            updatedAt: (object["updatedAt"] as? NSNumber)?.doubleValue ?? 0
+            updatedAt: (object["updatedAt"] as? NSNumber)?.doubleValue ?? 0,
+            shareTarget: object["shareTarget"] as? String,
+            event: object["event"] as? String
         )
     }
 
@@ -155,6 +162,8 @@ enum NsiteStore {
         ]
         if let worker = record.worker { object["worker"] = worker }
         if record.workerModule { object["workerType"] = "module" }
+        if let shareTarget = record.shareTarget { object["shareTarget"] = shareTarget }
+        if let event = record.event { object["event"] = event }
 
         guard JSONSerialization.isValidJSONObject(object),
               let data = try? JSONSerialization.data(withJSONObject: object) else {

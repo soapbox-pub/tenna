@@ -84,10 +84,15 @@ export function useNsiteAddress(input: string) {
   const query = useQuery({
     queryKey: ['nsite-address', trimmed],
     enabled: address !== null,
-    queryFn: async (c): Promise<NsiteAddressResult> => {
+    queryFn: async (): Promise<NsiteAddressResult> => {
       if (!address) return { event: null, relays: [] };
 
-      const signal = AbortSignal.any([c.signal, AbortSignal.timeout(8000)]);
+      // Not the query's own signal. A link that opens a site is answered out
+      // of the cache at once and then cleared, which unmounts this query and
+      // would abort the relay call — so the newer manifest it was going to
+      // bring back never reached the cache, and every later link opened the
+      // same old version of the site. Let it finish; it is one request.
+      const signal = AbortSignal.timeout(8000);
 
       // Resolve the name first, if the address is one. Whatever relays the
       // document named ride along with the key it named them for.

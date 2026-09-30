@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.13.1] - 2026-09-30
+
+A notification a site shows while its page is open now says what the site
+wrote, instead of arriving with nothing but the site's name.
+
+### Fixed
+
+- A notification a site shows from its open page, rather than from the
+  background, now carries its own title, text and options instead of
+  showing up empty under the site's name.
+
 ## [0.13.0] - 2026-09-30
 
 A site's App info now shows how much it has stored on your device, and can

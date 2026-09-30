@@ -435,7 +435,7 @@ export function useNsiteSignerRpc({
       // question nobody asked about a key.
       switch (method) {
         case 'notification.show':
-          return await showNotification(p.payload);
+          return await showNotification(p);
 
         case 'notification.list':
           return await listNotifications(p.tag);

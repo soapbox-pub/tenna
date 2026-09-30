@@ -1,6 +1,28 @@
 # Changelog
 
-## [Unreleased]
+## [0.13.0] - 2026-09-30
+
+A site's App info now shows how much it has stored on your device, and can
+clear it. On iPhone, sites catch up with Android again: you can share to a
+site from the share sheet, notifications wear the site's own icon and can
+have buttons, pictures and replies, and your key is kept in the Keychain,
+out of reach of the sites you open. Following a link to a site now picks up
+its newest version.
+
+### Added
+
+- A site's App info shows how much it has stored on this device, with a
+  button to clear it so the site starts fresh.
+- On iPhone, Tenna appears in the share sheet; pick which site to share to,
+  as on Android.
+- On iPhone, a site's notifications can have buttons, reply boxes and
+  pictures, one push can show several notifications, and the site hears
+  when you tap, answer or dismiss one.
+- On iPhone, sites can reach other websites the way they can on Android.
+- On iPhone, what a site saves in its page is there for its notifications
+  too, so they can know who you are and whom you have muted. This includes
+  the site's own secret keys, which stay sealed to that site on your phone.
+- On iPhone, sites can keep their own files in their offline cache.
 
 ### Changed
 
@@ -8,6 +30,21 @@
   site's icon if it has none, instead of Tenna's. Tenna's icon now appears
   only as a small badge in the corner, and the site's name heads the
   notification.
+- On iPhone, your account's key is kept in the Keychain and signs there,
+  instead of in the web page that also runs the sites you open. An existing
+  login moves over by itself the next time Tenna starts.
+- On iPhone, removing a site from the wall forgets everything it stored, as
+  on Android.
+
+### Fixed
+
+- Following a link to a site now brings its newest version along, instead of
+  opening the same older version every time.
+- On iPhone, tapping a notification opens the page it points to even when the
+  site was not already open.
+- On iPhone, a site's notifications work for sites whose background script is
+  in a folder or written as a module, and a missing file it asks for comes
+  back as not found instead of an error.
 
 ## [0.12.2] - 2026-09-27
 

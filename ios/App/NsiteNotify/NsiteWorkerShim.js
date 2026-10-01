@@ -182,6 +182,52 @@
     }
   };
 
+  /*
+   * `registration.pushManager`: the subscription `window.napp.push` made, as
+   * a worker reads one back. The same object as Android's — see
+   * `napp_sw_shim.js` — except for `userVisibleOnly`, which is true here and
+   * means it. A push reaches this worker as an alert the push server already
+   * wrote, and iOS shows whatever the extension hands back, so a worker that
+   * shows nothing leaves the server's placeholder on screen.
+   */
+  var PUSH_ENDPOINT = 'napp:push';
+  var USER_VISIBLE_ONLY = true;
+
+  var subscriptionOptions = Object.freeze({
+    userVisibleOnly: USER_VISIBLE_ONLY,
+    applicationServerKey: null
+  });
+
+  var pushSubscription = Object.freeze({
+    endpoint: PUSH_ENDPOINT,
+    expirationTime: null,
+    options: subscriptionOptions,
+    getKey: function() { return null; },
+    toJSON: function() { return { endpoint: PUSH_ENDPOINT, expirationTime: null, keys: {} }; },
+    // `napp.push.set([])` short of clearing the tray, as a browser's leaves it.
+    unsubscribe: function() {
+      return call('pushUnsubscribe').then(function(done) { return done === true; });
+    }
+  });
+
+  function subscribed() {
+    return call('pushSubscribed').then(function(has) { return has === true; });
+  }
+
+  self.registration.pushManager = {
+    getSubscription: function() {
+      return subscribed().then(function(has) { return has ? pushSubscription : null; });
+    },
+    // A site subscribes from its window, where the user can be asked.
+    subscribe: function() {
+      return Promise.reject(new DOMException(
+        'Subscribe with window.napp.push.set() instead.', 'NotSupportedError'));
+    },
+    permissionState: function() {
+      return subscribed().then(function(has) { return has ? 'granted' : 'prompt'; });
+    }
+  };
+
   /**
    * `clients.openWindow`, for a worker answering a tap.
    *

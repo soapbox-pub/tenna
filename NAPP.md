@@ -205,6 +205,53 @@ deliberately rather than be cut off mid-sentence.
 longer will work on Android and lose its tail on iOS, which for a notification
 means the difference between the real message and "New message".
 
+#### Showing nothing: `registration.pushManager`
+
+A push the worker decides is not news — the reader's own message from another
+device, an edit, something muted — may or may not be allowed to show nothing,
+and **that depends on the platform, which says so.** The worker reads it off
+the subscription, where the Push API puts it:
+
+```js
+const sub = await self.registration.pushManager.getSubscription();
+const mustShow = !sub || sub.options.userVisibleOnly !== false;
+```
+
+| Platform | `userVisibleOnly` | A push that shows nothing                                      |
+| -------- | ----------------- | -------------------------------------------------------------- |
+| Android  | `false`           | Shows nothing. Nothing is counted against the site.            |
+| iOS      | `true`            | Shows the push server's placeholder, under the site's name, with whatever sound the server gave it. |
+
+iOS is `true` because the push reaches the phone as an alert the server has
+already written, and iOS shows whatever the extension hands back; hiding it
+takes an entitlement Tenna does not hold. A worker there that has nothing to
+say does better to say something quiet — the same `tag` each time, with
+`silent: true`, which on iOS lands in Notification Center without a banner —
+than to leave "New notification" on the lock screen.
+
+`getSubscription()` resolves to the subscription while the site holds a
+non-empty list from `napp.push.set()`, and to `null` otherwise. Only these
+parts of a `PushSubscription` mean anything:
+
+- `options.userVisibleOnly`, as above. `options.applicationServerKey` is
+  `null`: there is no VAPID key, because there is no Web Push.
+- `endpoint` is `napp:push`, which is no push service's URL, so it cannot be
+  handed to a Web Push gateway by mistake. `getKey()` is `null`.
+- `unsubscribe()` clears the site's list, as `napp.push.set([])` does, except
+  that it leaves the site's notifications in the tray, as a browser's does. On
+  iOS the push service hears of it the next time Tenna is opened; until then
+  the site's pushes still arrive, run no worker, and show the placeholder.
+
+`subscribe()` rejects with `NotSupportedError`. A site subscribes from its
+window, with `napp.push.set()`, where the user can be asked.
+`permissionState()` is `granted` while there is a subscription and `prompt`
+otherwise.
+
+This is the worker's only. A site's window has no `pushManager` from Tenna, and
+on the web — where `window.napp` is not there either — the browser's own is
+`true` everywhere and is not worth reading: every browser refuses a
+subscription without it.
+
 #### `showNotification(title, options)`
 
 Every option the Notifications API defines, honoured as far as Android takes
@@ -219,7 +266,7 @@ it:
 | `image`       | A photograph, drawn as a thumbnail above the words when the notification is expanded. |
 | `actions`     | Buttons. See [Tapping, buttons and replies](#tapping-buttons-and-replies). |
 | `data`        | Anything the site wants back on `notificationclick`.                   |
-| `silent`      | Post without sound or vibration.                                       |
+| `silent`      | Post without sound or vibration. On iOS also without a banner or a lit screen: it goes straight to Notification Center. |
 | `renotify`    | Alert again when it replaces. Off by default, so an update is quiet.   |
 | `timestamp`   | The time shown on it, in milliseconds. Defaults to when it was posted. |
 | `vibrate`     | The vibration pattern — below Android 8. Above it a pattern belongs to the channel and a per-notification one is ignored, which is the platform's answer rather than Tenna's. |
@@ -988,8 +1035,9 @@ What the stand-in registration is honest about: `showNotification` and
 `active` reports a worker, because one will run. Inside the worker,
 `getNotifications()` lists what is in the shade — including what earlier pushes
 put there — `notification.close()` takes one down, `periodicSync` changes the
-site's tags as on Android, and `clients.openWindow()` moves the window a tap
-opened. Everything to do with *talking* to the worker from the page is not
+site's tags as on Android, `clients.openWindow()` moves the window a tap
+opened, and `pushManager.getSubscription()` reports `userVisibleOnly: true`
+(see [Showing nothing](#showing-nothing-registrationpushmanager)). Everything to do with *talking* to the worker from the page is not
 there — no `postMessage`, no `controller`, no `message` event — because the
 worker does not exist until a push arrives and the page is long gone by then.
 `update()` and `unregister()` resolve without doing anything.

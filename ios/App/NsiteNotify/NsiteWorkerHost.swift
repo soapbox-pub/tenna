@@ -97,6 +97,11 @@ final class NsiteWorkerHost: NSObject, WKScriptMessageHandler, WKNavigationDeleg
     /// leaves that to the app's next trip to the background.
     static var periodicChanged: (() -> Void)?
 
+    /// Told when a worker unsubscribed its site. The app re-sends the merged
+    /// list to the push service; the extension cannot, and leaves that to the
+    /// app's next launch or resume.
+    static var subscriptionsChanged: (() -> Void)?
+
     init(siteId: String, worker: String, module: Bool = false, periodicTags: [String] = [],
          serve: @escaping Serve) {
         self.siteId = siteId
@@ -345,6 +350,17 @@ final class NsiteWorkerHost: NSObject, WKScriptMessageHandler, WKNavigationDeleg
 
         case "periodicTags":
             return NsitePeriodic.tags(siteId: siteId)
+
+        case "pushSubscribed":
+            return !(NsiteStore.load(siteId)?.subscriptions.isEmpty ?? true)
+
+        case "pushUnsubscribe":
+            guard let record = NsiteStore.load(siteId), !record.subscriptions.isEmpty else { return false }
+            guard NsiteStore.update(siteId, { $0.subscriptions = [] }) != nil else {
+                throw CallFailure(message: "Could not store the subscriptions")
+            }
+            Self.subscriptionsChanged?()
+            return true
 
         case "napp.fetch.begin":
             do {

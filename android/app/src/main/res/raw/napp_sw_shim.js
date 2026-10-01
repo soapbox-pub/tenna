@@ -458,6 +458,83 @@
     } catch (err) {}
   }
 
+  // -------------------------------------------------------------------------
+  // registration.pushManager
+  // -------------------------------------------------------------------------
+
+  /*
+   * The subscription `window.napp.push` made, as a worker reads one back.
+   *
+   * There is no Push API here to stand in for — a site subscribes through
+   * `napp.push.set` in its window — so this is what lets a worker ask what it
+   * is holding, and above all `options.userVisibleOnly`. Here that is false
+   * and means it: a push that shows nothing shows nothing, and costs the site
+   * nothing either. The endpoint is no push service's URL, so a site cannot
+   * mistake it for one and hand it to a Web Push gateway.
+   */
+  var PUSH_ENDPOINT = 'napp:push';
+  var USER_VISIBLE_ONLY = false;
+
+  function PushSubscriptionOptions() {
+    throw new TypeError("Failed to construct 'PushSubscriptionOptions': Illegal constructor");
+  }
+  var subscriptionOptions = Object.create(PushSubscriptionOptions.prototype, {
+    userVisibleOnly: { value: USER_VISIBLE_ONLY, enumerable: true },
+    applicationServerKey: { value: null, enumerable: true },
+  });
+
+  function PushSubscription() {
+    throw new TypeError("Failed to construct 'PushSubscription': Illegal constructor");
+  }
+  PushSubscription.prototype.getKey = function () { return null; };
+  PushSubscription.prototype.toJSON = function () {
+    return { endpoint: PUSH_ENDPOINT, expirationTime: null, keys: {} };
+  };
+  // The same as `napp.push.set([])` from the window, short of clearing the
+  // tray: an unsubscribe in a browser takes no notification down either.
+  PushSubscription.prototype.unsubscribe = function () {
+    return call('push', { op: 'unsubscribe' }).then(function (done) { return done === true; });
+  };
+
+  var pushSubscription = Object.create(PushSubscription.prototype, {
+    endpoint: { value: PUSH_ENDPOINT, enumerable: true },
+    expirationTime: { value: null, enumerable: true },
+    options: { value: subscriptionOptions, enumerable: true },
+  });
+
+  function subscribed() {
+    return call('push', { op: 'subscribed' }).then(function (has) { return has === true; });
+  }
+
+  function PushManager() {
+    throw new TypeError("Failed to construct 'PushManager': Illegal constructor");
+  }
+  PushManager.prototype.getSubscription = function () {
+    return subscribed().then(function (has) { return has ? pushSubscription : null; });
+  };
+  // A site subscribes from its window, where the user can be asked.
+  PushManager.prototype.subscribe = function () {
+    return Promise.reject(new DOMException(
+      'Subscribe with window.napp.push.set() instead.', 'NotSupportedError'));
+  };
+  PushManager.prototype.permissionState = function () {
+    return subscribed().then(function (has) { return has ? 'granted' : 'prompt'; });
+  };
+
+  var pushManager = Object.create(PushManager.prototype);
+  self.PushManager = PushManager;
+  self.PushSubscription = PushSubscription;
+  self.PushSubscriptionOptions = PushSubscriptionOptions;
+
+  if (registration) {
+    try {
+      Object.defineProperty(registration, 'pushManager', {
+        configurable: true,
+        get: function () { return pushManager; },
+      });
+    } catch (err) {}
+  }
+
   if (self.Notification) {
     try {
       Object.defineProperty(self.Notification, 'permission', { get: function () { return 'granted'; } });

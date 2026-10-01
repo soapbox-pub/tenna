@@ -22,6 +22,8 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
         // A worker that re-registers a tag from inside an event wants the
         // next run asked for, which only the app can do.
         NsiteWorkerHost.periodicChanged = { NappPeriodicSync.schedule() }
+        // And one that unsubscribes wants the push service told.
+        NsiteWorkerHost.subscriptionsChanged = { NappPushPlugin.current?.subscriptionsDidChange() }
 
         // A transaction is a lock on a file in the App Group, and iOS kills a
         // suspended app holding one. So while any is open the app asks for a

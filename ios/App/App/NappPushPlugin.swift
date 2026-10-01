@@ -380,6 +380,11 @@ public class NappPushPlugin: CAPPlugin, CAPBridgedPlugin {
         notifyListeners(Self.notificationsChanged, data: ["siteId": siteId])
     }
 
+    /// A site's worker changed its subscriptions behind the web layer's back.
+    func subscriptionsDidChange() {
+        notifyListeners(Self.subscriptionsChanged, data: [:])
+    }
+
     /// A push arrived and its extension may have put something in the shade.
     func delivered(siteId: String) {
         notifyListeners(Self.notificationsChanged, data: ["siteId": siteId])

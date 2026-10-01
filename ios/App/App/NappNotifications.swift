@@ -285,7 +285,13 @@ enum NappNotifications {
         content.title = title.isEmpty ? label : title
         content.body = body
         content.threadIdentifier = siteId
-        if !((options["silent"] as? Bool) ?? false) {
+        // `silent` is read as "do not interrupt": no sound, and no banner or
+        // lit screen either, which on iOS is a separate switch. Set both ways,
+        // since in the extension this is the push's own content, sound and all.
+        if (options["silent"] as? Bool) ?? false {
+            content.sound = nil
+            content.interruptionLevel = .passive
+        } else {
             content.sound = .default
         }
 

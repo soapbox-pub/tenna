@@ -595,6 +595,9 @@ final class NappPort {
                 case "periodicsync":
                     periodicSync(id, params);
                     break;
+                case "push":
+                    push(id, params);
+                    break;
                 default:
                     fail(id, "Tenna does not know that call");
                     break;
@@ -658,6 +661,32 @@ final class NappPort {
                     return;
                 }
                 result(id, JSONObject.NULL);
+                return;
+            default:
+                fail(id, "Tenna does not know that call");
+        }
+    }
+
+    /**
+     * {@code registration.pushManager}, from inside the worker.
+     *
+     * <p>A site has a subscription while it holds a non-empty list from
+     * {@code napp.push.set}. Unsubscribing clears it and leaves the tray alone,
+     * as a browser's {@code PushSubscription.unsubscribe()} does.
+     */
+    private void push(int id, @NonNull JSONObject params) {
+        switch (params.optString("op", "")) {
+            case "subscribed":
+                result(id, NappSubscriptions.has(context, siteId));
+                return;
+            case "unsubscribe":
+                if (!NappSubscriptions.has(context, siteId)) {
+                    result(id, false);
+                    return;
+                }
+                NappSubscriptions.remove(context, siteId);
+                NappPushService.sync(context);
+                result(id, true);
                 return;
             default:
                 fail(id, "Tenna does not know that call");

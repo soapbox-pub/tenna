@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.13.3] - 2026-10-01
+
+Pictures in a site's notifications show up more reliably: larger artwork
+the site sends along with a notification is no longer dropped on Android,
+and pictures a page draws itself now make it into the notification too.
+
+### Fixed
+
+- On Android, a notification picture a site sends along inline is kept
+  instead of disappearing when it's more than a small thumbnail.
+- A notification shown from a site's open page keeps the pictures the page
+  made itself, instead of arriving without its icon or image.
+
 ## [0.13.2] - 2026-09-30
 
 Sites can now keep quiet about pushes that aren't news, like your own

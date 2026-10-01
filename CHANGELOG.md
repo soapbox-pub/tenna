@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.13.2] - 2026-09-30
+
+Sites can now keep quiet about pushes that aren't news, like your own
+message sent from another device. On Android they show nothing at all; on
+iPhone they slip into Notification Center without a banner or sound.
+
+### Changed
+
+- A site can tell whether a push must show a notification, so it can skip
+  the ones that aren't news instead of showing a placeholder.
+- On iPhone, a site's silent notification goes straight to Notification
+  Center without a banner or lighting up the screen.
+
 ## [0.13.1] - 2026-09-30
 
 A notification a site shows while its page is open now says what the site

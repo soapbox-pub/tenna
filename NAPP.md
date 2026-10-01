@@ -292,9 +292,9 @@ and the second takes one down. `Notification.permission` in the worker reads
 The same three are available **from the site's window**, and reach the same
 tray; see [Notifications from the page](#notifications-from-the-page).
 
-The whole payload — title and options together — travels as a URL, so it is
-capped at **64 KiB** of JSON. That is a great deal of words and not very much
-inlined artwork; see [Pictures](#pictures).
+From the page, the whole payload — title and options together — is capped at
+**64 KiB** of JSON. That is a great deal of words and not very much inlined
+artwork; see [Pictures](#pictures).
 
 A worked example, and the whole of what there is to know:
 
@@ -429,7 +429,14 @@ shapes:
 | ------------------------ | ---------------------------------------------------------------- |
 | `/logo-192.png`          | One of the site's own files, resolved against its NIP-5A manifest and served from the content-addressed blob cache. Free after the first time, works offline, reaches no network. **Prefer this.** |
 | `https://…`              | Fetched by Tenna with no cookies, no redirects, an image content type, a size ceiling and a short timeout. Unavoidable for a user's avatar — but it does tell that host the device is here. |
-| `data:image/…;base64,…`  | Inlined. Spent out of the same 64 KiB the words come from, so keep it to a thumbnail or don't. |
+| `data:image/…;base64,…`  | Inlined. On Android one longer than 64 KiB is dropped and the notification is drawn without it. From the page it is also spent out of the same 64 KiB the words come from. Keep it to a thumbnail: 256 pixels is plenty. |
+
+On Android a path or an `https` URL longer than 4 KiB is dropped too.
+
+A `blob:` URL from the **page** is read there, redrawn as a small `data:` URL
+and sent as that, since the bytes it names exist only in the page. One that
+cannot be read is dropped. A worker on Android cannot make one, and one from
+a worker on iOS is not supported; send a `data:` URL.
 
 **A picture holds a notification up for two seconds and no longer.** Android
 binds a line's face the first time it draws that line and never goes back for

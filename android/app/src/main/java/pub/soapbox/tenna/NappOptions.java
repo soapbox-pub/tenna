@@ -46,7 +46,14 @@ final class NappOptions {
     private static final int MAX_TITLE = 160;
     private static final int MAX_NAME = 64;
     private static final int MAX_ID = 128;
+    /** A path or an https URL. */
     private static final int MAX_IMAGE = 4096;
+
+    /**
+     * An inlined picture. Every record keeps its options, and a site's records
+     * are one file read on every render, so this bounds that file too.
+     */
+    static final int MAX_DATA_IMAGE = 64 * 1024;
 
     /** Pairs of on/off milliseconds. Longer than this is not a pattern. */
     private static final int MAX_VIBRATE = 32;
@@ -323,16 +330,19 @@ final class NappOptions {
      * An image reference, kept only if it is one of the three shapes
      * {@link NappImages} knows how to resolve.
      *
-     * The length cap is what makes a {@code data:} URL usable but small: the
-     * whole payload rides in a URL, so a site inlining artwork is spending a
-     * budget it also needs for words.
+     * A {@code data:} URL is the picture itself rather than a name for one, so
+     * it gets its own ceiling: enough for a thumbnail, which is all a
+     * notification draws, and not a photograph at full size.
      */
     @Nullable
     static String image(@Nullable String value) {
-        if (value == null || value.isEmpty() || value.length() > MAX_IMAGE) return null;
+        if (value == null || value.isEmpty()) return null;
+        if (value.startsWith("data:image/")) {
+            return value.length() <= MAX_DATA_IMAGE ? value : null;
+        }
+        if (value.length() > MAX_IMAGE) return null;
         if (value.startsWith("/") && !value.startsWith("//")) return value;
         if (value.startsWith("https://")) return value;
-        if (value.startsWith("data:image/")) return value;
         return null;
     }
 }

@@ -433,29 +433,105 @@ function notificationSource(grant: 'granted' | 'denied' | 'default'): string {
    * hung on the stand-in registration where there is not. See
    * {@link SERVICE_WORKER_SOURCE}.
    */
+  /**
+   * A \`blob:\` picture as a small \`data:\` one, or undefined.
+   *
+   * A blob URL names bytes in this page's memory and nowhere else, so the
+   * host, which draws the notification, cannot read it. Redrawn no larger
+   * than \`edge\` on its way, because a thumbnail is all a notification draws
+   * and it has to fit in the same message as the words.
+   */
+  function inlinePicture(url, edge) {
+    return nativeFetch(url)
+      .then(function(response) { return response.blob(); })
+      .then(function(blob) { return createImageBitmap(blob); })
+      .then(function(bitmap) {
+        var scale = Math.min(1, edge / Math.max(bitmap.width, bitmap.height));
+        var canvas = document.createElement('canvas');
+        canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+        canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+        canvas.getContext('2d').drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+        if (bitmap.close) bitmap.close();
+        var png = canvas.toDataURL('image/png');
+        // Kept as a PNG where that is small, for the transparency; anything
+        // else is a photograph, and far smaller as a JPEG.
+        return png.length <= ${16 * 1024} ? png : canvas.toDataURL('image/jpeg', 0.8);
+      })
+      .catch(function() { return undefined; });
+  }
+
+  function isBlobUrl(value) {
+    return typeof value === 'string' && value.slice(0, 5) === 'blob:';
+  }
+
+  /**
+   * The options with every \`blob:\` picture inlined, or dropped if it can't
+   * be, and how to take the inlined ones back out again, least missed first.
+   */
+  function inlinePictures(options) {
+    var out = Object.assign({}, options);
+    var pending = [];
+    var undo = [];
+    // In the order they are given up when the whole will not fit.
+    var fields = [['image', 320], ['badge', 96], ['icon', 192]];
+    fields.forEach(function(entry) {
+      var field = entry[0];
+      if (!isBlobUrl(out[field])) return;
+      pending.push(inlinePicture(out[field], entry[1]).then(function(inlined) {
+        if (inlined) out[field] = inlined; else delete out[field];
+      }));
+      undo.push(function() { delete out[field]; });
+    });
+    if (Array.isArray(out.actions)) {
+      out.actions = out.actions.map(function(action) {
+        if (!action || !isBlobUrl(action.icon)) return action;
+        var copy = Object.assign({}, action);
+        pending.push(inlinePicture(copy.icon, 96).then(function(inlined) {
+          if (inlined) copy.icon = inlined; else delete copy.icon;
+        }));
+        undo.splice(1, 0, function() { delete copy.icon; });
+        return copy;
+      });
+    }
+    return Promise.all(pending).then(function() {
+      return { options: out, undo: undo };
+    });
+  }
+
+  function showInlined(title, inlined) {
+    var payload;
+    try {
+      payload = { title: String(title), options: inlined.options };
+      // A picture Tenna inlined is given up before the words are refused.
+      var undo = inlined.undo.slice();
+      while (JSON.stringify(payload).length > ${64 * 1024} && undo.length) {
+        undo.shift()();
+      }
+      // Thrown here rather than at the bridge, so a site gets the TypeError
+      // a browser gives it instead of a message about a message channel.
+      if (JSON.stringify(payload).length > ${64 * 1024}) {
+        return Promise.reject(new TypeError('Notification is too large'));
+      }
+    } catch (e) {
+      return Promise.reject(new TypeError('Notification options must be serializable'));
+    }
+
+    return rpc('notification.show', payload).then(function() {
+      remember('granted');
+    }, function(err) {
+      // A refusal is an answer about the permission, and the only one the
+      // site will get: showNotification does not report why it failed.
+      if (err && /rejected|turned off|refused/i.test(String(err.message))) {
+        remember('denied');
+      }
+      throw err;
+    });
+  }
+
   var notifyMethods = {
     showNotification: function(title, options) {
-      var payload;
-      try {
-        payload = { title: String(title), options: options || {} };
-        // Thrown here rather than at the bridge, so a site gets the TypeError
-        // a browser gives it instead of a message about a message channel.
-        if (JSON.stringify(payload).length > ${64 * 1024}) {
-          return Promise.reject(new TypeError('Notification is too large'));
-        }
-      } catch (e) {
-        return Promise.reject(new TypeError('Notification options must be serializable'));
-      }
-
-      return rpc('notification.show', payload).then(function() {
-        remember('granted');
-      }, function(err) {
-        // A refusal is an answer about the permission, and the only one the
-        // site will get: showNotification does not report why it failed.
-        if (err && /rejected|turned off|refused/i.test(String(err.message))) {
-          remember('denied');
-        }
-        throw err;
+      return Promise.resolve(options || {}).then(inlinePictures).then(function(inlined) {
+        return showInlined(title, inlined);
       });
     },
 

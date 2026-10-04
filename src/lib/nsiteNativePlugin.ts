@@ -68,6 +68,13 @@ export interface NsiteWebViewPlugin {
     /** The NIP-07 provider to install, or omitted to withhold `window.nostr`. */
     providerScript?: string;
     /**
+     * The script defining `window.ENV`, or omitted when the site has no
+     * variables. Installed apart from the provider, and in every frame of the
+     * site's origin rather than only the top one, because it has nothing to
+     * do with a key and is what npanel serves every page. See `nsiteEnv`.
+     */
+    envScript?: string;
+    /**
      * A share to open the site on, instead of its front page.
      *
      * A `get` delivery is loaded as-is: the site's own action with the params

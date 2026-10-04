@@ -2,11 +2,12 @@ import { App } from '@capacitor/app';
 import type { PluginListenerHandle } from '@capacitor/core';
 import type { NostrEvent } from '@nostrify/nostrify';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, Check, ExternalLink, SquarePlus, Trash2, X } from 'lucide-react';
+import { ArrowLeft, Check, ChevronRight, ExternalLink, SquarePlus, Trash2, X } from 'lucide-react';
 import { nip19 } from 'nostr-tools';
 import { useEffect, useMemo, useRef, useState, type ComponentType } from 'react';
 import { Link } from 'react-router-dom';
 
+import { NsiteEnvironment } from '@/components/NsiteEnvironment';
 import { TileArtwork, TileFrame } from '@/components/Tile';
 import {
   AlertDialog,
@@ -33,6 +34,7 @@ import { useAuthor } from '@/hooks/useAuthor';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useNsiteAllowance } from '@/hooks/useNsiteAllowance';
 import { useNsiteBrowserAllowance } from '@/hooks/useNsiteBrowserAllowance';
+import { useNsiteEnv } from '@/hooks/useNsiteEnv';
 import type { NsiteApp } from '@/hooks/useNsiteApp';
 import type { UseNsitePinResult } from '@/hooks/useNsitePin';
 import { useToast } from '@/hooks/useToast';
@@ -495,6 +497,18 @@ export function NsiteAppInfo({
     onSettled: () => queryClient.invalidateQueries({ queryKey: usageKey }),
   });
 
+  // The variables the site reads as `window.ENV`, edited a screen further in.
+  // See `nsiteEnv`.
+  const env = useNsiteEnv(siteId);
+  const [editingEnv, setEditingEnv] = useState(false);
+  // Leaving App info leaves the screen inside it too, so the next visit
+  // starts at the top rather than a level down.
+  const [wasOpen, setWasOpen] = useState(open);
+  if (wasOpen !== open) {
+    setWasOpen(open);
+    if (!open) setEditingEnv(false);
+  }
+
   const handleRemove = (perm: NsitePermission) => {
     if (!user) return;
     void removeNsitePermission(siteId, user.pubkey, perm.type, perm.kind);
@@ -568,11 +582,14 @@ export function NsiteAppInfo({
   // Tenna outright — on a page imitating a system page, the one wrong answer.
   // Radix answers Escape, which is the same gesture on a keyboard and not one
   // anybody makes here.
-  // Back from the confirmation is back to this screen, not out of it.
+  // Back from the confirmation is back to this screen, not out of it, and so
+  // is back from the environment.
   const confirmingRef = useRef(confirmingClear);
+  const editingEnvRef = useRef(editingEnv);
   useEffect(() => {
     confirmingRef.current = confirmingClear;
-  }, [confirmingClear]);
+    editingEnvRef.current = editingEnv;
+  }, [confirmingClear, editingEnv]);
 
   useEffect(() => {
     if (!open) return;
@@ -581,6 +598,7 @@ export function NsiteAppInfo({
 
     App.addListener('backButton', () => {
       if (confirmingRef.current) setConfirmingClear(false);
+      else if (editingEnvRef.current) setEditingEnv(false);
       else onOpenChange(false);
     })
       .then((listener) => {
@@ -859,6 +877,30 @@ export function NsiteAppInfo({
             </section>
           )}
 
+          {/* A row that is a door rather than a control: what is behind it is
+              a list, and a list does not fit on a page of summaries. */}
+          <section className="rounded-2xl bg-foreground/[0.06]">
+            <button
+              type="button"
+              onClick={() => setEditingEnv(true)}
+              className="flex w-full items-center gap-3 rounded-2xl px-5 py-4 text-left outline-none transition-colors hover:bg-foreground/5 focus-visible:ring-2 focus-visible:ring-primary"
+            >
+              <span className="flex min-w-0 flex-1 flex-col">
+                <span className="flex min-h-9 items-center text-lg font-medium text-foreground">
+                  Environment
+                </span>
+                <span className="mt-1 text-base text-foreground/55">
+                  {env.length === 0
+                    ? 'No variables set.'
+                    : env.length === 1
+                      ? '1 variable in window.ENV'
+                      : `${env.length} variables in window.ENV`}
+                </span>
+              </span>
+              <ChevronRight aria-hidden="true" className="size-5 shrink-0 text-foreground/50" />
+            </button>
+          </section>
+
           {/* Where a system screen keeps the package name and version: what
               the thing is called by everything that is not a person. Cut
               through the middle rather than wrapped, because whole they would
@@ -878,6 +920,13 @@ export function NsiteAppInfo({
           </section>
         </div>
       </DialogContent>
+
+      <NsiteEnvironment
+        siteId={siteId}
+        name={name}
+        open={editingEnv}
+        onOpenChange={setEditingEnv}
+      />
 
       <AlertDialog open={confirmingClear} onOpenChange={setConfirmingClear}>
         <AlertDialogContent>

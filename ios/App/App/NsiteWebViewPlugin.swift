@@ -119,6 +119,7 @@ public class NsiteWebViewPlugin: CAPPlugin, CAPBridgedPlugin {
                 files: files,
                 servers: servers,
                 providerScript: script,
+                envScript: call.getString("envScript"),
                 onLoad: { [weak self] in self?.notifyListeners("nsiteLoad", data: [:]) },
                 onRpc: { [weak self] id, method, params in
                     self?.notifyListeners("nsiteRpc", data: [

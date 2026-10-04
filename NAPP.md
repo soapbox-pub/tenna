@@ -1007,6 +1007,30 @@ Ten files and 100 MB per share are the ceilings.
 Not on the web, which offers no page a way into the OS share menu, so the
 member is read and ignored there.
 
+## `window.ENV` — configuration without a rebuild
+
+The user can set variables on a site under **App info → Environment**, and its
+pages read them as `window.ENV`, defined before any of the site's own scripts
+run. It is the same object npanel serves a site from a
+host's settings, so a site that reads `window.ENV.API_URL` can be pointed
+somewhere else on either without a new deploy:
+
+```js
+const api = window.ENV?.API_URL ?? 'https://api.example.com';
+```
+
+- **Undefined until a variable is set.** A site with none sees no `ENV` at all,
+  as it would in any browser, so read it with a fallback.
+- Every value is a **string**. Names are letters, digits and `_`, not starting
+  with a digit; up to 100 variables, 4096 characters a value.
+- It is read **when the site opens**. A change takes effect the next time it
+  does.
+- It is in **every frame of the site's own origin**, not in a third-party
+  iframe it embeds, and not in its service worker.
+- It is **this device's**, set by the person using it. Nothing is published.
+
+On all three runtimes: the web, Android and iOS.
+
 ## On iOS
 
 Everything under [`window.napp` — notifications](#windownapp--notifications)

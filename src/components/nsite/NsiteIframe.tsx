@@ -7,6 +7,7 @@ import type { NsiteFrameProps } from '@/components/nsite/types';
 import { useSafeAreaInsets } from '@/hooks/useSafeAreaInsets';
 import { deriveIframeSubdomain } from '@/lib/iframeSubdomain';
 import { buildManifest, fetchFromBlossom, resolveServers } from '@/lib/nsiteFiles';
+import { getNsiteEnv, getNsiteEnvScript } from '@/lib/nsiteEnv';
 import { getNsiteNostrProviderScript } from '@/lib/nsiteNostrProvider';
 import { getNsiteSubdomain } from '@/lib/nsiteSubdomain';
 import { getPreviewInjectedScript } from '@/lib/previewInjectedScript';
@@ -96,14 +97,24 @@ export function NsiteIframe({
   useEffect(() => { insetsRef.current = insets; }, [insets]);
   useEffect(() => { onLoadRef.current = onLoad; }, [onLoad]);
 
+  // Read once, as the site opens: a change made in its App info takes effect
+  // the next time it does, the way a page reads its config once at load.
+  const env = useMemo(() => getNsiteEnvScript(getNsiteEnv(siteId)), [siteId]);
+
   const injectedScripts = useMemo<InjectedScript[]>(() => {
-    const scripts: InjectedScript[] = [{
+    const scripts: InjectedScript[] = [];
+    // First, so `window.ENV` is there for every other script as well as the
+    // site's own.
+    if (env) {
+      scripts.push({ path: '__injected__/env.js', content: env });
+    }
+    scripts.push({
       path: '__injected__/preview.js',
       content: getPreviewInjectedScript(),
     }, {
       path: '__injected__/safe-area.js',
       content: getSafeAreaInjectedScript(),
-    }];
+    });
     if (pubkey) {
       scripts.push({
         path: '__injected__/nostr-provider.js',
@@ -111,7 +122,7 @@ export function NsiteIframe({
       });
     }
     return scripts;
-  }, [pubkey]);
+  }, [env, pubkey]);
 
   const resolveFile = useCallback(
     async (pathname: string): Promise<FileResponse | null> => {

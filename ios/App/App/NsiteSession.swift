@@ -49,6 +49,7 @@ final class NsiteSession: NSObject, WKNavigationDelegate, WKUIDelegate {
         files: [String: String],
         servers: [String],
         providerScript: String?,
+        envScript: String?,
         onLoad: @escaping () -> Void,
         onRpc: @escaping (Int, String, String) -> Void,
         onCapability: @escaping (Int, [String]) -> Void,
@@ -102,6 +103,16 @@ final class NsiteSession: NSObject, WKNavigationDelegate, WKUIDelegate {
         // scripts: the shim that gives the provider something to call — see
         // `Host` below — and then the provider itself.
         let controller = config.userContentController
+        // `window.ENV`, ahead of everything, into every frame that is the
+        // site's own — as Android's origin-scoped document-start script does,
+        // and as a gateway serving it on every page would. See `nsiteEnv.ts`.
+        if let source = Self.envScript(envScript, siteId: siteId) {
+            controller.addUserScript(WKUserScript(
+                source: source,
+                injectionTime: .atDocumentStart,
+                forMainFrameOnly: false
+            ))
+        }
         if let providerScript {
             controller.addUserScript(WKUserScript(
                 source: Self.hostShim,
@@ -374,6 +385,12 @@ final class NsiteSession: NSObject, WKNavigationDelegate, WKUIDelegate {
         guard let script = NsiteIndexedDB.script, let origin = NsiteOrigins.originFor(siteId) else { return nil }
         let key = NsiteCryptoKeys.sealingKey(for: siteId).map { "self.__tennaIDBVaultKey = \(jsString($0));\n" } ?? ""
         return "if (self.origin === \(jsString(origin))) {\n\(key)\(script)\n}"
+    }
+
+    /// The web layer's `window.ENV` script, kept to frames of this site's origin.
+    private static func envScript(_ script: String?, siteId: String) -> String? {
+        guard let script, let origin = NsiteOrigins.originFor(siteId) else { return nil }
+        return "if (self.origin === \(jsString(origin))) {\n\(script)\n}"
     }
 
     /// Carries the engine's messages to the store, answering each in turn.

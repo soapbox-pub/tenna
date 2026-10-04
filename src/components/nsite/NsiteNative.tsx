@@ -16,6 +16,7 @@ import {
   type NsiteFrameRect,
   type NsiteRpcEvent,
 } from '@/lib/nsiteNativePlugin';
+import { getNsiteEnv, getNsiteEnvScript } from '@/lib/nsiteEnv';
 import { getNsiteNostrProviderScript } from '@/lib/nsiteNostrProvider';
 import type { NsiteShareDelivery } from '@/lib/nsiteShareTarget';
 import { getNsiteSubdomain } from '@/lib/nsiteSubdomain';
@@ -213,6 +214,9 @@ export function NsiteNative({
         // pictures to load. The script withholds `window.nostr` when there is
         // no pubkey to put in it.
         providerScript: nsiteProviderScript(pubkey, getNsiteSubdomain(event)),
+        // Read as the window opens, so a change made in App info takes effect
+        // the next time it does.
+        envScript: getNsiteEnvScript(getNsiteEnv(getNsiteSubdomain(event))),
         // The first URL, when the window was opened out of the share sheet.
         // Held in a ref like the callbacks: a share belongs to the open, and
         // re-reading it later would only reload the site over the user.

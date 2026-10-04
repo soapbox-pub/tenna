@@ -390,6 +390,7 @@ public class NsiteWebViewPlugin extends Plugin {
         String siteId = call.getString("siteId");
         String name = call.getString("name");
         String providerScript = call.getString("providerScript");
+        String envScript = call.getString("envScript");
         JSObject manifest = call.getObject("files");
         JSArray serverList = call.getArray("servers");
         JSObject share = call.getObject("share");
@@ -455,6 +456,9 @@ public class NsiteWebViewPlugin extends Plugin {
             // a WebView that has not been used yet. See NsiteProfiles.
             NsiteProfiles.attach(view, siteId);
             configure(view);
+            // Before the bridge, so `window.ENV` is there for the provider as
+            // well as for the site.
+            installEnv(view, origin, envScript);
             installBridge(view, origin, providerScript);
             // Who answers when this site's worker rings for a port. Its own
             // window is the only thing that can carry one across.
@@ -1244,6 +1248,19 @@ public class NsiteWebViewPlugin extends Plugin {
 
         downloads = saving;
         view.setDownloadListener(saving);
+    }
+
+    /**
+     * Define {@code window.ENV}, the variables the user set for this site.
+     *
+     * Apart from the bridge, which gives up without a message listener: this
+     * needs none. Every frame of the site's origin gets it, which is what a
+     * gateway serving it on every page amounts to. See {@code nsiteEnv.ts}.
+     */
+    private void installEnv(WebView view, String origin, @Nullable String envScript) {
+        if (envScript == null) return;
+        if (!WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) return;
+        WebViewCompat.addDocumentStartJavaScript(view, envScript, Collections.singleton(origin));
     }
 
     /**

@@ -2,12 +2,13 @@ import { App } from '@capacitor/app';
 import type { PluginListenerHandle } from '@capacitor/core';
 import type { NostrEvent } from '@nostrify/nostrify';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, Check, ChevronRight, ExternalLink, SquarePlus, Trash2, X } from 'lucide-react';
+import { ArrowLeft, Check, ExternalLink, SquarePlus, Trash2, X } from 'lucide-react';
 import { nip19 } from 'nostr-tools';
 import { useEffect, useMemo, useRef, useState, type ComponentType } from 'react';
 import { Link } from 'react-router-dom';
 
 import { NsiteEnvironment } from '@/components/NsiteEnvironment';
+import { NsiteInfoPage, NsiteInfoRow } from '@/components/NsiteInfoPage';
 import { TileArtwork, TileFrame } from '@/components/Tile';
 import {
   AlertDialog,
@@ -58,6 +59,9 @@ import { requestNsiteOpen } from '@/lib/nsiteOpenRequest';
 import { getNsiteSubdomain, NSITE_SNAPSHOT_KIND } from '@/lib/nsiteSubdomain';
 import { isNsiteUrl, nsiteUrl } from '@/lib/nsiteUrl';
 import { cn, middleEllipsis } from '@/lib/utils';
+
+/** The screens one level in from App info. */
+type InfoScreen = 'permissions' | 'storage' | 'environment' | 'addresses';
 
 interface NsiteAppInfoProps {
   /** The NIP-5A manifest event for the site being described. */
@@ -379,6 +383,18 @@ export function NsiteAppInfo({
 
   const hasPermissions = permissions.length > 0 || browserPermissions.length > 0;
 
+  // What the row on App info says is behind it: the permissions themselves
+  // when there are few enough to read on one line, a count when there are not.
+  const permissionSummary = (() => {
+    const labels = [
+      ...browserPermissions.filter((perm) => perm.allowed).map((perm) => getBrowserPermissionLabel(perm.type)),
+      ...permissions.map((perm) => getPermissionLabel(perm.type, perm.kind)),
+    ];
+    if (labels.length === 0) return 'No permissions granted';
+    if (labels.length <= 2) return labels.join(' and ');
+    return `${labels.length} permissions allowed`;
+  })();
+
   // Taking back "send notifications" has to reach further than the stored
   // decision: the subscriptions the site set are on disk on the native side,
   // and the push service would go on listening for them.
@@ -497,16 +513,22 @@ export function NsiteAppInfo({
     onSettled: () => queryClient.invalidateQueries({ queryKey: usageKey }),
   });
 
-  // The variables the site reads as `window.ENV`, edited a screen further in.
-  // See `nsiteEnv`.
+  // The variables the site reads as `window.ENV`. See `nsiteEnv`.
   const env = useNsiteEnv(siteId);
-  const [editingEnv, setEditingEnv] = useState(false);
+
+  // Which of the screens one level in is up, if any. App info itself is a
+  // short list of doors; what is behind each is a page of its own.
+  const [screen, setScreen] = useState<InfoScreen | null>(null);
+  const screenProps = (which: InfoScreen) => ({
+    open: screen === which,
+    onOpenChange: (next: boolean) => setScreen(next ? which : null),
+  });
   // Leaving App info leaves the screen inside it too, so the next visit
   // starts at the top rather than a level down.
   const [wasOpen, setWasOpen] = useState(open);
   if (wasOpen !== open) {
     setWasOpen(open);
-    if (!open) setEditingEnv(false);
+    if (!open) setScreen(null);
   }
 
   const handleRemove = (perm: NsitePermission) => {
@@ -582,14 +604,14 @@ export function NsiteAppInfo({
   // Tenna outright — on a page imitating a system page, the one wrong answer.
   // Radix answers Escape, which is the same gesture on a keyboard and not one
   // anybody makes here.
-  // Back from the confirmation is back to this screen, not out of it, and so
-  // is back from the environment.
+  // Back from the confirmation is back to the screen under it, and back from
+  // a screen one level in is back to this one, not out of it.
   const confirmingRef = useRef(confirmingClear);
-  const editingEnvRef = useRef(editingEnv);
+  const screenRef = useRef(screen);
   useEffect(() => {
     confirmingRef.current = confirmingClear;
-    editingEnvRef.current = editingEnv;
-  }, [confirmingClear, editingEnv]);
+    screenRef.current = screen;
+  }, [confirmingClear, screen]);
 
   useEffect(() => {
     if (!open) return;
@@ -598,7 +620,7 @@ export function NsiteAppInfo({
 
     App.addListener('backButton', () => {
       if (confirmingRef.current) setConfirmingClear(false);
-      else if (editingEnvRef.current) setEditingEnv(false);
+      else if (screenRef.current) setScreen(null);
       else onOpenChange(false);
     })
       .then((listener) => {
@@ -721,13 +743,14 @@ export function NsiteAppInfo({
           </div>
         </div>
 
-        <div className="flex flex-col gap-2 px-4 pb-safe-offset-8">
-          {/* Above the permissions, as it is on the screen this imitates, and
-              for the same reason: it is the one thing on the page a person
-              might have come here to change. */}
-          {notifiable && (
-            <section className="rounded-2xl bg-foreground/[0.06] px-5 py-4">
-              <div className="flex min-h-9 items-center justify-between gap-4">
+        <div className="px-4 pb-safe-offset-8">
+          {/* One list of short rows, each a door to a page of its own, so the
+              screen reads at a glance however much a site has been given. The
+              switch is the exception: it is the one thing a person might have
+              come here to change, and a page holding one switch is a detour. */}
+          <div className="divide-y divide-border overflow-hidden rounded-2xl bg-foreground/[0.06]">
+            {notifiable && (
+              <div className="flex items-center justify-between gap-4 px-5 py-4">
                 <Label
                   htmlFor="nsite-notifications"
                   className="min-w-0 text-lg font-medium text-foreground"
@@ -762,171 +785,175 @@ export function NsiteAppInfo({
                   />
                 )}
               </div>
-            </section>
-          )}
-
-          <section className="rounded-2xl bg-foreground/[0.06] px-5 py-4">
-            <div className="flex min-h-9 items-center justify-between gap-3">
-              <h3 className="text-lg font-medium text-foreground">Permissions</h3>
-              {hasPermissions && (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-9 shrink-0 px-3 text-sm text-destructive hover:bg-foreground/10 hover:text-destructive"
-                  onClick={handleClearAll}
-                >
-                  Revoke all
-                </Button>
-              )}
-            </div>
-
-            {/* A summary line where the system puts one, and the controls
-                themselves where there is something to control.
-
-                Both kinds of permission are listed together, because the
-                distinction between them — one is about a key, the other about
-                the device — is not one a person came here to think about. The
-                device's are shown whether or not anyone is signed in, since
-                that is what they are keyed on. */}
-            {!hasPermissions ? (
-              <p className="mt-1 text-base text-foreground/55">
-                {user
-                  ? 'Nothing granted yet. What you allow this app to do will be listed here.'
-                  : 'Nothing granted yet. Sign in to also see what this app may do with your identity.'}
-              </p>
-            ) : (
-              <ul className="-mx-2 mt-2 divide-y divide-border">
-                {browserPermissions.map((perm) => (
-                  <li key={perm.type} className="flex items-center gap-3 px-2 py-3">
-                    <span className="min-w-0 flex-1 truncate text-base text-foreground/90">
-                      {getBrowserPermissionLabel(perm.type)}
-                      {!perm.allowed && (
-                        <span className="text-foreground/45"> — refused</span>
-                      )}
-                    </span>
-
-                    <button
-                      type="button"
-                      onClick={() => handleRemoveBrowser(perm)}
-                      aria-label={`Forget ${getBrowserPermissionLabel(perm.type)}`}
-                      title="Forget"
-                      className="flex size-9 shrink-0 items-center justify-center rounded-full text-foreground/50 outline-none transition-colors hover:bg-foreground/10 hover:text-destructive focus-visible:ring-2 focus-visible:ring-primary"
-                    >
-                      <X className="size-5" />
-                    </button>
-                  </li>
-                ))}
-
-                {permissions.map((perm) => (
-                  <li
-                    key={`${perm.type}-${perm.kind}`}
-                    className="flex items-center gap-3 px-2 py-3"
-                  >
-                    <span className="min-w-0 flex-1 truncate text-base text-foreground/90">
-                      {getPermissionLabel(perm.type, perm.kind)}
-                    </span>
-
-                    <button
-                      type="button"
-                      onClick={() => handleRemove(perm)}
-                      aria-label={`Revoke ${getPermissionLabel(perm.type, perm.kind)}`}
-                      title="Revoke"
-                      className="flex size-9 shrink-0 items-center justify-center rounded-full text-foreground/50 outline-none transition-colors hover:bg-foreground/10 hover:text-destructive focus-visible:ring-2 focus-visible:ring-primary"
-                    >
-                      <X className="size-5" />
-                    </button>
-                  </li>
-                ))}
-              </ul>
             )}
-          </section>
 
-          {/* Below the permissions, where the system's own screen keeps it.
-              Clearing is a question put again before it is done, unlike
-              everything else on this page: a permission taken back can be
-              given again, and what the site stored is gone for good — for
-              some sites that is the only copy of a key. */}
-          {measurable && (
-            <section className="rounded-2xl bg-foreground/[0.06] px-5 py-4">
-              <div className="flex min-h-9 items-center justify-between gap-3">
-                <h3 className="text-lg font-medium text-foreground">Storage</h3>
-                {usage.data !== undefined && usage.data > 0 && (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="h-9 shrink-0 px-3 text-sm text-destructive hover:bg-foreground/10 hover:text-destructive"
-                    onClick={() => setConfirmingClear(true)}
-                    disabled={clearStorage.isPending}
-                  >
-                    {clearStorage.isPending ? 'Clearing…' : 'Clear storage'}
-                  </Button>
-                )}
-              </div>
+            <NsiteInfoRow
+              label="Permissions"
+              summary={permissionSummary}
+              onClick={() => setScreen('permissions')}
+            />
 
-              {usage.isPending ? (
-                <Skeleton aria-hidden="true" className="mt-2 h-5 w-32 bg-foreground/10" />
-              ) : (
-                <p className="mt-1 text-base text-foreground/55">
-                  {usage.data === undefined
-                    ? 'Could not measure what this app has stored.'
-                    : usage.data > 0
-                      ? `${formatBytes(usage.data)} used on this device`
-                      : 'Nothing stored on this device yet.'}
-                </p>
-              )}
-            </section>
-          )}
+            {measurable && (
+              <NsiteInfoRow
+                label="Storage"
+                summary={
+                  usage.isPending
+                    ? 'Measuring…'
+                    : usage.data === undefined
+                      ? 'Could not measure'
+                      : usage.data > 0
+                        ? `${formatBytes(usage.data)} used`
+                        : 'Nothing stored'
+                }
+                onClick={() => setScreen('storage')}
+              />
+            )}
 
-          {/* A row that is a door rather than a control: what is behind it is
-              a list, and a list does not fit on a page of summaries. */}
-          <section className="rounded-2xl bg-foreground/[0.06]">
-            <button
-              type="button"
-              onClick={() => setEditingEnv(true)}
-              className="flex w-full items-center gap-3 rounded-2xl px-5 py-4 text-left outline-none transition-colors hover:bg-foreground/5 focus-visible:ring-2 focus-visible:ring-primary"
-            >
-              <span className="flex min-w-0 flex-1 flex-col">
-                <span className="flex min-h-9 items-center text-lg font-medium text-foreground">
-                  Environment
-                </span>
-                <span className="mt-1 text-base text-foreground/55">
-                  {env.length === 0
-                    ? 'No variables set.'
-                    : env.length === 1
-                      ? '1 variable in window.ENV'
-                      : `${env.length} variables in window.ENV`}
-                </span>
-              </span>
-              <ChevronRight aria-hidden="true" className="size-5 shrink-0 text-foreground/50" />
-            </button>
-          </section>
+            <NsiteInfoRow
+              label="Environment"
+              summary={
+                env.length === 0
+                  ? 'No variables set'
+                  : env.length === 1
+                    ? '1 variable in window.ENV'
+                    : `${env.length} variables in window.ENV`
+              }
+              onClick={() => setScreen('environment')}
+            />
 
-          {/* Where a system screen keeps the package name and version: what
-              the thing is called by everything that is not a person. Cut
-              through the middle rather than wrapped, because whole they would
-              be four lines of base32 and the ends are the parts that mean
-              anything — the scheme at the front, and at the back the tail that
-              names the site. */}
-          <section className="rounded-2xl bg-foreground/[0.06] px-5 py-4">
-            <h3 className="flex min-h-9 items-center text-lg font-medium text-foreground">
-              Addresses
-            </h3>
-
-            <ul className="-mx-2 mt-1 divide-y divide-border">
-              {addresses.map((uri) => (
-                <AddressRow key={uri} uri={uri} onOpen={handleOpenUri} />
-              ))}
-            </ul>
-          </section>
+            <NsiteInfoRow
+              label="Addresses"
+              summary={addresses.length === 1 ? '1 address' : `${addresses.length} addresses`}
+              onClick={() => setScreen('addresses')}
+            />
+          </div>
         </div>
       </DialogContent>
 
-      <NsiteEnvironment
-        siteId={siteId}
-        name={name}
-        open={editingEnv}
-        onOpenChange={setEditingEnv}
-      />
+      <NsiteInfoPage title="Permissions" {...screenProps('permissions')}>
+        {/* Both kinds of permission are listed together, because the
+            distinction between them — one is about a key, the other about the
+            device — is not one a person came here to think about. The
+            device's are shown whether or not anyone is signed in, since that
+            is what they are keyed on. */}
+        <section className="rounded-2xl bg-foreground/[0.06] px-3 py-2">
+          {!hasPermissions ? (
+            <p className="px-2 py-3 text-base text-foreground/55">
+              {user
+                ? 'Nothing granted yet. What you allow this app to do will be listed here.'
+                : 'Nothing granted yet. Sign in to also see what this app may do with your identity.'}
+            </p>
+          ) : (
+            <ul className="divide-y divide-border">
+              {browserPermissions.map((perm) => (
+                <li key={perm.type} className="flex items-center gap-3 px-2 py-3">
+                  <span className="min-w-0 flex-1 truncate text-base text-foreground/90">
+                    {getBrowserPermissionLabel(perm.type)}
+                    {!perm.allowed && (
+                      <span className="text-foreground/45"> — refused</span>
+                    )}
+                  </span>
+
+                  <button
+                    type="button"
+                    onClick={() => handleRemoveBrowser(perm)}
+                    aria-label={`Forget ${getBrowserPermissionLabel(perm.type)}`}
+                    title="Forget"
+                    className="flex size-9 shrink-0 items-center justify-center rounded-full text-foreground/50 outline-none transition-colors hover:bg-foreground/10 hover:text-destructive focus-visible:ring-2 focus-visible:ring-primary"
+                  >
+                    <X className="size-5" />
+                  </button>
+                </li>
+              ))}
+
+              {permissions.map((perm) => (
+                <li
+                  key={`${perm.type}-${perm.kind}`}
+                  className="flex items-center gap-3 px-2 py-3"
+                >
+                  <span className="min-w-0 flex-1 truncate text-base text-foreground/90">
+                    {getPermissionLabel(perm.type, perm.kind)}
+                  </span>
+
+                  <button
+                    type="button"
+                    onClick={() => handleRemove(perm)}
+                    aria-label={`Revoke ${getPermissionLabel(perm.type, perm.kind)}`}
+                    title="Revoke"
+                    className="flex size-9 shrink-0 items-center justify-center rounded-full text-foreground/50 outline-none transition-colors hover:bg-foreground/10 hover:text-destructive focus-visible:ring-2 focus-visible:ring-primary"
+                  >
+                    <X className="size-5" />
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+
+        {hasPermissions && (
+          <Button
+            variant="ghost"
+            className="mt-1 h-12 justify-start rounded-2xl px-5 text-base text-destructive hover:bg-foreground/10 hover:text-destructive"
+            onClick={handleClearAll}
+          >
+            Revoke all
+          </Button>
+        )}
+      </NsiteInfoPage>
+
+      {/* Clearing is a question put again before it is done, unlike
+          everything else here: a permission taken back can be given again,
+          and what the site stored is gone for good — for some sites that is
+          the only copy of a key. */}
+      {measurable && (
+        <NsiteInfoPage title="Storage" {...screenProps('storage')}>
+          <section className="rounded-2xl bg-foreground/[0.06] px-5 py-4">
+            {usage.isPending ? (
+              <Skeleton aria-hidden="true" className="h-5 w-32 bg-foreground/10" />
+            ) : (
+              <p className="text-base text-foreground/70">
+                {usage.data === undefined
+                  ? 'Could not measure what this app has stored.'
+                  : usage.data > 0
+                    ? `${formatBytes(usage.data)} used on this device`
+                    : 'Nothing stored on this device yet.'}
+              </p>
+            )}
+          </section>
+
+          {usage.data !== undefined && usage.data > 0 && (
+            <Button
+              variant="ghost"
+              className="mt-1 h-12 justify-start rounded-2xl px-5 text-base text-destructive hover:bg-foreground/10 hover:text-destructive"
+              onClick={() => setConfirmingClear(true)}
+              disabled={clearStorage.isPending}
+            >
+              {clearStorage.isPending ? 'Clearing…' : 'Clear storage'}
+            </Button>
+          )}
+        </NsiteInfoPage>
+      )}
+
+      <NsiteEnvironment siteId={siteId} name={name} {...screenProps('environment')} />
+
+      {/* What the thing is called by everything that is not a person. Cut
+          through the middle rather than wrapped, because whole they would be
+          four lines of base32 and the ends are the parts that mean anything —
+          the scheme at the front, and at the back the tail that names the
+          site. */}
+      <NsiteInfoPage title="Addresses" {...screenProps('addresses')}>
+        <p className="px-1 pb-2 text-base text-foreground/60">
+          Tap an address to copy it.
+        </p>
+
+        <section className="rounded-2xl bg-foreground/[0.06] px-3 py-2">
+          <ul className="divide-y divide-border">
+            {addresses.map((uri) => (
+              <AddressRow key={uri} uri={uri} onOpen={handleOpenUri} />
+            ))}
+          </ul>
+        </section>
+      </NsiteInfoPage>
 
       <AlertDialog open={confirmingClear} onOpenChange={setConfirmingClear}>
         <AlertDialogContent>

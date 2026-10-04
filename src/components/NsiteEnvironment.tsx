@@ -1,8 +1,8 @@
-import { ArrowLeft, Plus } from 'lucide-react';
+import { Plus } from 'lucide-react';
 import { useState } from 'react';
 
+import { NsiteInfoPage } from '@/components/NsiteInfoPage';
 import { Button } from '@/components/ui/button';
-import { Dialog, DialogClose, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
@@ -16,7 +16,6 @@ import {
   removeNsiteEnvVariable,
   setNsiteEnvVariable,
 } from '@/lib/nsiteEnv';
-import { cn } from '@/lib/utils';
 
 interface NsiteEnvironmentProps {
   siteId: string;
@@ -48,13 +47,9 @@ function parseDraft(draft: Draft): { name: string; value: string } | { error: st
 /**
  * A site's `window.ENV`, one screen deeper than its App info.
  *
- * Drawn as the App info page is — a page, not a card, with the way back at the
- * top — because it is a page of that page. A variable is a row showing its name
- * and value; pressing one opens it for editing in place, and the button at the
- * foot opens an empty one.
- *
- * Back is answered by App info, which owns the gesture while either screen is
- * up. See `NsiteAppInfo`.
+ * A variable is a row showing its name and value; pressing one opens it for
+ * editing in place, and the button at the foot opens an empty one. See
+ * `NsiteInfoPage` for the screen around it.
  */
 export function NsiteEnvironment({ siteId, name, open, onOpenChange }: NsiteEnvironmentProps) {
   const variables = useNsiteEnv(siteId);
@@ -182,88 +177,61 @@ export function NsiteEnvironment({ siteId, name, open, onOpenChange }: NsiteEnvi
   );
 
   return (
-    <Dialog open={open} onOpenChange={close}>
-      <DialogContent
-        aria-describedby={undefined}
-        showCloseButton={false}
-        className={cn(
-          'inset-0 max-h-none w-full max-w-none translate-x-0 translate-y-0 sm:max-w-none',
-          'flex flex-col gap-0 overflow-y-auto overscroll-contain rounded-none border-0 p-0',
-          'bg-card text-card-foreground',
-          // As App info, except the fields, which have to take a caret.
-          'select-none',
-          'data-[state=open]:zoom-in-100 data-[state=closed]:zoom-out-100',
-          'data-[state=open]:slide-in-from-right-4 data-[state=closed]:slide-out-to-right-4',
+    <NsiteInfoPage title="Environment" open={open} onOpenChange={close}>
+      <p className="px-1 pb-2 text-base text-foreground/60">
+        {name} reads these as <code className="font-mono text-foreground/80">window.ENV</code>,
+        before any of its own scripts run. Changes apply the next time it opens.
+      </p>
+
+      <section className="rounded-2xl bg-foreground/[0.06] px-3 py-2">
+        {variables.length === 0 && !draft ? (
+          <p className="px-2 py-3 text-base text-foreground/55">
+            No variables. The site sees no <code className="font-mono">window.ENV</code> at all.
+          </p>
+        ) : (
+          <ul className="divide-y divide-border">
+            {variables.map(([key, value]) => (
+              <li key={key}>
+                {draft?.original === key ? form : (
+                  <button
+                    type="button"
+                    onClick={() => setDraft({ original: key, name: key, value })}
+                    aria-label={`Edit ${key}`}
+                    className="flex w-full min-w-0 flex-col items-start gap-0.5 rounded-lg px-2 py-3 text-left outline-none transition-colors hover:bg-foreground/5 focus-visible:ring-2 focus-visible:ring-primary"
+                  >
+                    <span className="w-full truncate font-mono text-base text-foreground/90">{key}</span>
+                    <span className="w-full truncate font-mono text-sm text-foreground/55">
+                      {value === '' ? <span className="italic">empty</span> : value}
+                    </span>
+                  </button>
+                )}
+              </li>
+            ))}
+            {draft && !draft.original && <li>{form}</li>}
+          </ul>
         )}
-      >
-        <header className="sticky top-0 z-10 flex items-center gap-3 bg-card/95 px-4 pb-3 pt-safe-offset-3 backdrop-blur">
-          <DialogClose
-            aria-label="Back"
-            className="flex size-11 shrink-0 items-center justify-center rounded-full text-foreground/90 outline-none transition-colors hover:bg-foreground/10 focus-visible:ring-2 focus-visible:ring-primary"
+      </section>
+
+      {!draft && (
+        full ? (
+          <p className="px-1 pt-2 text-sm text-foreground/55">
+            A site can have at most {MAX_VARIABLES} variables. Remove one to add another.
+          </p>
+        ) : (
+          <Button
+            variant="ghost"
+            className="mt-1 h-12 justify-start gap-3 rounded-2xl px-5 text-base hover:bg-foreground/10"
+            onClick={() => setDraft({ name: '', value: '' })}
           >
-            <ArrowLeft aria-hidden="true" className="size-6" />
-          </DialogClose>
+            <Plus aria-hidden="true" className="size-5" />
+            Add variable
+          </Button>
+        )
+      )}
 
-          <DialogTitle className="text-xl font-semibold">Environment</DialogTitle>
-        </header>
-
-        <div className="flex flex-col gap-2 px-4 pb-safe-offset-8 pt-2">
-          <p className="px-1 pb-2 text-base text-foreground/60">
-            {name} reads these as <code className="font-mono text-foreground/80">window.ENV</code>,
-            before any of its own scripts run. Changes apply the next time it opens.
-          </p>
-
-          <section className="rounded-2xl bg-foreground/[0.06] px-3 py-2">
-            {variables.length === 0 && !draft ? (
-              <p className="px-2 py-3 text-base text-foreground/55">
-                No variables. The site sees no <code className="font-mono">window.ENV</code> at all.
-              </p>
-            ) : (
-              <ul className="divide-y divide-border">
-                {variables.map(([key, value]) => (
-                  <li key={key}>
-                    {draft?.original === key ? form : (
-                      <button
-                        type="button"
-                        onClick={() => setDraft({ original: key, name: key, value })}
-                        aria-label={`Edit ${key}`}
-                        className="flex w-full min-w-0 flex-col items-start gap-0.5 rounded-lg px-2 py-3 text-left outline-none transition-colors hover:bg-foreground/5 focus-visible:ring-2 focus-visible:ring-primary"
-                      >
-                        <span className="w-full truncate font-mono text-base text-foreground/90">{key}</span>
-                        <span className="w-full truncate font-mono text-sm text-foreground/55">
-                          {value === '' ? <span className="italic">empty</span> : value}
-                        </span>
-                      </button>
-                    )}
-                  </li>
-                ))}
-                {draft && !draft.original && <li>{form}</li>}
-              </ul>
-            )}
-          </section>
-
-          {!draft && (
-            full ? (
-              <p className="px-1 pt-2 text-sm text-foreground/55">
-                A site can have at most {MAX_VARIABLES} variables. Remove one to add another.
-              </p>
-            ) : (
-              <Button
-                variant="ghost"
-                className="mt-1 h-12 justify-start gap-3 rounded-2xl px-5 text-base hover:bg-foreground/10"
-                onClick={() => setDraft({ name: '', value: '' })}
-              >
-                <Plus aria-hidden="true" className="size-5" />
-                Add variable
-              </Button>
-            )
-          )}
-
-          <p className="px-1 pt-2 text-sm text-foreground/45">
-            Anything here can be read by the site and everything it loads, so keep secrets out.
-          </p>
-        </div>
-      </DialogContent>
-    </Dialog>
+      <p className="px-1 pt-2 text-sm text-foreground/45">
+        Anything here can be read by the site and everything it loads, so keep secrets out.
+      </p>
+    </NsiteInfoPage>
   );
 }

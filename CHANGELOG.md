@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.14.0] - 2026-10-04
+
+You can now give a site its own settings without waiting for a new
+version of it: set variables under App info → Environment, and the site
+reads them the next time it opens. App info itself is tidier, with
+Permissions, Storage, Environment and Addresses each opening on their own
+screen.
+
+### Added
+
+- A site's App info has an Environment screen where you can set named
+  values the site reads when it opens, such as which server it talks to.
+  They stay on this device and are never published.
+
+### Changed
+
+- App info is a short list of rows that each open their own screen, with
+  a summary of what's inside, instead of one long page.
+
 ## [0.13.3] - 2026-10-01
 
 Pictures in a site's notifications show up more reliably: larger artwork

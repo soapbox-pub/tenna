@@ -127,9 +127,12 @@ export type ParsedNsiteSubdomain =
   | { kind: typeof NSITE_NAMED_KIND; pubkey: string; identifier: string }
   | { kind: typeof NSITE_SNAPSHOT_KIND; id: string };
 
+/** A label's characters and ends, with no limit on its length. */
+const NAME = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/;
+
 /**
- * Parse an nsite subdomain back into its components, following NIP-5A's
- * label precedence:
+ * Parse a NIP-5A site name into its components, following NIP-5A's
+ * precedence:
  *
  * 1. `<npub1...>` → root site (kind 15128)
  * 2. `v<50-char-base36>` → manifest snapshot (kind 5128), keyed by event id
@@ -138,36 +141,23 @@ export type ParsedNsiteSubdomain =
  * The snapshot rule is checked before the named-site rule because NIP-5A
  * specifies that order. A named site whose base36 pubkey happens to start with
  * `v` and whose `d` tag is exactly one character is therefore unreachable by
- * subdomain — an ambiguity inherent to the single-label format.
+ * name — an ambiguity inherent to the format.
  *
- * Also reads Tenna's `<dTag>.<npub>` spelling for a named site too long for
- * one label (see `isNsiteId`) — but only for such a site. A `d` tag that would
- * have fit is refused in this spelling, so that every site has exactly one id:
- * the id is its origin, and two would be two origins with two sets of storage.
+ * Not capped at a DNS label's 63 characters. That cap is a gateway's, which
+ * serves the name as a subdomain; an `nsite://` URL never becomes a DNS name,
+ * so it spells every named site this way, whatever the length of its `d` tag.
+ * The `d` tag is still held to a label of its own, which is the most a site id
+ * can carry — see `isNsiteId`.
  *
- * Returns null if the subdomain cannot be parsed.
+ * Returns null if the name cannot be parsed.
  */
-export function parseNsiteSubdomain(subdomain: string): ParsedNsiteSubdomain | null {
-  // Before anything is read out of it: whatever this names, it has to be a
-  // site id, because everything downstream puts it in a hostname. See `LABEL`.
-  if (!isNsiteId(subdomain)) return null;
+export function parseNsiteName(name: string): ParsedNsiteSubdomain | null {
+  if (!NAME.test(name)) return null;
 
-  if (subdomain.includes('.')) {
-    const [dTag, npub] = subdomain.split('.');
-    if (fitsOneLabel(dTag)) return null;
+  // Root site: name is an npub
+  if (name.startsWith('npub1')) {
     try {
-      const decoded = nip19.decode(npub);
-      if (decoded.type !== 'npub') return null;
-      return { kind: NSITE_NAMED_KIND, pubkey: decoded.data, identifier: dTag };
-    } catch {
-      return null;
-    }
-  }
-
-  // Root site: subdomain is an npub
-  if (subdomain.startsWith('npub1')) {
-    try {
-      const decoded = nip19.decode(subdomain);
+      const decoded = nip19.decode(name);
       if (decoded.type !== 'npub') return null;
       return { kind: NSITE_ROOT_KIND, pubkey: decoded.data as string, identifier: '' };
     } catch {
@@ -176,9 +166,9 @@ export function parseNsiteSubdomain(subdomain: string): ParsedNsiteSubdomain | n
   }
 
   // Snapshot: leading "v" followed by the base36 snapshot event id
-  if (/^v[0-9a-z]{50}$/.test(subdomain)) {
+  if (/^v[0-9a-z]{50}$/.test(name)) {
     try {
-      const id = base36ToHex(subdomain.slice(1));
+      const id = base36ToHex(name.slice(1));
       return id ? { kind: NSITE_SNAPSHOT_KIND, id } : null;
     } catch {
       return null;
@@ -186,12 +176,13 @@ export function parseNsiteSubdomain(subdomain: string): ParsedNsiteSubdomain | n
   }
 
   // Named site: first 50 chars are the base36 pubkey, the rest is the d-tag
-  if (subdomain.length <= BASE36_LENGTH) return null;
-  const b36Part = subdomain.slice(0, BASE36_LENGTH);
-  const dTag = subdomain.slice(BASE36_LENGTH);
+  if (name.length <= BASE36_LENGTH) return null;
+  const b36Part = name.slice(0, BASE36_LENGTH);
+  const dTag = name.slice(BASE36_LENGTH);
 
   // Validate base36 characters
   if (!/^[0-9a-z]+$/.test(b36Part)) return null;
+  if (dTag.length > 63) return null;
 
   try {
     const pubkey = base36ToHex(b36Part);
@@ -202,31 +193,82 @@ export function parseNsiteSubdomain(subdomain: string): ParsedNsiteSubdomain | n
 }
 
 /**
- * Derive the site id for an nsite event: its NIP-5A canonical subdomain, or,
- * for a named site whose `d` tag is too long for one, `<dTag>.<npub>`.
+ * Parse a site id back into its components.
+ *
+ * An id is a NIP-5A name that fits in one label (see `parseNsiteName`), or
+ * Tenna's `<dTag>.<npub>` for a named site too long for one (see `isNsiteId`)
+ * — but only for such a site. A `d` tag that would have fit is refused in that
+ * spelling, so that every site has exactly one id: the id is its origin, and
+ * two would be two origins with two sets of storage.
+ *
+ * Returns null if the id cannot be parsed.
+ */
+export function parseNsiteSubdomain(subdomain: string): ParsedNsiteSubdomain | null {
+  // Before anything is read out of it: whatever this names, it has to be a
+  // site id, because everything downstream puts it in a hostname. See `LABEL`.
+  if (!isNsiteId(subdomain)) return null;
+
+  if (!subdomain.includes('.')) return parseNsiteName(subdomain);
+
+  const [dTag, npub] = subdomain.split('.');
+  if (fitsOneLabel(dTag)) return null;
+  try {
+    const decoded = nip19.decode(npub);
+    if (decoded.type !== 'npub') return null;
+    return { kind: NSITE_NAMED_KIND, pubkey: decoded.data, identifier: dTag };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * A site's NIP-5A name — what an `nsite://` URL and a gateway call it.
  *
  * - Root site (kind 15128): `<npub>`
- * - Named site (kind 35128 with d-tag): `<pubkeyB36><dTag>`
- * - Named site with a `d` tag over 13 characters: `<dTag>.<npub>`
+ * - Named site (kind 35128): `<pubkeyB36><dTag>`
  * - Snapshot (kind 5128): `v<snapshotIdB36>`
+ */
+export function nsiteNameFor(pointer: ParsedNsiteSubdomain): string {
+  switch (pointer.kind) {
+    case NSITE_ROOT_KIND:
+      return nip19.npubEncode(pointer.pubkey);
+    case NSITE_NAMED_KIND:
+      return `${hexToBase36(pointer.pubkey)}${pointer.identifier}`;
+    case NSITE_SNAPSHOT_KIND:
+      return `v${hexToBase36(pointer.id)}`;
+  }
+}
+
+/**
+ * A site's id — what this app keys its origin, storage and permissions by.
+ *
+ * Its NIP-5A name, except for a named site whose `d` tag is over 13
+ * characters: that name is too long for the one label it would have to be
+ * under `nsite.localhost`, so the id is `<dTag>.<npub>` instead.
  *
  * The result is not checked here; a `d` tag that is no label at all comes out
  * as something `isNsiteId` refuses, and `isServableNsite` turns it away.
  */
+export function nsiteIdFor(pointer: ParsedNsiteSubdomain): string {
+  if (pointer.kind === NSITE_NAMED_KIND && !fitsOneLabel(pointer.identifier)) {
+    return `${pointer.identifier}.${nip19.npubEncode(pointer.pubkey)}`;
+  }
+  return nsiteNameFor(pointer);
+}
+
+/** The site id for an nsite event. See `nsiteIdFor`. */
 export function getNsiteSubdomain(event: NostrEvent): string {
   const dTag = event.tags.find(([n]) => n === 'd')?.[1];
 
   if (event.kind === NSITE_NAMED_KIND && dTag) {
-    return fitsOneLabel(dTag)
-      ? `${hexToBase36(event.pubkey)}${dTag}`
-      : `${dTag}.${nip19.npubEncode(event.pubkey)}`;
+    return nsiteIdFor({ kind: NSITE_NAMED_KIND, pubkey: event.pubkey, identifier: dTag });
   }
 
   if (event.kind === NSITE_SNAPSHOT_KIND) {
-    return `v${hexToBase36(event.id)}`;
+    return nsiteIdFor({ kind: NSITE_SNAPSHOT_KIND, id: event.id });
   }
 
-  return nip19.npubEncode(event.pubkey);
+  return nsiteIdFor({ kind: NSITE_ROOT_KIND, pubkey: event.pubkey, identifier: '' });
 }
 
 /**

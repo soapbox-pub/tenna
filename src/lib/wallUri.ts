@@ -36,7 +36,8 @@
  * path on such a URL is dropped, which is what taking a page off a link and
  * putting the site on the wall means.
  */
-import { parseNsiteSubdomain } from '@/lib/nsiteSubdomain';
+import { nsiteIdFor, parseNsiteSubdomain } from '@/lib/nsiteSubdomain';
+import { parseNsiteUrl } from '@/lib/nsiteUrl';
 
 /** How many relay hints off an address are worth opening a socket to. */
 const MAX_HINTS = 4;
@@ -62,7 +63,7 @@ function tidyRelays(values: readonly string[]): string[] {
   return [...urls];
 }
 
-/** A site's canonical NIP-5A subdomain, as a wall address. */
+/** A site's id, as a wall address. See `nsiteIdFor`. */
 export function nsiteUri(id: string, relays: readonly string[] = []): string {
   const hints = tidyRelays(relays)
     .map((relay) => `relay=${encodeURIComponent(relay)}`)
@@ -99,16 +100,21 @@ export function parseWallUri(uri: string): WallAddress | null {
   }
 
   if (url.protocol === 'nsite:') {
-    // The authority, when the URI has one, and otherwise the opaque path:
-    // everything between the scheme and the query. A host is lowercased
-    // because `nsite:` is not a special scheme, so `URL` leaves its case
-    // alone; the opaque form is Tenna's own and is already a label.
-    const id = url.host ? url.host.toLowerCase() : decodeURIComponent(url.pathname);
+    // A navigable URL is read by its own grammar, which names a site by
+    // NIP-5A name or `naddr` rather than by id, and carries no hints — its
+    // query is the site's. Only a pointer counts: a NIP-05 alias names a site
+    // only once somebody has asked a web server, and a wall entry can't wait.
+    if (url.host) {
+      const authority = parseNsiteUrl(uri)?.authority;
+      if (authority?.type !== 'pointer') return null;
+      return { kind: 'nsite', id: nsiteIdFor(authority.pointer), relays: authority.relays };
+    }
+
+    // Otherwise the opaque path: everything between the scheme and the query.
+    // It is Tenna's own, and already a site id.
+    const id = decodeURIComponent(url.pathname);
     if (!id || !parseNsiteSubdomain(id)) return null;
-    // A navigable URL carries no hints — its query is the site's — so only the
-    // opaque spelling is asked for any.
-    const relays = url.host ? [] : tidyRelays(url.searchParams.getAll('relay'));
-    return { kind: 'nsite', id, relays };
+    return { kind: 'nsite', id, relays: tidyRelays(url.searchParams.getAll('relay')) };
   }
 
   if (url.protocol === 'android-app:') {

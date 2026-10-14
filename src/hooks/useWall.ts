@@ -12,7 +12,12 @@ import { nsitePointerFilter } from '@/lib/nsiteAddress';
 import { forgetsRemovedSites, NsiteWebView } from '@/lib/nsiteNativePlugin';
 import { isServableNsite } from '@/lib/nsiteFiles';
 import { NsiteShortcuts, supportsNsiteWindows } from '@/lib/nsiteShortcutsPlugin';
-import { getNsiteSubdomain, hexToBase36, parseNsiteSubdomain } from '@/lib/nsiteSubdomain';
+import {
+  getNsiteSubdomain,
+  NSITE_NAMED_KIND,
+  nsiteIdFor,
+  parseNsiteSubdomain,
+} from '@/lib/nsiteSubdomain';
 import { APP_ID, DEFAULT_NSITES, NSITE_RELAY } from '@/lib/tenna';
 import { removeTileSnapshot } from '@/lib/tileSnapshot';
 import { nativeAppUri, nsiteUri, parseWallUri, wallUriKey } from '@/lib/wallUri';
@@ -32,7 +37,7 @@ const LEGACY_APPS = `${APP_ID}:added-native-apps`;
  * of these can be moved or taken off, and nothing puts them back.
  */
 const DEFAULTS = DEFAULT_NSITES.map(({ pubkey, identifier }) =>
-  nsiteUri(`${hexToBase36(pubkey)}${identifier}`),
+  nsiteUri(nsiteIdFor({ kind: NSITE_NAMED_KIND, pubkey, identifier })),
 );
 
 /** Only the shape survives a round trip through localStorage; check it. */

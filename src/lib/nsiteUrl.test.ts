@@ -9,6 +9,7 @@ import {
   hexToBase36,
 } from '@/lib/nsiteSubdomain';
 import { isNsiteUrl, nsiteUrl, parseNsiteUrl } from '@/lib/nsiteUrl';
+import { parseWallUri } from '@/lib/wallUri';
 
 /**
  * The `nsite://` grammar is the one part of this app that reads a string a
@@ -44,9 +45,9 @@ describe('parseNsiteUrl: canonical hosts', () => {
   });
 
   // NIP-5A caps the `d` tag at 13 so a gateway can serve the site at one
-  // label; a longer one gets a label of its own, under the author's npub.
-  it('reads a named site whose d tag is too long for one label', () => {
-    const url = parseNsiteUrl(`nsite://naturalist-quiz.${NPUB}/`);
+  // label. A host here is no DNS name and has no such limit.
+  it('reads a named site whose d tag is too long for a gateway', () => {
+    const url = parseNsiteUrl(`nsite://${B36}naturalist-quiz/`);
     expect(url?.authority).toEqual({
       type: 'pointer',
       pointer: { kind: NSITE_NAMED_KIND, pubkey: PUBKEY, identifier: 'naturalist-quiz' },
@@ -168,9 +169,15 @@ describe('parseNsiteUrl: NIP-05 aliases', () => {
     );
   });
 
-  it('refuses a d tag too long to have a canonical host', () => {
-    // NIP-5A: 50 base36 characters of pubkey leave 13 of a 63-character label.
-    expect(parseNsiteUrl('nsite://ditto.pub+fourteen-chars/')).toBeNull();
+  it('reads a d tag longer than NIP-5A’s 13 characters', () => {
+    expect(parseNsiteUrl('nsite://ditto.pub+fourteen-chars/')?.authority).toMatchObject({
+      type: 'nip05',
+      identifier: 'fourteen-chars',
+    });
+  });
+
+  it('refuses a d tag too long to be a label at all', () => {
+    expect(parseNsiteUrl(`nsite://ditto.pub+${'a'.repeat(64)}/`)).toBeNull();
   });
 
   it('refuses a d tag with a trailing hyphen', () => {
@@ -200,22 +207,18 @@ describe('parseNsiteUrl: refusals', () => {
     ['an empty `+`-joined part', 'nsite://ditto.pub++blog/'],
     ['an nsec, which is a secret and not a site', `nsite://${nip19.nsecEncode(new Uint8Array(32).fill(1))}/`],
     ['an npub with a broken checksum', `nsite://${NPUB.slice(0, -1)}x/`],
+    ['a named site whose d tag is too long to be a label', `nsite://${B36}${'a'.repeat(64)}/`],
     ['nothing', ''],
   ])('refuses %s', (_why, input) => {
     expect(parseNsiteUrl(input)).toBeNull();
     expect(isNsiteUrl(input)).toBe(false);
   });
 
-  // Any dotted host is still a NIP-05 domain to ask, which these will never
-  // answer as; what matters is that none of them is read as a site outright.
-  it.each([
-    // Two ids for one site would be two origins with two sets of storage.
-    ['a short d tag spelled with two labels', `nsite://armada.${NPUB}/`],
-    ['a long d tag under something not an npub', `nsite://naturalist-quiz.${B36}/`],
-    ['a long d tag under a broken npub', `nsite://naturalist-quiz.${NPUB.slice(0, -1)}x/`],
-    ['three labels', `nsite://a.naturalist-quiz.${NPUB}/`],
-  ])('does not read %s as a site', (_why, input) => {
-    expect(parseNsiteUrl(input)?.authority.type).not.toBe('pointer');
+  // Tenna's internal id for a long-named site is not a URL spelling. As a
+  // host it is a dotted name like any other, so a NIP-05 domain to ask — which
+  // this one will never answer as — and not a site read outright.
+  it('does not read the internal two-label id as a site', () => {
+    expect(parseNsiteUrl(`nsite://naturalist-quiz.${NPUB}/`)?.authority.type).toBe('nip05');
   });
 });
 
@@ -233,14 +236,17 @@ describe('nsiteUrl', () => {
   it.each([
     ['a d tag that fits one label', 'thirteen-char', `${B36}thirteen-char`],
     ['a d tag that does not', 'fourteen-chars', `fourteen-chars.${NPUB}`],
-  ])('round-trips the id of a named site with %s', (_why, d, id) => {
+  ])('spells a named site by its NIP-5A name, with %s', (_why, d, id) => {
     const event = {
       id: EVENT_ID, pubkey: PUBKEY, kind: NSITE_NAMED_KIND, created_at: 0,
       tags: [['d', d]], content: '', sig: '',
     };
     expect(getNsiteSubdomain(event)).toBe(id);
+    expect(nsiteUrl(id)).toBe(`nsite://${B36}${d}/`);
     expect(parseNsiteUrl(nsiteUrl(id))?.authority).toMatchObject({
       pointer: { kind: NSITE_NAMED_KIND, pubkey: PUBKEY, identifier: d },
     });
+    // And a wall handed the URL keeps the site by its id.
+    expect(parseWallUri(nsiteUrl(id, '/x'))).toEqual({ kind: 'nsite', id, relays: [] });
   });
 });

@@ -15,7 +15,6 @@
  *
  *     nsite://<npub1…>/path                 root site, canonical
  *     nsite://<pubkeyB36><dTag>/path        named site, canonical
- *     nsite://<dTag>.<npub1…>/path          named site, `d` tag too long for the above
  *     nsite://v<snapshotIdB36>/path         snapshot, canonical (see below)
  *     nsite://naddr1…/path                  alias, carrying its own relay hints
  *     nsite://<domain>[+<dTag>]/path        alias, NIP-05 `_@<domain>`
@@ -24,9 +23,14 @@
  *
  * The canonical host is NIP-5A's verbatim, so an nsite URL maps 1:1 onto
  * `<label>.nsite-host.com` on any gateway, and onto the `siteId` this app keys
- * a site's origin, storage and permissions by. The exception is a named site
- * whose `d` tag is over NIP-5A's 13 characters, which no gateway can serve and
- * which this app addresses by two labels instead — see `isNsiteId`.
+ * a site's origin, storage and permissions by.
+ *
+ * Unlike a gateway's subdomain, the host here is never a DNS name, so it has
+ * no 63-character label to fit in, and NIP-5A's 13-character cap on the `d`
+ * tag does not apply: every named site is spelled `<pubkeyB36><dTag>`. (One
+ * whose `d` tag is longer is keyed internally by a different id, because the
+ * origin *is* a DNS name — see `nsiteIdFor`. That id is this app's business
+ * and is never spelled in a URL.)
  *
  * ## Why the `d` tag is in the host
  *
@@ -53,13 +57,15 @@
  * `v<snapshotIdB36>` is a Tenna extension. NIP-5A defines the label and this
  * app serves sites addressed by it; Ditto Browser does not parse it yet, so a
  * snapshot URL is the one spelling here that does not yet round-trip. It costs
- * nothing, because {@link parseNsiteSubdomain} already reads the label.
+ * nothing, because {@link parseNsiteName} already reads the label.
  */
 import { nip19 } from 'nostr-tools';
 
 import {
   NSITE_NAMED_KIND,
   NSITE_ROOT_KIND,
+  nsiteNameFor,
+  parseNsiteName,
   parseNsiteSubdomain,
   type ParsedNsiteSubdomain,
 } from '@/lib/nsiteSubdomain';
@@ -71,14 +77,13 @@ export const NSITE_PROTOCOL = 'nsite:';
 const DEFAULT_NIP05_NAME = '_';
 
 /**
- * A `d` tag that can appear in a canonical host.
+ * A `d` tag that can appear in a host.
  *
- * NIP-5A's rule, and a tighter one than a `d` tag has to satisfy in general: a
- * named site's label is the 50-character base36 pubkey with the `d` tag
- * appended, and a DNS label is 63 characters. So a site whose `d` tag is longer
- * than 13 characters has no canonical host and is reachable by `naddr` alone.
+ * Not NIP-5A's 13 characters, which is what is left of a gateway's subdomain
+ * once the base36 pubkey has had its 50; a host here is not one. But no more
+ * than a label's 63, since that is the most a site id can carry.
  */
-const DTAG = /^[a-z0-9-]{1,13}$/;
+const DTAG = /^[a-z0-9-]{1,63}$/;
 
 /** The NIP-05 local part, per NIP-05. */
 const NIP05_NAME = /^[a-z0-9\-_.]{1,64}$/;
@@ -221,7 +226,7 @@ export function parseNsiteUrl(raw: string): NsiteUrl | null {
   // Lowercased because a host is case-insensitive everywhere a person types
   // one, and `nsite:` is a non-special scheme, so `URL` leaves the case alone
   // rather than folding it the way it would for `https:`. Every label rule
-  // below — and `isNsiteId`, which the origin depends on — is lowercase.
+  // below is lowercase, as is the site id the origin is built from.
   //
   // Deliberately not decoded. A percent escape is not part of any of these
   // grammars, and leaving `%` in is what makes `nsite://abc%2Fevil` fail the
@@ -233,7 +238,7 @@ export function parseNsiteUrl(raw: string): NsiteUrl | null {
 
   // A canonical label is the site itself, and is tried first so that nothing
   // resolved over the network can shadow one.
-  const canonical = parseNsiteSubdomain(host);
+  const canonical = parseNsiteName(host);
   if (canonical) {
     return { authority: { type: 'pointer', pointer: canonical, relays: [] }, path };
   }
@@ -277,9 +282,12 @@ export function isNsiteUrl(raw: string): boolean {
  *
  * Built from the `siteId` rather than from however the site was reached, for
  * the same reason the origin is: a name resolved over the network is a claim
- * about a key, and the key is the site.
+ * about a key, and the key is the site. Spelled with the site's NIP-5A name,
+ * which is the id except where the id had to be split to fit a hostname.
  */
 export function nsiteUrl(siteId: string, path = '/'): string {
+  const pointer = parseNsiteSubdomain(siteId);
+  const host = pointer ? nsiteNameFor(pointer) : siteId;
   const suffix = path.startsWith('/') ? path : `/${path}`;
-  return `${NSITE_PROTOCOL}//${siteId}${suffix}`;
+  return `${NSITE_PROTOCOL}//${host}${suffix}`;
 }

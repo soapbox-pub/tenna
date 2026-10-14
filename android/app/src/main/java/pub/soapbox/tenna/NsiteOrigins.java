@@ -39,11 +39,20 @@ final class NsiteOrigins {
      */
     private static final Pattern LABEL = Pattern.compile("^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$");
 
+    /**
+     * A named site whose {@code d} tag is too long to share a label with the
+     * base36 pubkey: {@code <dTag>.<npub>}. Exactly two labels, the second
+     * shaped like an npub. The Java side of {@code isNsiteId}.
+     */
+    private static final Pattern LONG_NAMED = Pattern.compile(
+        "^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\\.npub1[02-9ac-hj-np-z]{58}$");
+
     private NsiteOrigins() {}
 
-    /** Whether a string is a site id — that is, a DNS label. */
+    /** Whether a string is a site id: a DNS label, or {@code <dTag>.<npub>}. */
     static boolean isSiteId(@Nullable String siteId) {
-        return siteId != null && LABEL.matcher(siteId).matches();
+        return siteId != null
+            && (LABEL.matcher(siteId).matches() || LONG_NAMED.matcher(siteId).matches());
     }
 
     /**
@@ -70,7 +79,7 @@ final class NsiteOrigins {
      *
      * Site ids are NIP-5A subdomains, which are lowercase by construction —
      * bech32 and base36 both are, and a named site's {@code d} tag is part of
-     * a hostname — so the label is the id.
+     * a hostname — so whatever is left of the host is the id.
      */
     @Nullable
     static String siteIdFor(@Nullable String host) {

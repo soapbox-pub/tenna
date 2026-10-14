@@ -32,24 +32,44 @@ enum NsiteOrigins {
     static let siteDomain = "nsite.localhost"
 
     /**
-     Whether a string is a site id — that is, a DNS label.
+     Whether a string is a site id: a DNS label, or `<dTag>.<npub>` for a named
+     site whose `d` tag is too long to share a label with the base36 pubkey.
 
-     The Swift side of `isNsiteLabel` in `src/lib/nsiteSubdomain.ts`.
+     The Swift side of `isNsiteId` in `src/lib/nsiteSubdomain.ts`.
 
-     A named site's id ends in its `d` tag, which is arbitrary text off a
+     A named site's id carries its `d` tag, which is arbitrary text off a
      stranger's event, and the id is concatenated into a URL here. A tag
      carrying `/`, `\`, `?`, `#` or `@` names a host that is not ours, and the
      load that follows would put somebody else's page in the site's own window.
      */
     static func isSiteId(_ siteId: String?) -> Bool {
-        guard let siteId, !siteId.isEmpty, siteId.utf8.count <= 63 else { return false }
+        guard let siteId else { return false }
+        let labels = siteId.split(separator: ".", omittingEmptySubsequences: false)
+        switch labels.count {
+        case 1: return isLabel(Substring(siteId))
+        case 2: return isLabel(labels[0]) && isNpub(labels[1])
+        default: return false
+        }
+    }
 
-        let bytes = Array(siteId.utf8)
+    /// A DNS label: lowercase alphanumerics and inner hyphens, at most 63.
+    private static func isLabel(_ label: Substring) -> Bool {
+        guard !label.isEmpty, label.utf8.count <= 63 else { return false }
+
+        let bytes = Array(label.utf8)
         func isAlnum(_ b: UInt8) -> Bool {
             (b >= 0x61 && b <= 0x7a) || (b >= 0x30 && b <= 0x39)
         }
         guard isAlnum(bytes.first!), isAlnum(bytes.last!) else { return false }
         return bytes.allSatisfy { isAlnum($0) || $0 == 0x2d }
+    }
+
+    /// An npub's shape: `npub1` and 58 bech32 characters.
+    private static func isNpub(_ label: Substring) -> Bool {
+        let bech32 = Set("qpzry9x8gf2tvdw0s3jn54khce6mua7l".utf8)
+        return label.utf8.count == 63
+            && label.hasPrefix("npub1")
+            && label.utf8.dropFirst(5).allSatisfy { bech32.contains($0) }
     }
 
     /**
@@ -81,7 +101,7 @@ enum NsiteOrigins {
 
      Site ids are NIP-5A subdomains, which are lowercase by construction —
      bech32 and base36 both are, and a named site's `d` tag is part of a
-     hostname — so the label is the id.
+     hostname — so whatever is left of the host is the id.
      */
     static func siteIdFor(host: String?) -> String? {
         guard let host else { return nil }

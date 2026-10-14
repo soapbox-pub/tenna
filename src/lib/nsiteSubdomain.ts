@@ -49,9 +49,35 @@ const BASE36_LENGTH = 50;
  */
 const LABEL = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
 
-/** Whether a string is a site id — that is, a DNS label. */
+/** An npub's shape: `npub1` and 58 bech32 characters, 63 in all. */
+const NPUB_LABEL = /^npub1[02-9ac-hj-np-z]{58}$/;
+
+/** Whether a string is a single DNS label. */
 export function isNsiteLabel(value: string): boolean {
   return LABEL.test(value);
+}
+
+/**
+ * Whether a string is a site id: a single label, or `<dTag>.<npub>`.
+ *
+ * The second spelling is Tenna's, for a named site whose NIP-5A label would
+ * not fit. NIP-5A caps the `d` tag at 13 characters so that a gateway can
+ * serve the site at one label — but this app is not a gateway, and nothing
+ * stops a publisher using a longer one. Rather than leave those sites
+ * unreachable, they get two labels: the `d` tag, which can then be a label of
+ * its own, under the author's npub. Exactly two, and the second shaped like an
+ * npub, so the id is still nothing but hostname characters and still names a
+ * host under `nsite.localhost` and nowhere else. See `getNsiteSubdomain`.
+ */
+export function isNsiteId(value: string): boolean {
+  const labels = value.split('.');
+  if (labels.length === 1) return LABEL.test(value);
+  return labels.length === 2 && LABEL.test(labels[0]) && NPUB_LABEL.test(labels[1]);
+}
+
+/** Whether `<pubkeyB36><dTag>` fits in one label, as NIP-5A has it. */
+function fitsOneLabel(dTag: string): boolean {
+  return BASE36_LENGTH + dTag.length <= 63;
 }
 
 /** Encode a 32-byte hex string as base36 (50 chars, zero-padded). */
@@ -114,12 +140,29 @@ export type ParsedNsiteSubdomain =
  * `v` and whose `d` tag is exactly one character is therefore unreachable by
  * subdomain — an ambiguity inherent to the single-label format.
  *
+ * Also reads Tenna's `<dTag>.<npub>` spelling for a named site too long for
+ * one label (see `isNsiteId`) — but only for such a site. A `d` tag that would
+ * have fit is refused in this spelling, so that every site has exactly one id:
+ * the id is its origin, and two would be two origins with two sets of storage.
+ *
  * Returns null if the subdomain cannot be parsed.
  */
 export function parseNsiteSubdomain(subdomain: string): ParsedNsiteSubdomain | null {
   // Before anything is read out of it: whatever this names, it has to be a
-  // label, because everything downstream puts it in a hostname. See `LABEL`.
-  if (!isNsiteLabel(subdomain)) return null;
+  // site id, because everything downstream puts it in a hostname. See `LABEL`.
+  if (!isNsiteId(subdomain)) return null;
+
+  if (subdomain.includes('.')) {
+    const [dTag, npub] = subdomain.split('.');
+    if (fitsOneLabel(dTag)) return null;
+    try {
+      const decoded = nip19.decode(npub);
+      if (decoded.type !== 'npub') return null;
+      return { kind: NSITE_NAMED_KIND, pubkey: decoded.data, identifier: dTag };
+    } catch {
+      return null;
+    }
+  }
 
   // Root site: subdomain is an npub
   if (subdomain.startsWith('npub1')) {
@@ -159,18 +202,24 @@ export function parseNsiteSubdomain(subdomain: string): ParsedNsiteSubdomain | n
 }
 
 /**
- * Derive the NIP-5A canonical subdomain for an nsite event.
+ * Derive the site id for an nsite event: its NIP-5A canonical subdomain, or,
+ * for a named site whose `d` tag is too long for one, `<dTag>.<npub>`.
  *
  * - Root site (kind 15128): `<npub>`
  * - Named site (kind 35128 with d-tag): `<pubkeyB36><dTag>`
+ * - Named site with a `d` tag over 13 characters: `<dTag>.<npub>`
  * - Snapshot (kind 5128): `v<snapshotIdB36>`
+ *
+ * The result is not checked here; a `d` tag that is no label at all comes out
+ * as something `isNsiteId` refuses, and `isServableNsite` turns it away.
  */
 export function getNsiteSubdomain(event: NostrEvent): string {
   const dTag = event.tags.find(([n]) => n === 'd')?.[1];
 
   if (event.kind === NSITE_NAMED_KIND && dTag) {
-    const pubkeyB36 = hexToBase36(event.pubkey);
-    return `${pubkeyB36}${dTag}`;
+    return fitsOneLabel(dTag)
+      ? `${hexToBase36(event.pubkey)}${dTag}`
+      : `${dTag}.${nip19.npubEncode(event.pubkey)}`;
   }
 
   if (event.kind === NSITE_SNAPSHOT_KIND) {
@@ -192,7 +241,7 @@ const NSITE_NAME_LIMIT = 48;
  *
  * NIP-5A's optional `title` is the author saying what the site is named, in
  * characters the `d` tag doesn't have. That one is a DNS label — lowercase,
- * hyphens, thirteen characters at the outside — so `my-blog` is the most it
+ * hyphens, no spaces — so `my-blog` is the most it
  * can ever say, and a root site has no `d` tag at all to say it with.
  *
  * This is not the served document's `<title>`, which is deliberately not

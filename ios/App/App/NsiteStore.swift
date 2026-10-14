@@ -20,8 +20,9 @@ import UniformTypeIdentifiers
  task reads (see `NappPeriodicSync`).
 
  Records live in the App Group container as one JSON file per site, named by
- the site id. An id is a DNS label — `NsiteOrigins.isSiteId` — so it is already
- a safe file name, and unlike Android there is no `d` tag to hash around.
+ the site id. An id is one or two DNS labels — `NsiteOrigins.isSiteId` — so it
+ is already a safe file name, and unlike Android there is no `d` tag to hash
+ around.
  */
 struct NsiteRecord {
 

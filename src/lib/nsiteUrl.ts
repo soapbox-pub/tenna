@@ -15,6 +15,7 @@
  *
  *     nsite://<npub1…>/path                 root site, canonical
  *     nsite://<pubkeyB36><dTag>/path        named site, canonical
+ *     nsite://<dTag>.<npub1…>/path          named site, `d` tag too long for the above
  *     nsite://v<snapshotIdB36>/path         snapshot, canonical (see below)
  *     nsite://naddr1…/path                  alias, carrying its own relay hints
  *     nsite://<domain>[+<dTag>]/path        alias, NIP-05 `_@<domain>`
@@ -23,7 +24,9 @@
  *
  * The canonical host is NIP-5A's verbatim, so an nsite URL maps 1:1 onto
  * `<label>.nsite-host.com` on any gateway, and onto the `siteId` this app keys
- * a site's origin, storage and permissions by.
+ * a site's origin, storage and permissions by. The exception is a named site
+ * whose `d` tag is over NIP-5A's 13 characters, which no gateway can serve and
+ * which this app addresses by two labels instead — see `isNsiteId`.
  *
  * ## Why the `d` tag is in the host
  *
@@ -218,7 +221,7 @@ export function parseNsiteUrl(raw: string): NsiteUrl | null {
   // Lowercased because a host is case-insensitive everywhere a person types
   // one, and `nsite:` is a non-special scheme, so `URL` leaves the case alone
   // rather than folding it the way it would for `https:`. Every label rule
-  // below — and `isNsiteLabel`, which the origin depends on — is lowercase.
+  // below — and `isNsiteId`, which the origin depends on — is lowercase.
   //
   // Deliberately not decoded. A percent escape is not part of any of these
   // grammars, and leaving `%` in is what makes `nsite://abc%2Fevil` fail the

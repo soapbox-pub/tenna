@@ -5,6 +5,7 @@ import {
   NSITE_NAMED_KIND,
   NSITE_ROOT_KIND,
   NSITE_SNAPSHOT_KIND,
+  getNsiteSubdomain,
   hexToBase36,
 } from '@/lib/nsiteSubdomain';
 import { isNsiteUrl, nsiteUrl, parseNsiteUrl } from '@/lib/nsiteUrl';
@@ -38,6 +39,17 @@ describe('parseNsiteUrl: canonical hosts', () => {
     expect(url?.authority).toEqual({
       type: 'pointer',
       pointer: { kind: NSITE_NAMED_KIND, pubkey: PUBKEY, identifier: 'armada' },
+      relays: [],
+    });
+  });
+
+  // NIP-5A caps the `d` tag at 13 so a gateway can serve the site at one
+  // label; a longer one gets a label of its own, under the author's npub.
+  it('reads a named site whose d tag is too long for one label', () => {
+    const url = parseNsiteUrl(`nsite://naturalist-quiz.${NPUB}/`);
+    expect(url?.authority).toEqual({
+      type: 'pointer',
+      pointer: { kind: NSITE_NAMED_KIND, pubkey: PUBKEY, identifier: 'naturalist-quiz' },
       relays: [],
     });
   });
@@ -193,6 +205,18 @@ describe('parseNsiteUrl: refusals', () => {
     expect(parseNsiteUrl(input)).toBeNull();
     expect(isNsiteUrl(input)).toBe(false);
   });
+
+  // Any dotted host is still a NIP-05 domain to ask, which these will never
+  // answer as; what matters is that none of them is read as a site outright.
+  it.each([
+    // Two ids for one site would be two origins with two sets of storage.
+    ['a short d tag spelled with two labels', `nsite://armada.${NPUB}/`],
+    ['a long d tag under something not an npub', `nsite://naturalist-quiz.${B36}/`],
+    ['a long d tag under a broken npub', `nsite://naturalist-quiz.${NPUB.slice(0, -1)}x/`],
+    ['three labels', `nsite://a.naturalist-quiz.${NPUB}/`],
+  ])('does not read %s as a site', (_why, input) => {
+    expect(parseNsiteUrl(input)?.authority.type).not.toBe('pointer');
+  });
 });
 
 describe('nsiteUrl', () => {
@@ -204,5 +228,19 @@ describe('nsiteUrl', () => {
     const built = nsiteUrl(`${B36}armada`, '/notifications');
     expect(built).toBe(`nsite://${B36}armada/notifications`);
     expect(parseNsiteUrl(built)?.path).toBe('/notifications');
+  });
+
+  it.each([
+    ['a d tag that fits one label', 'thirteen-char', `${B36}thirteen-char`],
+    ['a d tag that does not', 'fourteen-chars', `fourteen-chars.${NPUB}`],
+  ])('round-trips the id of a named site with %s', (_why, d, id) => {
+    const event = {
+      id: EVENT_ID, pubkey: PUBKEY, kind: NSITE_NAMED_KIND, created_at: 0,
+      tags: [['d', d]], content: '', sig: '',
+    };
+    expect(getNsiteSubdomain(event)).toBe(id);
+    expect(parseNsiteUrl(nsiteUrl(id))?.authority).toMatchObject({
+      pointer: { kind: NSITE_NAMED_KIND, pubkey: PUBKEY, identifier: d },
+    });
   });
 });

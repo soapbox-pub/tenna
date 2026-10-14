@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.14.1] - 2026-10-14
+
+Paying, signing in and other trips away from a site now come back to it.
+Web links from a site open in a browser inside Tenna, over the site, and
+when the page sends you back, you land in the site again instead of on an
+error page. You can still open any page in your usual browser with one tap.
+
+### Changed
+
+- Web links from a site open over it inside Tenna, with buttons to close
+  the page or open it in your browser.
+
+### Fixed
+
+- Finishing a checkout or sign-in that started in a site, such as buying
+  credits on Shakespeare, returns you to the site instead of showing
+  "This site can't be reached".
+
 ## [0.14.0] - 2026-10-04
 
 You can now give a site its own settings without waiting for a new

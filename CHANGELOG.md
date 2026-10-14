@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.14.2] - 2026-10-14
+
+Sites with longer names now show up. Some sites were missing from their
+publisher's page and from the list of apps to add, and couldn't be
+opened, only because their name was more than thirteen characters long.
+
+### Fixed
+
+- Sites whose names are longer than thirteen characters appear on their
+  publisher's page and in the list of apps to add, and open like any
+  other.
+
 ## [0.14.1] - 2026-10-14
 
 Paying, signing in and other trips away from a site now come back to it.

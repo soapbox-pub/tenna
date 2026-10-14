@@ -114,6 +114,17 @@
             android:exported="true" />
 
         <!--
+            A link out of a site, opened over it in the site's own task. See
+            NsiteBrowserActivity. Not exported: only a site's window starts it,
+            and only for a result.
+        -->
+        <activity
+            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode|navigation|density"
+            android:name=".NsiteBrowserActivity"
+            android:theme="@style/AppTheme.NsiteBrowser"
+            android:exported="false" />
+
+        <!--
             Where the OS share sheet hands Tenna something. See
             NsiteShareActivity: it draws nothing and finishes at once, having
             copied the payload out of the grants it was started with.

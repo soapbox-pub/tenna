@@ -40,6 +40,7 @@
 		F807767E6C9C12ED86606C3A /* NsiteSchemeHandler.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9DFF9F0B933BFB683C98977A /* NsiteSchemeHandler.swift */; };
 		00FB53B074CB8EA02A6C995D /* NsiteSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD2B2CC2D5F98E0EEFB58BD3 /* NsiteSession.swift */; };
 		A1B2C3D4E5F60718293A4B03 /* NsiteDownloads.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60718293A4B04 /* NsiteDownloads.swift */; };
+		B7E1A9C04D2F6B3E8A510C01 /* NsiteBrowser.swift in Sources */ = {isa = PBXBuildFile; fileRef = B7E1A9C04D2F6B3E8A510C02 /* NsiteBrowser.swift */; };
 		A1B2C3D4E5F60718293A4B01 /* NsiteLocation.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60718293A4B02 /* NsiteLocation.swift */; };
 		C4E64CFCB3DD051776028A28 /* NsiteWebViewPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = 321F28F125BEFA8F1B8466C9 /* NsiteWebViewPlugin.swift */; };
 		4D0AAC9DA39D65F84B5AD870 /* TennaBridgeViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 91457C98973717B6C5995D86 /* TennaBridgeViewController.swift */; };
@@ -111,6 +112,7 @@
 		F6711A877D923FE3FD94BFDA /* NsiteSiteChrome.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NsiteSiteChrome.swift; sourceTree = "<group>"; };
 		5056FC16164516614F89A2D4 /* NsiteFileServer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NsiteFileServer.swift; sourceTree = "<group>"; };
 		9DFF9F0B933BFB683C98977A /* NsiteSchemeHandler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NsiteSchemeHandler.swift; sourceTree = "<group>"; };
+		B7E1A9C04D2F6B3E8A510C02 /* NsiteBrowser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NsiteBrowser.swift; sourceTree = "<group>"; };
 		A1B2C3D4E5F60718293A4B02 /* NsiteLocation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NsiteLocation.swift; sourceTree = "<group>"; };
 		A1B2C3D4E5F60718293A4B04 /* NsiteDownloads.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NsiteDownloads.swift; sourceTree = "<group>"; };
 		CD2B2CC2D5F98E0EEFB58BD3 /* NsiteSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NsiteSession.swift; sourceTree = "<group>"; };
@@ -246,6 +248,7 @@
 				321F28F125BEFA8F1B8466C9 /* NsiteWebViewPlugin.swift */,
 				CD2B2CC2D5F98E0EEFB58BD3 /* NsiteSession.swift */,
 				A1B2C3D4E5F60718293A4B04 /* NsiteDownloads.swift */,
+				B7E1A9C04D2F6B3E8A510C02 /* NsiteBrowser.swift */,
 				A1B2C3D4E5F60718293A4B02 /* NsiteLocation.swift */,
 				9DFF9F0B933BFB683C98977A /* NsiteSchemeHandler.swift */,
 				5056FC16164516614F89A2D4 /* NsiteFileServer.swift */,
@@ -478,6 +481,7 @@
 				C4E64CFCB3DD051776028A28 /* NsiteWebViewPlugin.swift in Sources */,
 				00FB53B074CB8EA02A6C995D /* NsiteSession.swift in Sources */,
 				A1B2C3D4E5F60718293A4B03 /* NsiteDownloads.swift in Sources */,
+				B7E1A9C04D2F6B3E8A510C01 /* NsiteBrowser.swift in Sources */,
 				A1B2C3D4E5F60718293A4B01 /* NsiteLocation.swift in Sources */,
 				F807767E6C9C12ED86606C3A /* NsiteSchemeHandler.swift in Sources */,
 				02B186B5DF02F26C38AB7FEF /* NsiteFileServer.swift in Sources */,

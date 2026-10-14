@@ -13,4 +13,8 @@
 
     <!-- What a site that arrived without a name is called over one. -->
     <string name="nsite_dialog_anonymous">This site</string>
+
+    <!-- The window a link out of a site opens in. See NsiteBrowserActivity. -->
+    <string name="nsite_browser_close">Close</string>
+    <string name="nsite_browser_open_externally">Open in browser</string>
 </resources>

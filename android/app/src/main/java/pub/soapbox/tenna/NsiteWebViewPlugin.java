@@ -4,6 +4,7 @@ import android.animation.Animator;
 import android.animation.AnimatorListenerAdapter;
 import android.Manifest;
 import android.annotation.SuppressLint;
+import android.app.Activity;
 import android.app.ActivityManager;
 import android.content.ActivityNotFoundException;
 import android.content.Context;
@@ -1104,8 +1105,8 @@ public class NsiteWebViewPlugin extends Plugin {
 
                 // Anything else is a link out, which this window cannot
                 // follow: it is one site's window, not a browser, and there is
-                // nowhere in it for another origin to go. So it is handed to
-                // the device, which is where a link out of an app goes.
+                // nowhere in it for another origin to go. See `handOff` for
+                // where it goes instead.
                 //
                 // Only the main frame's. A third-party subframe reaching for
                 // its own origin is the page loading itself, not somebody
@@ -1136,13 +1137,15 @@ public class NsiteWebViewPlugin extends Plugin {
     }
 
     /**
-     * Hand a link out of the site to whatever on the device answers for it.
+     * Send a link out of the site wherever it goes.
      *
-     * A site's window has no address bar and no second tab, so a link to
-     * anywhere else can only be somebody else's to open: an http link goes to
-     * the browser, a {@code mailto:} to the mail app, a {@code lightning:} to a
-     * wallet. That is the same thing the tile for a native app does, and it
-     * runs through the same helper.
+     * A site's window has no address bar and no second tab. The web opens over
+     * it, in {@link NsiteBrowserActivity}, so that a flow which ends back at
+     * the site's origin — a checkout, a sign-in — can actually arrive there;
+     * the device's browser cannot reach {@code *.nsite.localhost}. Anything
+     * else is somebody else's to open: a {@code mailto:} goes to the mail app,
+     * a {@code lightning:} to a wallet. That is the same thing the tile for a
+     * native app does, and it runs through the same helper.
      *
      * Two things are asked of the link first. It must be one the user pressed,
      * because a page that reaches for another app on load is not following
@@ -1156,7 +1159,7 @@ public class NsiteWebViewPlugin extends Plugin {
         Uri url = request.getUrl();
         String scheme = url.getScheme();
 
-        if (scheme == null || UNHANDLED_SCHEMES.contains(scheme.toLowerCase(Locale.ROOT))) {
+        if (scheme == null || isUnhandledScheme(scheme)) {
             Log.i(TAG, "Refused to hand the device a " + scheme + ": link");
             return;
         }
@@ -1171,16 +1174,73 @@ public class NsiteWebViewPlugin extends Plugin {
         // device answer it would start Tenna's own task, resolve the site on
         // the wall, and only then open it — a visible detour through a home
         // screen nobody asked for. The window resolves it instead.
-        if (NSITE_SCHEME.equalsIgnoreCase(scheme)) {
-            JSObject link = new JSObject();
-            link.put("url", url.toString());
-            notifyListeners("nsiteLink", link);
+        if (NSITE_SCHEME.equalsIgnoreCase(scheme) || NsiteOrigins.siteIdFor(url.getHost()) != null) {
+            openSite(url);
             return;
         }
+
+        if (NsiteBrowserActivity.opens(url) && browse(url)) return;
 
         if (!NativeApps.openUri(getContext(), url.toString())) {
             Log.i(TAG, "Nothing on the device answers for " + url);
         }
+    }
+
+    /**
+     * Open a web page over the site, and follow it home if it comes back.
+     *
+     * Started for a result, through the launcher the file chooser uses, so the
+     * answer lands here: the address at the site's origin the page went to, or
+     * nothing if the user closed it. Reports false if the window could not be
+     * started at all, which leaves the link to the device as it was before.
+     */
+    private boolean browse(@NonNull Uri url) {
+        String siteId = NsiteOrigins.siteIdFor(host);
+        if (siteId == null) return false;
+
+        Intent intent = NsiteBrowserActivity.intentFor(getContext(), url.toString(), siteId);
+        return startForResult(intent, (code, data) -> {
+            Uri back = data == null ? null : data.getData();
+            if (code != Activity.RESULT_OK || back == null) return;
+            if (!"https".equalsIgnoreCase(back.getScheme())) return;
+
+            String expected = host;
+            WebView view = webView;
+            if (view != null && expected != null && expected.equalsIgnoreCase(back.getHost())) {
+                view.loadUrl(back.toString());
+            } else {
+                openSite(back);
+            }
+        });
+    }
+
+    /**
+     * Raise a link to another site to the web layer, which resolves and opens
+     * it.
+     *
+     * One written against that site's origin here —
+     * {@code https://<id>.nsite.localhost/path}, which exists only inside this
+     * app — is turned back into the canonical spelling of the same site,
+     * {@code nsite://<id>/path}, which is what the web layer reads. iOS does
+     * the same in `NsiteSession.publicLink`.
+     */
+    private void openSite(@NonNull Uri url) {
+        String id = NsiteOrigins.siteIdFor(url.getHost());
+        Uri link = url;
+        if (id != null) {
+            link = url.buildUpon().scheme(NSITE_SCHEME).encodedAuthority(id).build();
+        } else if (!NSITE_SCHEME.equalsIgnoreCase(url.getScheme())) {
+            return;
+        }
+
+        JSObject event = new JSObject();
+        event.put("url", link.toString());
+        notifyListeners("nsiteLink", event);
+    }
+
+    /** Whether a site may never hand the device a link in this scheme. */
+    static boolean isUnhandledScheme(@NonNull String scheme) {
+        return UNHANDLED_SCHEMES.contains(scheme.toLowerCase(Locale.ROOT));
     }
 
     /** The scheme a site is named by outside Tenna. See src/lib/nsiteUrl.ts. */
@@ -1223,8 +1283,8 @@ public class NsiteWebViewPlugin extends Plugin {
             siteHost,
             origin,
             this::startForResult,
-            // A file at somebody else's origin is a link out, and goes where
-            // every other link out of a site's window goes.
+            // A file at somebody else's origin goes to the device's browser,
+            // which has a downloads list to put it in.
             //
             // Web schemes only, and not because the denylist would let the
             // others through — because this is the one hand-off with no

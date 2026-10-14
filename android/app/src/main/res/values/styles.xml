@@ -63,4 +63,12 @@
         says nothing about what a dialog in it should look like.
     -->
     <style name="NsiteDialog" parent="Theme.AppCompat.DayNight.Dialog.Alert" />
+
+    <!--
+        The window a link out of a site opens in. See NsiteBrowserActivity.
+        Dark in either mode, because its toolbar is the app's own colour.
+    -->
+    <style name="AppTheme.NsiteBrowser" parent="Theme.AppCompat.NoActionBar">
+        <item name="android:windowBackground">@color/nsiteWindow</item>
+    </style>
 </resources>

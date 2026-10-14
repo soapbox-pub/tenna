@@ -825,10 +825,12 @@ final class NsiteSession: NSObject, WKNavigationDelegate, WKUIDelegate {
     }
 
     /**
-     Hand a link out of the site to whatever on the device answers for it.
+     Send a link out of the site wherever it goes.
 
-     An http link goes to the browser, a `mailto:` to the mail app, a
-     `lightning:` to a wallet. Two things are asked of it first, as on
+     The web opens over the site, in `NsiteBrowser`, so that a flow which ends
+     back at the site's origin — a checkout, a sign-in — can arrive there;
+     Safari cannot reach it. A `mailto:` goes to the mail app, a `lightning:`
+     to a wallet. Two things are asked of it first, as on
      Android. Its scheme must not be one of `refusedSchemes`. And it must be
      one the user pressed, because a page that reaches for another app on load
      is not following anybody. `WKNavigationAction` has no `hasGesture()`, so
@@ -855,6 +857,23 @@ final class NsiteSession: NSObject, WKNavigationDelegate, WKUIDelegate {
 
         if scheme == NsiteOrigins.scheme {
             onLink(Self.publicLink(url))
+            return
+        }
+
+        if NsiteBrowser.opens(url), let presenter = presenter() {
+            NsiteBrowser.present(url, siteId: siteId, over: presenter) { [weak self] back in
+                guard let self else { return }
+                // Either spelling of the site's origin, Android's included:
+                // a return address is whatever the site handed somebody.
+                var parts = URLComponents(url: back, resolvingAgainstBaseURL: false)
+                parts?.scheme = NsiteOrigins.scheme
+                guard let back = parts?.url else { return }
+                if self.isOwn(back) {
+                    self.webView.load(URLRequest(url: back))
+                } else {
+                    self.onLink(Self.publicLink(back))
+                }
+            }
             return
         }
 

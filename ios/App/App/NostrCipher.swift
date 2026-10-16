@@ -25,15 +25,10 @@ enum NostrCipher {
     static func encrypt44(conversationKey: [UInt8], plaintext: String, nonce: [UInt8]) -> [UInt8]? {
         guard conversationKey.count == 32, nonce.count == 32 else { return nil }
         let unpadded = Array(plaintext.utf8)
-        guard (1...65535).contains(unpadded.count) else { return nil }
+        guard (1...Int(UInt32.max)).contains(unpadded.count) else { return nil }
 
         let (chachaKey, chachaNonce, hmacKey) = messageKeys(conversationKey, nonce)
-
-        var padded = [UInt8](repeating: 0, count: 2 + paddedLength(unpadded.count))
-        padded[0] = UInt8(unpadded.count >> 8)
-        padded[1] = UInt8(unpadded.count & 0xff)
-        padded.replaceSubrange(2..<(2 + unpadded.count), with: unpadded)
-
+        let padded = pad(unpadded)
         let ciphertext = chacha20(key: chachaKey, nonce: chachaNonce, input: padded)
         let mac = hmac(hmacKey, nonce + ciphertext)
         return [2] + nonce + ciphertext + mac
@@ -76,12 +71,32 @@ enum NostrCipher {
         return chunk * ((length - 1) / chunk + 1)
     }
 
+    /// Plaintexts this long or longer take the extended u32 length prefix.
+    private static let extendedPrefixThreshold = 65536
+
+    /// `[u16-BE len][plaintext][zeros]`, or `[0x0000][u32-BE len][plaintext][zeros]`
+    /// from 64 KiB up.
+    private static func pad(_ unpadded: [UInt8]) -> [UInt8] {
+        let length = unpadded.count
+        let prefix: [UInt8] = length >= extendedPrefixThreshold
+            ? [0, 0, UInt8(length >> 24 & 0xff), UInt8(length >> 16 & 0xff), UInt8(length >> 8 & 0xff), UInt8(length & 0xff)]
+            : [UInt8(length >> 8), UInt8(length & 0xff)]
+        return prefix + unpadded + [UInt8](repeating: 0, count: paddedLength(length) - length)
+    }
+
     private static func unpad(_ padded: [UInt8]) -> String? {
         guard padded.count >= 2 else { return nil }
-        let length = Int(padded[0]) << 8 | Int(padded[1])
-        guard length >= 1, 2 + length <= padded.count,
-              padded.count == 2 + paddedLength(length) else { return nil }
-        return String(bytes: padded[2..<(2 + length)], encoding: .utf8)
+        var length = Int(padded[0]) << 8 | Int(padded[1])
+        var prefixLength = 2
+        if length == 0 {
+            guard padded.count >= 6 else { return nil }
+            length = Int(padded[2]) << 24 | Int(padded[3]) << 16 | Int(padded[4]) << 8 | Int(padded[5])
+            guard length >= extendedPrefixThreshold else { return nil }
+            prefixLength = 6
+        }
+        guard length >= 1, prefixLength + length <= padded.count,
+              padded.count == prefixLength + paddedLength(length) else { return nil }
+        return String(bytes: padded[prefixLength..<(prefixLength + length)], encoding: .utf8)
     }
 
     // MARK: - NIP-04

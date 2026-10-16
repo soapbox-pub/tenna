@@ -110,17 +110,14 @@ final class NostrCipher {
         try {
             if (conversationKey == null || conversationKey.length != 32) return null;
             byte[] unpadded = plaintext.getBytes(StandardCharsets.UTF_8);
-            if (unpadded.length < 1 || unpadded.length > 65535) return null;
+            if (unpadded.length < 1) return null;
 
             byte[] keys = hkdfExpand(conversationKey, nonce, 76);
             byte[] chachaKey = Arrays.copyOfRange(keys, 0, 32);
             byte[] chachaNonce = Arrays.copyOfRange(keys, 32, 44);
             byte[] hmacKey = Arrays.copyOfRange(keys, 44, 76);
 
-            byte[] padded = new byte[2 + calcPaddedLen(unpadded.length)];
-            padded[0] = (byte) (unpadded.length >>> 8);
-            padded[1] = (byte) unpadded.length;
-            System.arraycopy(unpadded, 0, padded, 2, unpadded.length);
+            byte[] padded = pad(unpadded);
 
             byte[] ciphertext = chacha20(chachaKey, chachaNonce, padded);
             byte[] macMsg = new byte[nonce.length + ciphertext.length];
@@ -212,6 +209,32 @@ final class NostrCipher {
         return chunk * ((unpaddedLen - 1) / chunk + 1);
     }
 
+    /** Plaintexts this long or longer take the extended u32 length prefix. */
+    private static final int EXTENDED_PREFIX_THRESHOLD = 65536;
+
+    /**
+     * Add NIP-44 padding: {@code [u16-BE len][plaintext][zeros]}, or
+     * {@code [0x0000][u32-BE len][plaintext][zeros]} from 64 KiB up. Without
+     * the extended form a bunker cannot answer with a large signed event, and
+     * the client waits out its timeout for a reply that never comes.
+     */
+    private static byte[] pad(byte[] unpadded) {
+        int len = unpadded.length;
+        int prefixLen = len >= EXTENDED_PREFIX_THRESHOLD ? 6 : 2;
+        byte[] padded = new byte[prefixLen + calcPaddedLen(len)];
+        if (prefixLen == 6) {
+            padded[2] = (byte) (len >>> 24);
+            padded[3] = (byte) (len >>> 16);
+            padded[4] = (byte) (len >>> 8);
+            padded[5] = (byte) len;
+        } else {
+            padded[0] = (byte) (len >>> 8);
+            padded[1] = (byte) len;
+        }
+        System.arraycopy(unpadded, 0, padded, prefixLen, len);
+        return padded;
+    }
+
     /** Strip NIP-44 padding: [u16-BE len][plaintext][zeros] (extended u32 form for >= 65536). */
     private static String unpad(byte[] padded) {
         if (padded.length < 2) return null;
@@ -222,13 +245,14 @@ final class NostrCipher {
             if (padded.length < 6) return null;
             unpaddedLen = ((padded[2] & 0xff) << 24) | ((padded[3] & 0xff) << 16)
                     | ((padded[4] & 0xff) << 8) | (padded[5] & 0xff);
+            if (unpaddedLen < EXTENDED_PREFIX_THRESHOLD) return null;
             prefixLen = 6;
         } else {
             unpaddedLen = firstTwo;
             prefixLen = 2;
         }
         if (unpaddedLen < 1) return null;
-        if ((long) prefixLen + unpaddedLen > padded.length) return null;
+        if ((long) prefixLen + calcPaddedLen(unpaddedLen) != padded.length) return null;
         return new String(padded, prefixLen, unpaddedLen, StandardCharsets.UTF_8);
     }
 

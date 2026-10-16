@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.14.3] - 2026-10-16
+
+Tenna can now sign big things for apps connected to it by a link. Asked to
+sign something large, such as publishing a site of a few hundred pages, it
+couldn't send its answer back, and the app waited until it gave up.
+
+### Fixed
+
+- An app connected to Tenna by a link gets its answer when it asks Tenna to
+  sign something large, instead of waiting until it times out.
+- Sites and apps can encrypt and decrypt messages larger than 64 KB.
+
 ## [0.14.2] - 2026-10-14
 
 Sites with longer names now show up. Some sites were missing from their

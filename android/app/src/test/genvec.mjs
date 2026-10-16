@@ -52,6 +52,15 @@ console.log('nip44 plaintext =', JSON.stringify(plaintext));
 console.log('nip44 payload b64 =', payload);
 console.log('nip44 payload hex =', hex(Buffer.from(payload, 'base64')));
 
+// NIP-44 v2 either side of the extended length prefix. Too big to paste, so
+// the test pins the sha256 of each base64 payload instead, as the spec's
+// own long-message vectors do.
+const { sha256 } = await import('@noble/hashes/sha2.js');
+for (const n of [65535, 65536, 65537, 100000]) {
+  const big = nip44.v2.encrypt('x'.repeat(n), conv, nonce);
+  console.log(`nip44 'x' * ${n}: sha256(base64) =`, hex(sha256(new TextEncoder().encode(big))));
+}
+
 // NIP-04: the shared secret, and a payload for the native side to open. The IV
 // is random per run, so the ct and iv below are only a vector as a pair —
 // copy both or neither.

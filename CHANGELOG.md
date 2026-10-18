@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.15.0] - 2026-10-18
+
+You can now log in to Din on a computer using your phone, with no key to
+copy or paste. Choose Log in on a computer in Settings, hold the phone
+near the computer, check that both screens show the same six-digit code,
+and approve. Your key goes straight to that computer over Bluetooth.
+
+### Added
+
+- Settings > Apps has Log in on a computer on Android, which sends your
+  key to a nearby computer running Din over Bluetooth. Both screens show a
+  matching code, and nothing is sent until you approve it with your phone's
+  lock screen or a confirmation prompt.
+
 ## [0.14.3] - 2026-10-16
 
 Tenna can now sign big things for apps connected to it by a link. Asked to

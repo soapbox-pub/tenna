@@ -1,4 +1,5 @@
 import { App as NativeApp } from '@capacitor/app';
+import { useNostrLogin } from '@nostrify/react/login';
 import { useSeoMeta } from '@unhead/react';
 import { ArrowLeft, ChevronRight, LogIn, LogOut, Plus, Trash2, UserPlus, UserRound } from 'lucide-react';
 import { nip19 } from 'nostr-tools';
@@ -6,6 +7,7 @@ import { useEffect, useMemo, useState, type ComponentType } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 
 import AuthDialog from '@/components/auth/AuthDialog';
+import { NearbyLoginDialog } from '@/components/NearbyLoginDialog';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import {
@@ -25,6 +27,7 @@ import { useLoggedInAccounts } from '@/hooks/useLoggedInAccounts';
 import { useNostrPublish } from '@/hooks/useNostrPublish';
 import { useToast } from '@/hooks/useToast';
 import { impactLight, notificationError } from '@/lib/haptics';
+import { supportsNearbyLogin } from '@/lib/nearbyLoginPlugin';
 import { cn, middleEllipsis } from '@/lib/utils';
 
 /** Where the source lives, for the one row on the page that leaves the app. */
@@ -392,6 +395,13 @@ export function SettingsPage() {
   const [authOpen, setAuthOpen] = useState(false);
   const [addingRelay, setAddingRelay] = useState(false);
   const [editingRelay, setEditingRelay] = useState<string | null>(null);
+  const [loggingInComputer, setLoggingInComputer] = useState(false);
+
+  // A computer can only be given a key this phone holds, so only for an
+  // account whose key lives in the app process.
+  const { logins } = useNostrLogin();
+  const canLogInComputer =
+    supportsNearbyLogin() && !!currentUser && logins[0]?.type === 'x-native-key';
 
   const relays = config.relayMetadata.relays;
   const editing = relays.find((relay) => relay.url === editingRelay);
@@ -664,6 +674,23 @@ export function SettingsPage() {
                   <ChevronRight aria-hidden="true" className="size-5 shrink-0 text-foreground/40" />
                 </Link>
               </li>
+              {canLogInComputer && (
+                <li>
+                  <button
+                    type="button"
+                    onClick={() => setLoggingInComputer(true)}
+                    className="flex w-full items-center justify-between gap-3 rounded-lg px-2 py-3 text-left outline-none transition-colors hover:bg-foreground/5 focus-visible:ring-2 focus-visible:ring-primary"
+                  >
+                    <span className="min-w-0">
+                      <span className="block text-base text-foreground/90">Log in on a computer</span>
+                      <span className="block text-sm text-foreground/50">
+                        Send your key to a nearby computer running Din
+                      </span>
+                    </span>
+                    <ChevronRight aria-hidden="true" className="size-5 shrink-0 text-foreground/40" />
+                  </button>
+                </li>
+              )}
             </ul>
           </section>
 
@@ -721,6 +748,14 @@ export function SettingsPage() {
       />
 
       <AuthDialog isOpen={authOpen} onClose={() => setAuthOpen(false)} />
+
+      {canLogInComputer && currentUser && (
+        <NearbyLoginDialog
+          pubkey={currentUser.pubkey}
+          open={loggingInComputer}
+          onOpenChange={setLoggingInComputer}
+        />
+      )}
     </main>
   );
 }

@@ -51,7 +51,9 @@ import javax.crypto.spec.GCMParameterSpec;
  *       {@link #importKey} is never readable again, and neither is a generated
  *       one after the call that made it. Anything that wants to show a user
  *       their own nsec later has to come with a native confirmation the
- *       renderer cannot forge, and nothing here does yet.
+ *       renderer cannot forge. {@link NearbyLogin} is the one that does: it
+ *       sends a key to a computer, encrypted, only after the user approves
+ *       a system prompt, and never through the renderer.
  *   <li><b>The seal is device-bound, not user-bound.</b> The Keystore key sets
  *       no {@code setUserAuthenticationRequired}, so unsealing needs no
  *       prompt. A biometric gate would be strictly stronger against someone
@@ -124,8 +126,8 @@ final class TennaKeys {
      * The secret key for {@code pubkey}, or null if this device has none.
      *
      * <p>Package-private, and it must stay that way: the value is the account.
-     * Only {@link TennaSignerPlugin} calls it, and only to pass it straight
-     * into {@link NostrCrypto} or {@link NostrCipher}.
+     * Only {@link TennaSignerPlugin} and {@link NearbyLogin} call it, and only
+     * to pass it straight into {@link NostrCrypto} or {@link NostrCipher}.
      */
     static synchronized byte[] get(Context context, String pubkey) {
         if (pubkey == null || pubkey.length() != 64) return null;

@@ -24,8 +24,7 @@
  * The site it opens is derived from the manifest, never from the link: the
  * `siteId` that keys the origin, the storage and the grants comes back out of
  * `getNsiteSubdomain(event)`. So a link cannot name one site and be served as
- * another, and a NIP-05 alias cannot inherit a key's storage by pointing at
- * its name.
+ * another.
  */
 import { Capacitor } from '@capacitor/core';
 

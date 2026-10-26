@@ -61,9 +61,6 @@ nsite://<npub1…>/path                  root site
 nsite://<pubkeyB36><dTag>/path         named site
 nsite://v<snapshotIdB36>/path          snapshot
 nsite://naddr1…/path                   by identifier, with its relay hints
-nsite://soapbox.pub/path               NIP-05: _@soapbox.pub's root site
-nsite://soapbox.pub+armada/path        NIP-05: its named site "armada"
-nsite://mk@ditto.pub+polaroids/path    NIP-05: someone in particular
 ```
 
 The grammar is [Ditto Browser](https://gitlab.com/soapbox-pub/ditto-browser)'s,
@@ -72,10 +69,10 @@ site two ways would not be an address. The `d` tag rides in the host so the
 path is the site's own, which also means the query is — an `nsite://` URL
 carries no relay hints of its own, only the ones inside an `naddr`.
 
-A name is resolved to a key and then forgotten. Everything downstream — the
-origin, the storage, the permissions — is keyed by the site id derived from the
-manifest, so a domain repointed at a different key is a different site with
-none of the old one's storage and none of its grants.
+Every spelling names a key, never a NIP-05 name: a name is a claim about a key
+made by whoever runs the domain, and an address should not change hands when
+the domain does. Everything downstream — the origin, the storage, the
+permissions — is keyed by the site id derived from the manifest.
 
 Opening is all a link does. Any page can navigate to one, so nothing arriving
 this way is added to the wall, pinned, or granted anything.

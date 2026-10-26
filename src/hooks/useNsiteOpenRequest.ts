@@ -163,10 +163,9 @@ function siteName(event: NostrEvent): string {
  * Open the site an arriving `nsite://` link named.
  *
  * The wall's half of the deep link. The address goes through exactly the
- * resolution a pasted one does — `useNsiteAddress`, including a NIP-05 lookup
- * where the link used a name — and the site that comes back is opened the way
- * pressing a tile opens one: its own window where the platform gives sites
- * windows, and tuned in over the wall where it doesn't.
+ * resolution a pasted one does — `useNsiteAddress` — and the site that comes
+ * back is opened the way pressing a tile opens one: its own window where the
+ * platform gives sites windows, and tuned in over the wall where it doesn't.
  *
  * `opening` is true while there is a link outstanding, and is what keeps the
  * wall off the screen in front of a site the user asked for.

@@ -101,13 +101,12 @@ export function parseWallUri(uri: string): WallAddress | null {
 
   if (url.protocol === 'nsite:') {
     // A navigable URL is read by its own grammar, which names a site by
-    // NIP-5A name or `naddr` rather than by id, and carries no hints — its
-    // query is the site's. Only a pointer counts: a NIP-05 alias names a site
-    // only once somebody has asked a web server, and a wall entry can't wait.
+    // NIP-5A name or `naddr` rather than by id, and carries no hints but an
+    // `naddr`'s — its query is the site's.
     if (url.host) {
-      const authority = parseNsiteUrl(uri)?.authority;
-      if (authority?.type !== 'pointer') return null;
-      return { kind: 'nsite', id: nsiteIdFor(authority.pointer), relays: authority.relays };
+      const parsed = parseNsiteUrl(uri);
+      if (!parsed) return null;
+      return { kind: 'nsite', id: nsiteIdFor(parsed.pointer), relays: parsed.relays };
     }
 
     // Otherwise the opaque path: everything between the scheme and the query.

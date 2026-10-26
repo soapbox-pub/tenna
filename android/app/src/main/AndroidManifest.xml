@@ -52,7 +52,7 @@
 
             <!--
                 A site, named the way sites are named outside Tenna:
-                nsite://<npub|pubkeyB36+dTag|naddr|nip05>/<path>. See
+                nsite://<npub|pubkeyB36+dTag|naddr>/<path>. See
                 src/lib/nsiteUrl.ts for the grammar, which is Ditto Browser's.
 
                 It lands on the wall and the wall opens the site, because a

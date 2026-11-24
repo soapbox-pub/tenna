@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.16.1] - 2026-11-23
+
+Allowing a site to send notifications now sticks. Before, pressing Allow
+without also ticking Remember for this site let the site notify only while
+it was open, so a site that keeps working after you close it couldn't show
+its progress.
+
+### Changed
+
+- When a site asks to send notifications, your answer is always kept, as
+  in a web browser, and there's no Remember checkbox to tick. You can change
+  it later in the site's App info.
+
+### Fixed
+
+- A site you allowed to send notifications can send them while it's closed,
+  even if you didn't tick Remember for this site.
+
 ## [0.16.0] - 2026-11-23
 
 Sites can keep working after you close them. On Android, a site can carry on

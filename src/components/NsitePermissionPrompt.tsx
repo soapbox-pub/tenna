@@ -55,18 +55,23 @@ export function NsitePermissionPrompt({
     return <AccountPrompt identity={identity} artwork={artwork} onResolve={onResolve} />;
   }
 
+  // Whether a site may notify is always kept, either way, as a browser's
+  // Allow and Block are: a site's worker can only notify on a grant that is
+  // written down. Backing out still decides nothing.
+  const kept = prompt.type === 'notifications';
+
   return (
     <PermissionSheet
       artwork={artwork}
       name={identity.name}
       subtitle="Permission request"
-      remember={{
+      remember={kept ? undefined : {
         label: 'Remember for this site',
         checked: remember,
         onChange: setRemember,
       }}
-      onAllow={() => onResolve({ allowed: true, remember })}
-      onDeny={() => onResolve({ allowed: false, remember })}
+      onAllow={() => onResolve({ allowed: true, remember: kept || remember })}
+      onDeny={() => onResolve({ allowed: false, remember: kept || remember })}
       // Never a remembered one; see the note on `PermissionSheet`.
       onDismiss={() => onResolve({ allowed: false, remember: false })}
     >

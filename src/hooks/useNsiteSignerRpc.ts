@@ -300,7 +300,12 @@ export function useNsiteSignerRpc({
 
         const decision = await showPrompt({ type: kind, kind: null });
 
-        if (decision.remember) {
+        // Allowing a site to notify is always kept, as a browser keeps it:
+        // the site's worker can only notify on a grant that is written
+        // down, so an Allow that was not would leave the page reading
+        // `granted` while every notification its worker shows is refused.
+        const keep = decision.remember || (kind === 'notifications' && decision.allowed);
+        if (keep) {
           setNsiteBrowserPermission(siteId, siteName, kind, decision.allowed);
         }
         if (!decision.allowed) return false;

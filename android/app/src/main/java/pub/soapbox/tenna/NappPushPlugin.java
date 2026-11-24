@@ -218,7 +218,7 @@ public class NappPushPlugin extends Plugin {
         String tag = call.getString("tag");
         JSONArray out = new JSONArray();
 
-        for (NappNotificationStore.Entry entry : NappNotificationStore.list(getContext(), siteId)) {
+        for (NappNotificationStore.Entry entry : NappNotifications.list(getContext(), siteId)) {
             if (tag != null && !tag.equals(entry.tag)) continue;
             try {
                 JSONObject json = new JSONObject();

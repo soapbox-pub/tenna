@@ -134,9 +134,38 @@ anything else is refused out loud rather than left to time out.
 ## A site inside Tenna
 
 An nsite asks over `window.nostr`, injected into its window, and is answered by
-the web layer. Its service worker has no signer: a site woken by a push can
-notify, but it cannot sign or decrypt until the user opens it.
-[NAPP.md](NAPP.md) is the whole of what a site sees.
+the web layer — and on Android over `self.nostr` in its service worker too,
+which has no window to inject into. [NAPP.md](NAPP.md) is the whole of what a
+site sees.
+
+**Which account.** The provider acts as whoever is signed in to Tenna, as
+NIP-07 always has. A client that holds several accounts itself uses the two
+additions Din gives websites: `requestPublicKey()`, which has the user pick one
+of Tenna's accounts for the site, and `getSigner(pubkey)`, a signer pinned to
+an account the site holds, which keeps acting as it whatever Tenna switches to.
+A site holds an account once it was opened as it or was given it that way; it
+is a record of its own (`NsiteAccounts`), kept natively on Android for the
+reason the grants are, and revoking the site in Settings takes the account
+away again.
+
+**The worker** is the case worth stating here, because it is the one that
+reaches this code rather than the web layer. A site woken by a push has no
+window, no bridge and nothing on screen, so its calls are answered by the same
+class that answers an intent and a relay — against the same grants, which is
+why they are kept natively rather than in the browser storage that a worker
+cannot see.
+
+So a site allowed to decrypt in its window is allowed to decrypt in its
+worker, one switch in Settings turns off both, and a call nobody has decided
+raises the same notification a remote app's does. Two differences: a worker
+acts as Tenna's account only once the site has been opened as it, and cannot
+be given another — there is nobody to show the picker to — and it will not
+wait forever: after two and a half minutes the call is refused, the
+notification comes down, and the site is told why.
+
+Until then it simply waits. A worker's calls arrive over a channel of its own,
+answered on a thread of Tenna's, and the answer is sent when there is one. See
+`NappPort` and `NsiteWorkerSigner`.
 
 ## Being asked
 

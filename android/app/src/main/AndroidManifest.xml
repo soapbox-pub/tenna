@@ -215,6 +215,23 @@
                 android:value="Maintains Nostr relay WebSocket subscriptions so that installed nsites can deliver notifications in real time" />
         </service>
 
+        <!--
+            Runs while an installed nsite has a task going that the user
+            started, shown as the site's own ongoing notification with a Stop
+            button, and keeps the site's service worker running with its window
+            closed. See NappTaskService. Special-use because the work is
+            whatever the site is doing (an upload, a sync, an assistant
+            writing code), which no narrower type describes.
+        -->
+        <service
+            android:name=".NappTaskService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Keeps an installed nsite's service worker running while it finishes a task the user started, shown as an ongoing notification the user can stop" />
+        </service>
+
         <receiver
             android:name=".NappBootReceiver"
             android:exported="false">

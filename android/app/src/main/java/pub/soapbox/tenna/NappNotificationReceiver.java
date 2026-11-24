@@ -41,6 +41,9 @@ public class NappNotificationReceiver extends BroadcastReceiver {
      */
     static final String ACTION_DISMISSED = "pub.soapbox.tenna.napp.NOTIFICATION_DISMISSED";
 
+    /** A running task's Stop, or the swipe that stands for it. See NappTasks. */
+    static final String ACTION_STOP = "pub.soapbox.tenna.napp.TASK_STOP";
+
     static final String EXTRA_SITE_ID = "pub.soapbox.tenna.napp.SITE_ID";
     static final String EXTRA_KEY = "pub.soapbox.tenna.napp.KEY";
     static final String EXTRA_ACTION = "pub.soapbox.tenna.napp.ACTION";
@@ -66,6 +69,12 @@ public class NappNotificationReceiver extends BroadcastReceiver {
                 );
             }
             NappNotifications.forgetConversation(context, siteId);
+            return;
+        }
+
+        if (ACTION_STOP.equals(intent.getAction())) {
+            String key = intent.getStringExtra(EXTRA_KEY);
+            if (key != null) NappTasks.stop(context, siteId, key);
             return;
         }
 

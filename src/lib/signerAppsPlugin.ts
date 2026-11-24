@@ -96,6 +96,11 @@ export interface SignerAppsPlugin {
     uri: string;
   }): Promise<{ name: string; localPubkey: string }>;
   revokeConnection(options: { localPubkey: string }): Promise<void>;
+
+  /** Give a site an account. See `NsiteAccounts.java` and `nsiteAccounts.ts`. */
+  holdAccount(options: { siteId: string; pubkey: string }): Promise<void>;
+  /** The accounts a site holds that are still signed in. */
+  heldAccounts(options: { siteId: string }): Promise<{ accounts: string[] }>;
 }
 
 export const SignerApps = registerPlugin<SignerAppsPlugin>('SignerApps');

@@ -110,7 +110,8 @@ public class SignerAppsPlugin extends Plugin {
      *
      * <p>The one write here that is not a revocation, and it exists because
      * the sheet over an nsite is drawn in React while the record it produces
-     * lives here, beside every other grant. See {@code nsitePermissions.ts}.
+     * has to be readable from a service worker fetch with no WebView in front
+     * of it. See {@code nsitePermissions.ts}.
      */
     @PluginMethod
     public void grant(PluginCall call) {
@@ -174,8 +175,48 @@ public class SignerAppsPlugin extends Plugin {
         }
 
         SignerApps.forget(getContext(), account, requesterId);
+        // A site revoked in Settings no longer holds the account either, so
+        // `getSigner` stops answering for it until the user gives it again.
+        if (NsiteOrigins.isSiteId(requesterId)) {
+            NsiteAccounts.release(getContext(), requesterId, account);
+        }
         NappPushService.sync(getContext());
         call.resolve();
+    }
+
+    // ── The accounts a site holds ────────────────────────────────────────────
+
+    /**
+     * Give a site an account: it was opened as it, or the user picked it for
+     * {@code requestPublicKey()}. See {@link NsiteAccounts}.
+     */
+    @PluginMethod
+    public void holdAccount(PluginCall call) {
+        String siteId = call.getString("siteId");
+        String pubkey = call.getString("pubkey");
+        if (siteId == null || !NsiteOrigins.isSiteId(siteId) || !NsiteAccounts.isPubkey(pubkey)) {
+            call.reject("siteId and pubkey are required");
+            return;
+        }
+        NsiteAccounts.hold(getContext(), siteId, pubkey);
+        call.resolve();
+    }
+
+    /** The accounts a site holds that are still signed in, oldest first. */
+    @PluginMethod
+    public void heldAccounts(PluginCall call) {
+        String siteId = call.getString("siteId");
+        if (siteId == null || !NsiteOrigins.isSiteId(siteId)) {
+            call.reject("siteId is required");
+            return;
+        }
+        JSArray accounts = new JSArray();
+        for (String pubkey : NsiteAccounts.held(getContext(), siteId)) {
+            if (TennaAccounts.find(getContext(), pubkey) != null) accounts.put(pubkey);
+        }
+        JSObject result = new JSObject();
+        result.put("accounts", accounts);
+        call.resolve(result);
     }
 
     // ── Connections ──────────────────────────────────────────────────────────

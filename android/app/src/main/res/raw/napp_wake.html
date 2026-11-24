@@ -22,6 +22,12 @@
  * be torn down immediately afterwards, because the port outlives the document
  * that handed it over.
  *
+ * It also keeps a worker awake while its site has a task running (an
+ * `ongoing` notification; see NappTasks): told to hold, it posts the worker a
+ * keep-alive, which the shim holds open with `waitUntil` for a little longer
+ * than the host waits before sending the next. Only an event keeps a worker
+ * from being stopped as idle, and only a document can raise one.
+ *
  * The host object `nappHost` exists only in the WebView the push service made;
  * anywhere else this page does nothing.
  */
@@ -48,8 +54,20 @@
     navigator.serviceWorker.addEventListener('message', function (e) {
       var m = e.data;
       if (m && m.__napp === 'done') send({ type: 'done', id: m.id, delivered: true });
+      if (m && m.__napp === 'kept') send({ type: 'kept', instance: String(m.instance || '') });
     });
   }
+
+  // From the host down the listener's own channel, which carries text and
+  // no ports. A keep-alive needs none: the worker already has one.
+  host.onmessage = function (e) {
+    var m;
+    try { m = JSON.parse(e.data); } catch (err) { return; }
+    if (!m || m.type !== 'hold') return;
+    worker().then(function (w) {
+      if (w) w.postMessage({ __napp: 'keepalive' });
+    });
+  };
 
   window.addEventListener('message', function (e) {
     var m;

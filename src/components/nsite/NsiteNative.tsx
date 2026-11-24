@@ -6,7 +6,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { NsiteFrameProps } from '@/components/nsite/types';
 import { nsiteAppQuery } from '@/hooks/useNsiteApp';
 import { renderAppIconPng } from '@/lib/appIconBitmap';
-import { supportsNappPush, supportsNappWorkerShim, supportsPeriodicSync } from '@/lib/nappPushPlugin';
+import { supportsNappPush, supportsNappTasks, supportsNappWorkerShim, supportsPeriodicSync } from '@/lib/nappPushPlugin';
 import { getNsiteBrowserPermission } from '@/lib/nsiteBrowserPermissions';
 import { buildManifest, resolveServers } from '@/lib/nsiteFiles';
 import {
@@ -73,6 +73,7 @@ function nsiteProviderScript(
     notify,
     serviceWorker,
     periodicSync,
+    tasks: notify && supportsNappTasks(),
     notifyGrant: stored === 'allow' ? 'granted' : stored === 'deny' ? 'denied' : 'default',
   });
 }

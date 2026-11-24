@@ -96,6 +96,11 @@ final class NappWakeWebView {
         void onIdle(@NonNull NappWakeWebView view);
     }
 
+    /** The worker answered a keep-alive, saying which instance it is. */
+    interface OnKept {
+        void kept(@Nullable String instance);
+    }
+
     private static final class Delivery {
         /** {@code push}, {@code notificationclick}, {@code notificationclose} or {@code periodicsync}. */
         final String kind;
@@ -130,6 +135,11 @@ final class NappWakeWebView {
 
     private final Runnable idle = this::idle;
     private final Runnable timeout = this::timedOut;
+    private final Runnable keepAlive = this::keepAlive;
+
+    /** Set while this page is holding its worker awake. See {@link #hold}. */
+    @Nullable private OnKept onKept;
+    private long holdEvery;
 
     @MainThread
     NappWakeWebView(@NonNull Context context, @NonNull String siteId, @NonNull OnIdle onIdle) {
@@ -156,12 +166,35 @@ final class NappWakeWebView {
         pump();
     }
 
+    /**
+     * Keep the site's worker awake until this is destroyed, by posting it a
+     * keep-alive every {@code every} milliseconds. A page doing this never
+     * goes idle. See {@link NappTaskService}.
+     */
+    @MainThread
+    void hold(long every, @NonNull OnKept onKept) {
+        if (destroyed) return;
+        this.holdEvery = every;
+        this.onKept = onKept;
+        main.removeCallbacks(idle);
+        main.removeCallbacks(keepAlive);
+        if (ready) keepAlive();
+    }
+
+    private void keepAlive() {
+        if (destroyed || onKept == null) return;
+        JavaScriptReplyProxy reply = proxy;
+        if (ready && reply != null) reply.postMessage("{\"type\":\"hold\"}");
+        main.postDelayed(keepAlive, holdEvery);
+    }
+
     @MainThread
     void destroy() {
         if (destroyed) return;
         destroyed = true;
         main.removeCallbacks(idle);
         main.removeCallbacks(timeout);
+        main.removeCallbacks(keepAlive);
 
         Delivery current = inFlight;
         inFlight = null;
@@ -240,7 +273,7 @@ final class NappWakeWebView {
     }
 
     private void idle() {
-        if (destroyed || inFlight != null || !queue.isEmpty()) return;
+        if (destroyed || inFlight != null || !queue.isEmpty() || onKept != null) return;
         onIdle.onIdle(this);
     }
 
@@ -252,6 +285,13 @@ final class NappWakeWebView {
                     ready = true;
                     main.removeCallbacks(timeout);
                     pump();
+                    if (onKept != null) {
+                        main.removeCallbacks(keepAlive);
+                        keepAlive();
+                    }
+                    break;
+                case "kept":
+                    if (onKept != null) onKept.kept(message.optString("instance", ""));
                     break;
                 case "done":
                     if (message.optBoolean("delivered", true)) {

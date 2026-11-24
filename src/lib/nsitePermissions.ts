@@ -12,14 +12,17 @@
  *
  * On Android, natively, in the same store that holds the grants given to apps
  * on the phone and to remote clients — see `SignerApps.java`. It used to be
- * the web layer's `localStorage` on every platform. It moved so that a site's
- * service worker, which has no window and no `localStorage` of Tenna's, could
- * read it; workers no longer sign, but one store for every grant is still what
- * lets Settings list and revoke them in one place. So on Android the native
- * store is the original and this module is a window onto it.
+ * the web layer's `localStorage` on every platform, on the reasoning that a
+ * site always has a WebView in front of it. A **service worker does not**: a
+ * site woken by a push has no window, no bridge and no `localStorage` of
+ * Tenna's to read, and it can still ask to sign and decrypt. So on Android the
+ * native store is the original and this module is a window onto it, which is
+ * what keeps one decision meaning the same thing in a site's window and in its
+ * worker.
  *
- * Elsewhere — the web build, and iOS — there is no native store, and
- * `localStorage` remains the original.
+ * Elsewhere — the web build, and iOS, where a worker runs inside a
+ * notification extension that could not raise a prompt anyway — there is no
+ * native store, and `localStorage` remains the original.
  *
  * Every function here is therefore asynchronous, including the reads.
  */
@@ -31,6 +34,7 @@ import {
 } from '@/lib/signerAppsPlugin';
 
 import { getKindLabel } from '@/lib/kindLabels';
+import { releaseNsiteAccount } from '@/lib/nsiteAccounts';
 
 // Re-export so existing consumers of `getKindLabel` from this module keep working.
 export { getKindLabel } from '@/lib/kindLabels';
@@ -460,6 +464,9 @@ export async function clearNsitePermissions(
   const filtered = allowances.filter(
     (a) => !(a.siteId === siteId && a.userPubkey === userPubkey),
   );
+  // Revoked here, as on Android natively: the site no longer holds the
+  // account for `getSigner` until it is given it again.
+  releaseNsiteAccount(siteId, userPubkey);
   writeAllowances(filtered);
 }
 

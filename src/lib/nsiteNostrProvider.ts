@@ -112,6 +112,16 @@ export interface NsiteBridgeOptions {
    * `navigator.permissions.query`. See {@link PERIODIC_SYNC_SOURCE}.
    */
   periodicSync?: boolean;
+  /**
+   * Din's running tasks: a notification shown with `ongoing: true` keeps the
+   * site's service worker running with its window closed. Android only, where
+   * the host can keep a worker and the process alive; see `NappTasks.java`.
+   *
+   * What it adds to the page is the feature test and the reflection —
+   * `'ongoing' in Notification.prototype`, and a notification's `ongoing` and
+   * `progress` — since the options themselves pass through as they are.
+   */
+  tasks?: boolean;
 }
 
 /**
@@ -312,7 +322,7 @@ function nappFetchImplementation(): string {
  * and the instances `getNotifications()` hands back are all reached through
  * it.
  */
-function notificationSource(grant: 'granted' | 'denied' | 'default'): string {
+function notificationSource(grant: 'granted' | 'denied' | 'default', tasks: boolean): string {
   return `
   /**
    * What \`Notification.permission\` reads, as the host knew it when this page
@@ -364,6 +374,10 @@ function notificationSource(grant: 'granted' | 'denied' | 'default'): string {
     this.dir = options.dir || 'auto';
     this.lang = options.lang || '';
     this.vibrate = options.vibrate || [];
+    // Din's options for a running task, as the worker's shim reads them too:
+    // whether this one got it, and how far along it says it is.
+    this.ongoing = options.ongoing === true;
+    this.progress = typeof options.progress === 'number' ? options.progress : null;
     // The host's own name for it. Not part of the API, so not enumerable — a
     // site round-tripping a notification through JSON shouldn't carry it.
     Object.defineProperty(this, '__key', { value: String(record.key || '') });
@@ -424,7 +438,12 @@ function notificationSource(grant: 'granted' | 'denied' | 'default'): string {
     get: permission
   });
   window.Notification = Notification;
-
+${tasks ? `
+  // Din's running tasks are here: \`'ongoing' in Notification.prototype\` is
+  // how a site tells. See \`tasks\` in NsiteBridgeOptions.
+  NappNotification.prototype.ongoing = false;
+  NappNotification.prototype.progress = null;
+` : ''}
   /**
    * The two methods a registration answers, defined once.
    *
@@ -793,7 +812,7 @@ export function getNsiteNostrProviderScript(
   if (options.fetch) napp.push(NAPP_FETCH_SOURCE);
 
   const notifications = options.notify
-    ? notificationSource(options.notifyGrant ?? 'default')
+    ? notificationSource(options.notifyGrant ?? 'default', options.tasks === true)
     : '';
 
   // After the notifications, which is where `notifyMethods` is defined: the
@@ -844,6 +863,25 @@ export function getNsiteNostrProviderScript(
   var _nextId = 1;
   var _pending = {};
 
+  /**
+   * A refusal as the error Din names it (its docs/window-nostr.md), so a
+   * client can tell "you don't hold that account" from "the user said no"
+   * from "you called it wrong". The host throws a DOMException or TypeError,
+   * which crosses as its string: the name, a colon, and the message.
+   */
+  function rpcError(text) {
+    var match = /^(NotFoundError|NotAllowedError|TypeError): ([\\s\\S]*)$/.exec(String(text));
+    if (!match) return new Error(String(text));
+    if (match[1] === 'TypeError') return new TypeError(match[2]);
+    try {
+      return new DOMException(match[2], match[1]);
+    } catch (e) {
+      var out = new Error(match[2]);
+      out.name = match[1];
+      return out;
+    }
+  }
+
   function handleResponse(msg) {
     if (!msg || typeof msg !== 'object' || msg.jsonrpc !== '2.0') return;
     if (msg.id === undefined || msg.id === null) return;
@@ -851,7 +889,7 @@ export function getNsiteNostrProviderScript(
     if (!cb) return;
     delete _pending[msg.id];
     if (msg.error) {
-      cb.reject(new Error(msg.error.message || 'RPC error'));
+      cb.reject(rpcError(msg.error.message || 'RPC error'));
     } else {
       cb.resolve(msg.result);
     }
@@ -893,37 +931,75 @@ ${options.fetch ? nappFetchImplementation() : ''}${notifications}${periodicSync}
   // ------------------------------------------------------------------
   var pubkey = ${JSON.stringify(pubkey)};
 
-  if (pubkey) window.nostr = {
-    getPublicKey: function() {
-      return Promise.resolve(pubkey);
-    },
-
-    signEvent: function(event) {
-      return rpc('nostr.signEvent', { event: event });
-    },
-
-    getRelays: function() {
-      return Promise.resolve({});
-    },
-
-    nip04: {
-      encrypt: function(pubkey, plaintext) {
-        return rpc('nostr.nip04.encrypt', { pubkey: pubkey, plaintext: plaintext });
-      },
-      decrypt: function(pubkey, ciphertext) {
-        return rpc('nostr.nip04.decrypt', { pubkey: pubkey, ciphertext: ciphertext });
-      }
-    },
-
-    nip44: {
-      encrypt: function(pubkey, plaintext) {
-        return rpc('nostr.nip44.encrypt', { pubkey: pubkey, plaintext: plaintext });
-      },
-      decrypt: function(pubkey, ciphertext) {
-        return rpc('nostr.nip44.decrypt', { pubkey: pubkey, ciphertext: ciphertext });
-      }
+  /**
+   * The NIP-07 methods, acting as \`account\` — or, with none, as whoever
+   * Tenna is signed in as. \`getSigner\` makes the first kind; the provider
+   * itself is the second.
+   */
+  function signer(account) {
+    function ask(method, params) {
+      if (account) params.account = account;
+      return rpc(method, params);
     }
-  };
+
+    return {
+      getPublicKey: function() {
+        return Promise.resolve(account || pubkey);
+      },
+
+      signEvent: function(event) {
+        return ask('nostr.signEvent', { event: event });
+      },
+
+      getRelays: function() {
+        return Promise.resolve({});
+      },
+
+      nip04: {
+        encrypt: function(peer, plaintext) {
+          return ask('nostr.nip04.encrypt', { pubkey: peer, plaintext: plaintext });
+        },
+        decrypt: function(peer, ciphertext) {
+          return ask('nostr.nip04.decrypt', { pubkey: peer, ciphertext: ciphertext });
+        }
+      },
+
+      nip44: {
+        encrypt: function(peer, plaintext) {
+          return ask('nostr.nip44.encrypt', { pubkey: peer, plaintext: plaintext });
+        },
+        decrypt: function(peer, ciphertext) {
+          return ask('nostr.nip44.decrypt', { pubkey: peer, ciphertext: ciphertext });
+        }
+      }
+    };
+  }
+
+  if (pubkey) {
+    var provider = signer(null);
+
+    /**
+     * Din's two additions to NIP-07, for a client that holds its accounts
+     * itself: \`requestPublicKey()\` has the user give the site an account
+     * (one of those signed in to Tenna) and resolves with its key, and
+     * \`getSigner(pubkey)\` resolves without asking with a signer that
+     * always acts as an account the site holds, whatever Tenna switches to,
+     * or rejects with NotFoundError. Feature-detected with
+     * \`'getSigner' in window.nostr\`.
+     */
+    provider.requestPublicKey = function() {
+      return rpc('nostr.requestPublicKey', {});
+    };
+
+    provider.getSigner = function(key) {
+      var account = String(key);
+      return rpc('nostr.getSigner', { pubkey: account }).then(function() {
+        return signer(account);
+      });
+    };
+
+    window.nostr = provider;
+  }
 ${napp.length === 0 ? '' : `
   // Frozen, so a site cannot swap the methods out from under its own code —
   // or another script's — after the fact.

@@ -18,14 +18,24 @@
  * now and a relay subscription saying something later, are one grant, because
  * to the person being asked they are one thing.
  *
- * This is the path for a site with a window. The same site's **service
- * worker** posts notifications over a channel answered in native code — see
- * `NappPort.java` — because a worker woken by a push has no window and no
- * bridge to reach this hook with. Both roads reach one tray, so a notification
- * posted here is the worker's to replace. A worker cannot sign.
+ * This is the path for a site with a window. On Android the same site's
+ * **service worker** asks for the same things over a port answered in native
+ * code — see `NsiteWorkerSigner.java` and `NappPort.java` — because a worker
+ * woken by a push has no window and no bridge to reach this hook with. Both
+ * roads reach one store of grants, one record of the accounts a site holds,
+ * and one tray, so a grant made here is honoured there and a notification
+ * posted here is the worker's to replace.
+ *
+ * **Accounts.** `window.nostr` acts as whoever is signed in to Tenna. Din's
+ * two additions let a client hold accounts of its own: `requestPublicKey()`
+ * has the user give the site another (see `nsiteAccounts`), and a signer from
+ * `getSigner(pubkey)` names its account on every call, which is answered as
+ * that account if the site still holds it. Refusals are the DOMExceptions Din
+ * gives: `NotAllowedError` for a no, `NotFoundError` for an account the site
+ * does not hold, `TypeError` for a malformed call.
  */
-import type { NostrEvent } from '@nostrify/nostrify';
-import { useCallback, useRef, useState } from 'react';
+import type { NostrEvent, NostrSigner } from '@nostrify/nostrify';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import {
@@ -35,6 +45,7 @@ import {
   supportsPeriodicSync,
 } from '@/lib/nappPushPlugin';
 import { normalizeNappSubscriptions } from '@/lib/nappSubscriptions';
+import { holdNsiteAccount, holdsNsiteAccount } from '@/lib/nsiteAccounts';
 import {
   getNsiteBrowserPermission,
   setNsiteBrowserPermission,
@@ -54,6 +65,24 @@ import {
 /** NIP-42 client authentication. Signed on request, without asking. */
 const NIP42_AUTH = 22242;
 
+const PUBKEY = /^[0-9a-f]{64}$/;
+
+/*
+ * Refusals, named as Din names them (its docs/window-nostr.md), so a client
+ * can tell them apart. They cross to the site as their string — the name, a
+ * colon, the message — and the provider script makes the error again.
+ */
+
+/** The user, or what they remembered, said no; or nobody is signed in to ask. */
+function notAllowed(message = 'User rejected'): DOMException {
+  return new DOMException(message, 'NotAllowedError');
+}
+
+/** The site does not hold that account: never given, revoked, or signed out. */
+function notFound(message = 'The site does not hold that account'): DOMException {
+  return new DOMException(message, 'NotFoundError');
+}
+
 /** The longest periodic sync tag a site may register. Chromium sets none; a tag is a name, not a payload. */
 const MAX_PERIODIC_SYNC_TAG = 256;
 
@@ -68,11 +97,13 @@ export interface NsitePromptState {
    * remembered per site. They share a prompt because they are the same
    * question to the person reading it.
    */
-  type: NsitePermissionType | NsiteBrowserPermissionType;
+  type: NsitePermissionType | NsiteBrowserPermissionType | 'requestPublicKey';
   /** For signEvent: the event kind. Null otherwise. */
   kind: number | null;
   /** For signEvent: the unsigned event template. */
   event?: Record<string, unknown>;
+  /** Whose key would be used: the account a `getSigner` signer is pinned to, or Tenna's. */
+  account?: string;
 }
 
 /** The user's response to a permission prompt. */
@@ -81,6 +112,8 @@ export interface NsitePromptDecision {
   allowed: boolean;
   /** Whether to remember this decision. */
   remember: boolean;
+  /** For `requestPublicKey`: the account the user gave the site. */
+  pubkey?: string;
 }
 
 interface UseNsiteSignerRpcOptions {
@@ -133,8 +166,18 @@ export function useNsiteSignerRpc({
   siteName,
   event: manifest,
 }: UseNsiteSignerRpcOptions): UseNsiteSignerRpcResult {
-  const { user } = useCurrentUser();
+  const { user, users } = useCurrentUser();
   const [pendingPrompt, setPendingPrompt] = useState<NsitePromptState | null>(null);
+
+  // A site opened as an account knows it — the provider is handed the pubkey
+  // on the way in — so it holds it, for `getSigner` here and in its worker.
+  const userPubkey = user?.pubkey;
+  useEffect(() => {
+    if (!userPubkey) return;
+    holdNsiteAccount(siteId, userPubkey).catch((err: unknown) => {
+      console.warn('[nsite] could not record the account a site holds:', err);
+    });
+  }, [siteId, userPubkey]);
 
   /**
    * The questions waiting to be asked, oldest first, the one on screen at the
@@ -207,29 +250,28 @@ export function useNsiteSignerRpc({
    */
   const checkPermission = useCallback(
     async (
+      account: string,
       type: NsitePermissionType,
       kind: number | null,
       promptState: NsitePromptState,
     ): Promise<void> => {
-      if (!user) throw new Error('Not logged in');
-
-      const stored = await getNsitePermission(siteId, user.pubkey, type, kind);
+      const stored = await getNsitePermission(siteId, account, type, kind);
 
       if (stored === 'allow') return;
-      if (stored === 'deny') throw new Error('User rejected');
+      if (stored === 'deny') throw notAllowed();
 
       // No stored decision — ask the user.
-      const decision = await showPrompt(promptState);
+      const decision = await showPrompt({ ...promptState, account });
 
       if (decision.remember) {
-        await setNsitePermission(siteId, user.pubkey, siteName, type, kind, decision.allowed);
+        await setNsitePermission(siteId, account, siteName, type, kind, decision.allowed);
       }
 
       if (!decision.allowed) {
-        throw new Error('User rejected');
+        throw notAllowed();
       }
     },
-    [siteId, siteName, user, showPrompt],
+    [siteId, siteName, showPrompt],
   );
 
   /**
@@ -562,17 +604,59 @@ export function useNsiteSignerRpc({
 
       // Everything past here is a question about the user's key.
       if (!user) {
-        throw new Error('Not logged in');
+        throw notAllowed('Not logged in');
       }
 
-      const signer = user.signer;
+      const signedIn = users.map((u) => u.pubkey);
+
+      switch (method) {
+        // ------------------------------------------------------------------
+        // Din's additions: the accounts a site holds
+        // ------------------------------------------------------------------
+
+        // The user gives the site one of the accounts signed in to Tenna.
+        // Always asks; picking one the site already holds just returns it.
+        case 'nostr.requestPublicKey': {
+          const decision = await showPrompt({ type: 'requestPublicKey', kind: null });
+          const picked = decision.pubkey;
+          if (!decision.allowed || !picked || !signedIn.includes(picked)) {
+            throw notAllowed();
+          }
+          await holdNsiteAccount(siteId, picked);
+          return picked;
+        }
+
+        // Never asks. The provider script makes the signer; this says whether
+        // there is one to make.
+        case 'nostr.getSigner': {
+          const pubkey = typeof p.pubkey === 'string' ? p.pubkey : '';
+          if (!PUBKEY.test(pubkey)) throw new TypeError('A valid pubkey is required');
+          if (!(await holdsNsiteAccount(siteId, pubkey, signedIn))) throw notFound();
+          return null;
+        }
+      }
+
+      // Which account this is asked of: the one a `getSigner` signer is
+      // pinned to, which the site must still hold, or Tenna's own, which the
+      // site holds by having been opened as it.
+      let account = user.pubkey;
+      let signer: NostrSigner = user.signer;
+      if (p.account !== undefined) {
+        const pinned = typeof p.account === 'string' ? p.account : '';
+        const pinnedUser = users.find((u) => u.pubkey === pinned);
+        if (!pinnedUser || !(await holdsNsiteAccount(siteId, pinned, signedIn))) {
+          throw notFound();
+        }
+        account = pinned;
+        signer = pinnedUser.signer;
+      }
 
       switch (method) {
         // ------------------------------------------------------------------
         // getPublicKey — always allowed
         // ------------------------------------------------------------------
         case 'nostr.getPublicKey': {
-          return user.pubkey;
+          return account;
         }
 
         // ------------------------------------------------------------------
@@ -581,7 +665,13 @@ export function useNsiteSignerRpc({
         case 'nostr.signEvent': {
           const event = p.event as Record<string, unknown> | undefined;
           if (!event || typeof event.kind !== 'number') {
-            throw new Error('Invalid event');
+            throw new TypeError('Invalid event');
+          }
+
+          // An event naming another author would be signed as somebody it
+          // does not claim to be, with an id the site did not ask for.
+          if (event.pubkey !== undefined && event.pubkey !== null && event.pubkey !== account) {
+            throw new TypeError("The event's pubkey is not the signer's");
           }
 
           const kind = event.kind as number;
@@ -597,7 +687,7 @@ export function useNsiteSignerRpc({
           // app applies to itself. A prompt here is a question with one sane
           // answer, asked mid-connection, which teaches people to say yes.
           if (kind !== NIP42_AUTH) {
-            await checkPermission('signEvent', kind, {
+            await checkPermission(account, 'signEvent', kind, {
               type: 'signEvent',
               kind,
               event,
@@ -617,77 +707,29 @@ export function useNsiteSignerRpc({
         }
 
         // ------------------------------------------------------------------
-        // NIP-04 encryption
+        // NIP-04 and NIP-44 encryption
         // ------------------------------------------------------------------
-        case 'nostr.nip04.encrypt': {
-          if (!signer.nip04) throw new Error('Signer does not support NIP-04');
-
-          const pubkey = p.pubkey as string;
-          const plaintext = p.plaintext as string;
-          if (!pubkey || typeof plaintext !== 'string') {
-            throw new Error('Invalid params');
-          }
-
-          await checkPermission('nip04.encrypt', null, {
-            type: 'nip04.encrypt',
-            kind: null,
-          });
-
-          return await signer.nip04.encrypt(pubkey, plaintext);
-        }
-
-        case 'nostr.nip04.decrypt': {
-          if (!signer.nip04) throw new Error('Signer does not support NIP-04');
-
-          const pubkey = p.pubkey as string;
-          const ciphertext = p.ciphertext as string;
-          if (!pubkey || typeof ciphertext !== 'string') {
-            throw new Error('Invalid params');
-          }
-
-          await checkPermission('nip04.decrypt', null, {
-            type: 'nip04.decrypt',
-            kind: null,
-          });
-
-          return await signer.nip04.decrypt(pubkey, ciphertext);
-        }
-
-        // ------------------------------------------------------------------
-        // NIP-44 encryption
-        // ------------------------------------------------------------------
-        case 'nostr.nip44.encrypt': {
-          if (!signer.nip44) throw new Error('Signer does not support NIP-44');
-
-          const pubkey = p.pubkey as string;
-          const plaintext = p.plaintext as string;
-          if (!pubkey || typeof plaintext !== 'string') {
-            throw new Error('Invalid params');
-          }
-
-          await checkPermission('nip44.encrypt', null, {
-            type: 'nip44.encrypt',
-            kind: null,
-          });
-
-          return await signer.nip44.encrypt(pubkey, plaintext);
-        }
-
+        case 'nostr.nip04.encrypt':
+        case 'nostr.nip04.decrypt':
+        case 'nostr.nip44.encrypt':
         case 'nostr.nip44.decrypt': {
-          if (!signer.nip44) throw new Error('Signer does not support NIP-44');
+          const version = method.startsWith('nostr.nip04') ? 'nip04' : 'nip44';
+          const decrypting = method.endsWith('decrypt');
+          const cipher = signer[version];
+          if (!cipher) throw new Error(`Signer does not support ${version.toUpperCase()}`);
 
           const pubkey = p.pubkey as string;
-          const ciphertext = p.ciphertext as string;
-          if (!pubkey || typeof ciphertext !== 'string') {
-            throw new Error('Invalid params');
+          const text = decrypting ? p.ciphertext : p.plaintext;
+          if (!pubkey || typeof text !== 'string') {
+            throw new TypeError('Invalid params');
           }
 
-          await checkPermission('nip44.decrypt', null, {
-            type: 'nip44.decrypt',
-            kind: null,
-          });
+          const type = `${version}.${decrypting ? 'decrypt' : 'encrypt'}` as NsitePermissionType;
+          await checkPermission(account, type, null, { type, kind: null });
 
-          return await signer.nip44.decrypt(pubkey, ciphertext);
+          return decrypting
+            ? await cipher.decrypt(pubkey, text)
+            : await cipher.encrypt(pubkey, text);
         }
 
         default:
@@ -696,7 +738,9 @@ export function useNsiteSignerRpc({
     },
     [
       user,
+      users,
       checkPermission,
+      showPrompt,
       siteId,
       siteName,
       manifest,

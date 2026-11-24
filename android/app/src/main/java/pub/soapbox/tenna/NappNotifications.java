@@ -88,6 +88,17 @@ final class NappNotifications {
      * saying something.
      */
     private static final String SIGNER_CHANNEL = "napp.signer";
+
+    /** Where a site's running tasks are drawn. See {@link NappTasks}. */
+    private static final String TASK_CHANNEL = "napp.tasks";
+
+    /** What {@link #post} did with a notification. */
+    static final int REFUSED = 0;
+    static final int SHOWN = 1;
+    static final int RUNNING = 2;
+
+    /** The buttons a task has room for of its own, beside Stop. */
+    private static final int MAX_TASK_ACTIONS = 2;
     private static final String SIGNER_TAG_PREFIX = "signer/";
 
     /**
@@ -218,9 +229,34 @@ final class NappNotifications {
      * the options object as the Notifications API defines it.
      */
     static boolean show(@NonNull Context context, @NonNull String siteId, @NonNull JSONObject payload) {
+        return post(context, siteId, payload, null) != REFUSED;
+    }
+
+    /**
+     * Post a notification for a site, as {@link #show} does, and say whether
+     * it is running as a task.
+     *
+     * <p>One with {@code ongoing: true} is run as a task when the site may
+     * start one — see {@link NappTasks} — and drawn on its own, out of the
+     * site's conversation, for as long as it runs. Otherwise it is an ordinary
+     * notification, and its {@code ongoing} is written down as false, so that
+     * {@code getNotifications} tells the site it did not get it. A running
+     * task's tag shown again without {@code ongoing} ends the task, and is
+     * news.
+     *
+     * @param instance the worker asking, if it was one, so that a task it
+     *                 starts ends if that worker stops. See
+     *                 {@link NappTasks#workerSeen}.
+     */
+    static int post(
+        @NonNull Context context,
+        @NonNull String siteId,
+        @NonNull JSONObject payload,
+        @Nullable String instance
+    ) {
         if (!isEnabled(context)) {
             Log.i(TAG, "Notifications are off; dropping one from " + siteId);
-            return false;
+            return REFUSED;
         }
 
         // Nothing should be listening for a muted site in the first place, but
@@ -229,17 +265,18 @@ final class NappNotifications {
         // notification the user said they did not want.
         if (NappMuted.isMuted(context, siteId)) {
             Log.i(TAG, "Notifications are off for " + siteId + "; dropping one");
-            return false;
+            return REFUSED;
         }
 
         NsiteSites.Record record = NsiteSites.load(context, siteId);
         if (record == null) {
             Log.i(TAG, "No record for " + siteId + "; dropping its notification");
-            return false;
+            return REFUSED;
         }
 
         JSONObject json = payload.optJSONObject("options");
         if (json == null) json = new JSONObject();
+        boolean wantsTask = json.optBoolean("ongoing", false);
 
         NappOptions options = NappOptions.parse(json);
         discardStale(context, siteId);
@@ -255,14 +292,49 @@ final class NappNotifications {
             replacing = NappNotificationStore.get(context, siteId, key) != null;
         }
 
-        NappNotificationStore.put(context, siteId, new NappNotificationStore.Entry(
+        // A task, if it may be one: a site updating its own running task, or
+        // one the user just acted in starting it.
+        boolean wasTask = NappTasks.isRunning(key);
+        boolean task = wantsTask && (wasTask || NappTasks.mayStart(siteId));
+
+        // What it got, written into what `getNotifications` reads back.
+        try {
+            if (task) json.put("ongoing", true);
+            else if (json.has("ongoing")) json.put("ongoing", false);
+        } catch (JSONException e) {
+            // Cannot happen for a boolean.
+        }
+
+        NappNotificationStore.Entry entry = new NappNotificationStore.Entry(
             key,
             options.tag,
             NappOptions.title(payload.optString("title", ""), record.label),
             json.toString(),
             options.url,
             System.currentTimeMillis()
-        ));
+        );
+        NappNotificationStore.put(context, siteId, entry);
+
+        if (task) {
+            if (NappTasks.show(context, siteId, entry, instance)) return RUNNING;
+
+            // Not allowed to run in the foreground from here, so it is news
+            // after all, and says so.
+            try {
+                json.put("ongoing", false);
+            } catch (JSONException e) {
+                // Cannot happen for a boolean.
+            }
+            entry = new NappNotificationStore.Entry(
+                entry.key, entry.tag, entry.title, json.toString(), entry.url, entry.postedAt);
+            NappNotificationStore.put(context, siteId, entry);
+        }
+
+        // Its task is over, and this is the news of it.
+        if (wasTask) {
+            NappTasks.end(context, key);
+            replacing = false;
+        }
 
         // Web semantics: replacing a tagged notification is quiet unless the
         // site asks otherwise. Anything the site has not said before alerts.
@@ -270,10 +342,10 @@ final class NappNotifications {
 
         if (!render(context, siteId, alert, System.currentTimeMillis() + PICTURE_DEADLINE_MS)) {
             NappNotificationStore.remove(context, siteId, key);
-            return false;
+            return REFUSED;
         }
 
-        return true;
+        return SHOWN;
     }
 
     /**
@@ -333,7 +405,13 @@ final class NappNotifications {
         if (record == null) return false;
 
         String key = conversationKey(siteId);
-        List<NappNotificationStore.Entry> entries = NappNotificationStore.list(context, siteId);
+        // A running task is drawn on its own, not as a line in the row; one
+        // whose worker is gone is not drawn at all.
+        NappTasks.sweep(context, siteId);
+        List<NappNotificationStore.Entry> entries = new ArrayList<>();
+        for (NappNotificationStore.Entry entry : NappNotificationStore.list(context, siteId)) {
+            if (!NappTasks.isRunning(entry.key)) entries.add(entry);
+        }
 
         if (entries.isEmpty()) {
             NotificationManagerCompat.from(context).cancel(key, 0);
@@ -590,7 +668,16 @@ final class NappNotifications {
         // Unreadable, or the conversation is up and its records are current.
         if (active == null || active.contains(conversationKey(siteId))) return;
 
-        NappNotificationStore.clear(context, siteId);
+        // Everything but what is running, which is drawn apart from the row
+        // and is current whether or not the row is up.
+        forgetLines(context, siteId);
+    }
+
+    /** Drop every record but a running task's. */
+    private static void forgetLines(Context context, String siteId) {
+        for (NappNotificationStore.Entry entry : NappNotificationStore.list(context, siteId)) {
+            if (!NappTasks.isRunning(entry.key)) NappNotificationStore.remove(context, siteId, entry.key);
+        }
     }
 
     @NonNull
@@ -645,7 +732,22 @@ final class NappNotifications {
         long deadline,
         NappImages.OnLoaded again
     ) {
+        actions(context, siteId, builder, key, options, deadline, again, NappOptions.MAX_ACTIONS);
+    }
+
+    private static void actions(
+        Context context,
+        String siteId,
+        NotificationCompat.Builder builder,
+        String key,
+        @NonNull NappOptions options,
+        long deadline,
+        NappImages.OnLoaded again,
+        int limit
+    ) {
+        int added = 0;
         for (NappOptions.Action action : options.actions) {
+            if (added++ >= limit) break;
             Intent intent = new Intent(context, NappNotificationReceiver.class)
                 .setAction(NappNotificationReceiver.ACTION_ACTION)
                 // Extras alone do not tell two PendingIntents apart; the data
@@ -723,7 +825,22 @@ final class NappNotifications {
     static void cancel(@NonNull Context context, @NonNull String siteId, @NonNull String key) {
         if (NappNotificationStore.get(context, siteId, key) == null) return;
         NappNotificationStore.remove(context, siteId, key);
+        // Closing a running task's notification is how a site ends it.
+        if (NappTasks.isRunning(key)) {
+            NappTasks.end(context, key);
+            return;
+        }
         render(context, siteId, false, 0);
+    }
+
+    /**
+     * A site's notifications as {@code getNotifications()} lists them, a
+     * running task's included, oldest first.
+     */
+    @NonNull
+    static List<NappNotificationStore.Entry> list(@NonNull Context context, @NonNull String siteId) {
+        NappTasks.sweep(context, siteId);
+        return NappNotificationStore.list(context, siteId);
     }
 
     /**
@@ -736,7 +853,7 @@ final class NappNotifications {
     static List<String> conversationKeys(@NonNull Context context, @NonNull String siteId) {
         List<String> keys = new ArrayList<>();
         for (NappNotificationStore.Entry entry : NappNotificationStore.list(context, siteId)) {
-            keys.add(entry.key);
+            if (!NappTasks.isRunning(entry.key)) keys.add(entry.key);
         }
         return keys;
     }
@@ -749,7 +866,7 @@ final class NappNotifications {
      * swipe asked for.
      */
     static void forgetConversation(@NonNull Context context, @NonNull String siteId) {
-        NappNotificationStore.clear(context, siteId);
+        forgetLines(context, siteId);
         changed(siteId);
     }
 
@@ -771,6 +888,7 @@ final class NappNotifications {
             manager.cancel(entry.key, 0);
         }
 
+        NappTasks.forget(context, siteId);
         NappNotificationStore.clear(context, siteId);
         changed(siteId);
     }
@@ -901,10 +1019,11 @@ final class NappNotifications {
     /**
      * Something is asking to use the key, and nobody has said yes or no.
      *
-     * <p>There is no window to put this in. The request arrived on a relay
-     * socket held by a service with the app closed, so a notification is the
-     * only way it reaches anybody. Tapping it opens the sheet, at whatever
-     * {@code open} says.
+     * <p>There is no window to put this in. Either the request arrived on a
+     * relay socket held by a service with the app closed, or it came from an
+     * nsite's service worker, which can be the only thing this app is running
+     * — so a notification is the only way it reaches anybody. Tapping it opens
+     * the sheet, at whatever {@code open} says.
      *
      * <p>It says what was asked and never what was in it. A lock screen is
      * read by whoever is holding the phone.
@@ -974,6 +1093,141 @@ final class NappNotifications {
     }
 
     // -----------------------------------------------------------------------
+    // Running tasks
+    // -----------------------------------------------------------------------
+
+    /**
+     * A site's running task, as its own notification. See {@link NappTasks}.
+     *
+     * <p>Not a line in the site's conversation: it is not something said but
+     * something going on, and it is the notification a foreground service
+     * runs under, which has to be one of its own. It carries the site's name
+     * and colour, its title and body, a bar where it gives a {@code progress}
+     * from 0 to 1, up to two of its own buttons, and Stop.
+     *
+     * <p>Tapping it opens the site and raises {@code notificationclick},
+     * leaving it up. Swiping it away, where Android lets a user swipe one, is
+     * Stop.
+     */
+    @Nullable
+    static Notification taskNotification(
+        @NonNull Context context,
+        @NonNull String siteId,
+        @NonNull NappNotificationStore.Entry entry
+    ) {
+        NsiteSites.Record record = NsiteSites.load(context, siteId);
+        if (record == null) return null;
+        ensureTaskChannel(context);
+
+        Context app = context.getApplicationContext();
+        NappOptions options = optionsOf(entry);
+        NappImages.OnLoaded again = () -> retask(app, siteId, entry.key);
+        long deadline = System.currentTimeMillis() + PICTURE_DEADLINE_MS;
+
+        NotificationCompat.Builder builder = new NotificationCompat.Builder(context, TASK_CHANNEL)
+            .setContentTitle(entry.title)
+            .setSubText(record.label)
+            .setOngoing(true)
+            .setSilent(true)
+            .setOnlyAlertOnce(true)
+            .setAutoCancel(false)
+            .setShowWhen(false)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setCategory(NotificationCompat.CATEGORY_PROGRESS)
+            .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
+            .setContentIntent(openSite(context, siteId, entry.key, options.url, entry.key.hashCode()))
+            .setDeleteIntent(stopTask(context, siteId, entry.key));
+
+        if (!options.body.isEmpty()) {
+            builder.setContentText(options.body)
+                .setStyle(new NotificationCompat.BigTextStyle().bigText(options.body));
+        }
+
+        double progress = progressOf(entry);
+        if (!Double.isNaN(progress)) {
+            builder.setProgress(1000, (int) Math.round(progress * 1000), false);
+        }
+
+        smallIcon(builder, context, siteId, options.badge, deadline, again);
+
+        NsiteSites.TaskIcon tile = NsiteSites.taskIcon(context, siteId);
+        if (tile != null) {
+            builder.setColor(tile.color);
+            if (tile.bitmap != null) builder.setLargeIcon(tile.bitmap);
+        }
+
+        actions(context, siteId, builder, entry.key, options, deadline, again, MAX_TASK_ACTIONS);
+        builder.addAction(new NotificationCompat.Action.Builder(
+            IconCompat.createWithResource(context, R.drawable.ic_stat_napp),
+            "Stop",
+            stopTask(context, siteId, entry.key)
+        ).build());
+
+        return builder.build();
+    }
+
+    /** A picture a task was waiting on has arrived: draw it again. */
+    private static void retask(Context context, String siteId, String key) {
+        if (!NappTasks.isRunning(key)) return;
+        NappNotificationStore.Entry entry = NappNotificationStore.get(context, siteId, key);
+        if (entry != null) NappTasks.show(context, siteId, entry, null);
+    }
+
+    /** A task's {@code progress}, clamped to 0 to 1, or NaN where it has none. */
+    private static double progressOf(@NonNull NappNotificationStore.Entry entry) {
+        try {
+            Object value = new JSONObject(entry.options).opt("progress");
+            if (!(value instanceof Number)) return Double.NaN;
+            double progress = ((Number) value).doubleValue();
+            if (Double.isNaN(progress) || Double.isInfinite(progress)) return Double.NaN;
+            return Math.max(0, Math.min(1, progress));
+        } catch (JSONException e) {
+            return Double.NaN;
+        }
+    }
+
+    /**
+     * What the task service shows for the moment it is in the foreground with
+     * nothing running: a task that ended before the service came up.
+     */
+    @NonNull
+    static Notification taskPlaceholder(@NonNull Context context) {
+        ensureTaskChannel(context);
+        return new NotificationCompat.Builder(context, TASK_CHANNEL)
+            .setSmallIcon(R.drawable.ic_stat_napp)
+            .setContentTitle("Tenna")
+            .setContentText("Finishing a task")
+            .setSilent(true)
+            .setPriority(NotificationCompat.PRIORITY_MIN)
+            .build();
+    }
+
+    private static PendingIntent stopTask(Context context, String siteId, String key) {
+        Intent intent = new Intent(context, NappNotificationReceiver.class)
+            .setAction(NappNotificationReceiver.ACTION_STOP)
+            .setData(android.net.Uri.parse("tenna-napp-task:" + key))
+            .putExtra(NappNotificationReceiver.EXTRA_SITE_ID, siteId)
+            .putExtra(NappNotificationReceiver.EXTRA_KEY, key);
+        return PendingIntent.getBroadcast(
+            context, 0, intent, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+    }
+
+    private static void ensureTaskChannel(Context context) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return;
+        NotificationManager manager = context.getSystemService(NotificationManager.class);
+        if (manager == null) return;
+
+        NotificationChannel channel = new NotificationChannel(
+            TASK_CHANNEL,
+            "Running tasks",
+            NotificationManager.IMPORTANCE_LOW
+        );
+        channel.setDescription("Shown while a site does something you started, with its window closed");
+        channel.setShowBadge(false);
+        manager.createNotificationChannel(channel);
+    }
+
+    // -----------------------------------------------------------------------
     // Intents
     // -----------------------------------------------------------------------
 
@@ -992,10 +1246,20 @@ final class NappNotifications {
         @NonNull String key,
         @Nullable String path
     ) {
+        // Distinct per site, or one site's tap would replace another's.
+        return openSite(context, siteId, key, path, conversationKey(siteId).hashCode());
+    }
+
+    private static PendingIntent openSite(
+        Context context,
+        String siteId,
+        @NonNull String key,
+        @Nullable String path,
+        int requestCode
+    ) {
         return PendingIntent.getActivity(
             context,
-            // Distinct per site, or one site's tap would replace another's.
-            conversationKey(siteId).hashCode(),
+            requestCode,
             NsiteAppActivity.notificationIntentFor(context, siteId, path, key),
             PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE
         );

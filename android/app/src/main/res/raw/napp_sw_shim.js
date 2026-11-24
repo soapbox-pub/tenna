@@ -11,19 +11,20 @@
  * `event.notification.close()` and `event.reply` all work.
  *
  * Everything that reaches outside the worker — showing a notification, reading
- * the tray back, making an HTTP request — is a message on a `MessagePort` the
- * host handed over. That port arrives with the very same `message` the event
- * does, so by the time a site's `push` handler runs there is already somewhere
- * to ask.
+ * the tray back, signing something, making an HTTP request — is a message on a
+ * `MessagePort` the host handed over. That port arrives with the very same
+ * `message` the event does, so by the time a site's `push` handler runs there
+ * is already somewhere to ask.
  *
  * It used to be a same-origin `fetch` instead, answered from
  * `shouldInterceptRequest`, with the payload written out as base64 in the
  * query string. That road is worth remembering because every awkward thing
  * about it came from one fact: interception is never given a request body. So
  * a worker could only ever ask, never say; anything it wanted to hand over had
- * to fit in a URL or be cut into several; and nothing it asked could be waited
- * on for long, because the thread belonged to Chromium and was shared by every
- * worker in the app. A port has none of that. See NappPort.
+ * to fit in a URL or be cut into several; and a call that needed the user's
+ * approval could not be waited for, because the thread belonged to Chromium
+ * and was shared by every worker in the app — so it was answered with "not
+ * yet" and asked again every second. A port has none of that. See NappPort.
  *
  * Appended rather than prepended so that a `'use strict'` prologue at the top
  * of the site's own script keeps meaning what it says.
@@ -67,6 +68,16 @@
    * Tenna's permission prompt and a worker's do not. See NappTokens.
    */
   var AUTH = %%NAPP_SITE_TOKEN%%;
+
+  /**
+   * Which start of this worker this is. Chromium gives a stopped worker a
+   * fresh global when it starts it again, so this changes exactly when
+   * everything held in memory was lost — which is what tells the host that a
+   * task this worker was running is gone. See NappTasks.
+   */
+  var INSTANCE = (self.crypto && crypto.randomUUID)
+    ? crypto.randomUUID()
+    : String(Math.random()).slice(2) + String(Date.now());
 
   function pathOf(url) {
     try { return new URL(url).pathname; } catch (e) { return null; }
@@ -146,7 +157,7 @@
     // Before anything else, and before anything queued: the host answers
     // nothing until it has this, and messages arrive in the order they were
     // sent, so being first is the whole of the protocol.
-    post({ m: 'hello', p: { a: AUTH } });
+    post({ m: 'hello', p: { a: AUTH, i: INSTANCE } });
 
     var waiting = queued;
     queued = [];
@@ -365,6 +376,10 @@
     this.dir = options.dir || 'auto';
     this.lang = options.lang || '';
     this.vibrate = options.vibrate || [];
+    // Din's options for a running task: whether this one got it, and how far
+    // along it says it is. See "Running tasks" below.
+    this.ongoing = options.ongoing === true;
+    this.progress = typeof options.progress === 'number' ? options.progress : null;
     // The host's own name for it. Not part of the API, so not enumerable —
     // a site round-tripping a notification through JSON shouldn't carry it.
     Object.defineProperty(this, '__key', { value: String(record.key || '') });
@@ -395,7 +410,9 @@
         return Promise.reject(new TypeError('Notification options must be serializable'));
       }
       return call('notification', { title: String(title), options: payload })
-        .then(function () {});
+        .then(function (shown) {
+          if (shown && shown.ongoing) releaseWaits();
+        });
     };
 
     registration.getNotifications = function (filter) {
@@ -407,6 +424,83 @@
         })
         .catch(function () { return []; });
     };
+  }
+
+  // -------------------------------------------------------------------------
+  // Running tasks
+  // -------------------------------------------------------------------------
+
+  /*
+   * Work that goes on with the site's windows closed, while a notification
+   * says so: Din's `ongoing` option, which Tenna gives sites on Android (Din's
+   * docs/din/background.md, "Running a task").
+   *
+   *   registration.showNotification('Syncing', { tag: 'sync', ongoing: true, progress: 0.5 })
+   *
+   * While it shows, the host keeps this worker running — a hidden page at the
+   * site's origin sends it a keep-alive every twenty seconds, which is held
+   * open here for a little longer than that — and the process with it, under
+   * a foreground service whose notification is this one. Chromium still stops
+   * a worker whose one event waits past five minutes, so once a task is
+   * granted, and each time it is updated or kept alive, what the worker's
+   * events handed `waitUntil()` counts as done to Chromium, and the work goes
+   * on. `'ongoing' in Notification.prototype` says this is here, and a
+   * notification's `ongoing` whether it got it.
+   */
+
+  /** Promises handed to Chromium for a `waitUntil()`, to settle early. */
+  var waits = [];
+
+  function releaseWaits() {
+    var settle = waits;
+    waits = [];
+    for (var i = 0; i < settle.length; i++) settle[i]();
+  }
+
+  var nativeWaitUntil = null;
+  if (self.ExtendableEvent && ExtendableEvent.prototype.waitUntil) {
+    nativeWaitUntil = ExtendableEvent.prototype.waitUntil;
+    ExtendableEvent.prototype.waitUntil = function (promise) {
+      var release;
+      var released = new Promise(function (resolve) { release = resolve; });
+      var settled = Promise.resolve(promise);
+      waits.push(release);
+      settled.then(function () { forget(release); }, function () { forget(release); });
+      // Outside dispatch this throws InvalidStateError, as it should.
+      return nativeWaitUntil.call(this, Promise.race([settled, released]));
+    };
+  }
+
+  function forget(release) {
+    var at = waits.indexOf(release);
+    if (at !== -1) waits.splice(at, 1);
+  }
+
+  /*
+   * A worker has no Notification of its own in this WebView, so there is one
+   * here — for `'ongoing' in Notification.prototype`, `instanceof`, and
+   * `Notification.permission` — with the constructor refused, as it is in a
+   * worker everywhere.
+   */
+  if (typeof self.Notification !== 'function') {
+    var WorkerNotification = function Notification() {
+      throw new TypeError("Failed to construct 'Notification': Illegal constructor");
+    };
+    WorkerNotification.prototype = NappNotification.prototype;
+    NappNotification.prototype.constructor = WorkerNotification;
+    try {
+      Object.defineProperty(WorkerNotification, 'permission', { get: function () { return 'granted'; } });
+    } catch (err) {}
+    self.Notification = WorkerNotification;
+  }
+
+  NappNotification.prototype.ongoing = false;
+  NappNotification.prototype.progress = null;
+  if (self.Notification && self.Notification.prototype !== NappNotification.prototype) {
+    try {
+      Object.defineProperty(self.Notification.prototype, 'ongoing', { configurable: true, value: false, writable: true });
+      Object.defineProperty(self.Notification.prototype, 'progress', { configurable: true, value: null, writable: true });
+    } catch (err) {}
   }
 
   // -------------------------------------------------------------------------
@@ -540,6 +634,150 @@
       Object.defineProperty(self.Notification, 'permission', { get: function () { return 'granted'; } });
     } catch (err) {}
   }
+
+  // -------------------------------------------------------------------------
+  // self.nostr
+  // -------------------------------------------------------------------------
+
+  /*
+   * The NIP-07 provider, for a worker.
+   *
+   * A site's window gets this injected as `window.nostr`; a worker has no
+   * window to inject into, and is often the only thing running — which is
+   * exactly when it is worth having, since a push about a message is not much
+   * of a notification until somebody decrypts it.
+   *
+   * The host decides nothing new: the grants are the ones the site's window
+   * was given, read out of the store they were written to. See
+   * NsiteWorkerSigner.
+   *
+   * A call the user has to approve simply takes as long as it takes — the
+   * promise settles when they have pressed something. On the old road it could
+   * not: the answer had to come back on a thread Chromium shared with every
+   * worker in the app, so the call was parked and asked about once a second
+   * until somebody had decided.
+   *
+   * `self.nostr` being here says Tenna can answer, not that it will. Nobody
+   * signed in, and a permission refused, both come back as a rejected promise
+   * rather than as a missing object — the object is baked into this script
+   * when the worker is installed, and who is signed in changes long
+   * afterwards.
+   */
+
+  /*
+   * A refusal as the error Din names it (its docs/window-nostr.md), so a client
+   * can tell "you don't hold that account" from "the user said no" from "you
+   * called it wrong". The host prefixes the reason with the name.
+   */
+  function nostrError(err) {
+    var text = String(err && err.message != null ? err.message : err);
+    var match = /^(NotFoundError|NotAllowedError|TypeError): ([\s\S]*)$/.exec(text);
+    if (!match) return new Error(text);
+    if (match[1] === 'TypeError') return new TypeError(match[2]);
+    try {
+      return new DOMException(match[2], match[1]);
+    } catch (e) {
+      var out = new Error(match[2]);
+      out.name = match[1];
+      return out;
+    }
+  }
+
+  /*
+   * One call at a time.
+   *
+   * A call nobody has answered before puts a notification in front of the
+   * user, and a worker looping over a conversation would otherwise put one
+   * there per message. The window's provider serialises for the same reason;
+   * see `nsiteNostrProvider.ts`.
+   */
+  var nostrQueue = Promise.resolve();
+
+  function sign(method, params) {
+    var run = function () {
+      return call('nostr', { method: method, params: params || {} })
+        .then(null, function (err) { throw nostrError(err); });
+    };
+
+    // Chained off the tail whatever happened to the one in front: a refusal
+    // is an answer, and the next call is still owed its turn.
+    var next = nostrQueue.then(run, run);
+    nostrQueue = next.then(function () {}, function () {});
+    return next;
+  }
+
+  /*
+   * The NIP-07 methods, acting as `account` — or, with none, as whoever is
+   * signed in to Tenna. `getSigner` makes the first kind; the provider itself
+   * is the second.
+   */
+  function signer(account) {
+    function ask(method, params) {
+      if (account) params.account = account;
+      return sign(method, params);
+    }
+
+    return {
+      getPublicKey: function () {
+        return account ? Promise.resolve(account) : ask('getPublicKey', {});
+      },
+
+      signEvent: function (event) {
+        return ask('signEvent', { event: event });
+      },
+
+      // As in the window: Tenna publishes on the relays the user configured,
+      // and a site asking which those are is asking the app rather than the
+      // key.
+      getRelays: function () {
+        return Promise.resolve({});
+      },
+
+      nip04: {
+        encrypt: function (pubkey, plaintext) {
+          return ask('nip04.encrypt', { pubkey: pubkey, text: plaintext });
+        },
+        decrypt: function (pubkey, ciphertext) {
+          return ask('nip04.decrypt', { pubkey: pubkey, text: ciphertext });
+        },
+      },
+
+      nip44: {
+        encrypt: function (pubkey, plaintext) {
+          return ask('nip44.encrypt', { pubkey: pubkey, text: plaintext });
+        },
+        decrypt: function (pubkey, ciphertext) {
+          return ask('nip44.decrypt', { pubkey: pubkey, text: ciphertext });
+        },
+      },
+    };
+  }
+
+  var provider = signer(null);
+
+  /*
+   * Din's two additions, for a client that holds its accounts itself.
+   *
+   * `getSigner(pubkey)` resolves without asking with a signer that always acts
+   * as that account, whichever account Tenna is on, or rejects with
+   * `NotFoundError` when the site was never given it (or it was revoked, or
+   * nobody is signed in as it any more). `requestPublicKey()` gives the site
+   * another account, which takes an account picker on screen: a worker has
+   * none, so it rejects with `NotAllowedError` here and is asked from the
+   * window, whose accounts the worker holds too.
+   */
+  provider.getSigner = function (pubkey) {
+    var key = String(pubkey);
+    return sign('getSigner', { pubkey: key }).then(function () {
+      return signer(key);
+    });
+  };
+
+  provider.requestPublicKey = function () {
+    return sign('requestPublicKey', {});
+  };
+
+  self.nostr = provider;
 
   // -------------------------------------------------------------------------
   // self.napp.fetch
@@ -875,9 +1113,27 @@
 
   var KINDS = { push: true, notificationclick: true, notificationclose: true, periodicsync: true };
 
+  /** How long one keep-alive holds the worker: a little past the next. */
+  var KEEP_ALIVE_HOLD_MS = 25000;
+
   self.addEventListener('message', function (e) {
     var m = e.data;
     if (!m || typeof m !== 'object') return;
+
+    // The host keeping this worker running for a task. It holds the event
+    // open past the next one, so the worker is never idle, and lets go of
+    // what the site's own events are waiting on, since the task is what
+    // keeps the worker now.
+    if (m.__napp === 'keepalive') {
+      releaseWaits();
+      // Held with the engine's own waitUntil, so that nothing releases it.
+      var hold = nativeWaitUntil || e.waitUntil;
+      if (typeof hold === 'function') {
+        hold.call(e, new Promise(function (resolve) { setTimeout(resolve, KEEP_ALIVE_HOLD_MS); }));
+      }
+      reply(e.source, { __napp: 'kept', instance: INSTANCE });
+      return;
+    }
 
     var named = m.__napp === 'port' || KINDS[m.__napp];
     if (!named) return;

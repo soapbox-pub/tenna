@@ -457,6 +457,20 @@ public class NsiteWebViewPlugin extends Plugin {
             // a WebView that has not been used yet. See NsiteProfiles.
             NsiteProfiles.attach(view, siteId);
             configure(view);
+            // The user acting in the site is what lets it start a task that
+            // goes on with the window closed, for the next minute. Watched
+            // without being consumed: the site gets every touch and key.
+            final String touchedSite = siteId;
+            view.setOnTouchListener((v, event) -> {
+                if (event.getActionMasked() == android.view.MotionEvent.ACTION_DOWN) {
+                    NappTasks.touched(touchedSite);
+                }
+                return false;
+            });
+            view.setOnKeyListener((v, keyCode, event) -> {
+                NappTasks.touched(touchedSite);
+                return false;
+            });
             // Before the bridge, so `window.ENV` is there for the provider as
             // well as for the site.
             installEnv(view, origin, envScript);

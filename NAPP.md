@@ -9,6 +9,14 @@ Each is declared the way the web already declares them where the web has a way
 All three are on both platforms. What differs per platform is set out under
 [On iOS](#on-ios); the short version is that a site writes the same code.
 
+Tenna also speaks the parts of Din's runtime that a
+site can use on a phone, under the same names, so a site written for one
+runs on the other: a `window.nostr` that lets a client
+[hold several accounts](#windownostr--the-accounts-a-site-holds),
+[`self.nostr`](#selfnostr--signing-in-the-service-worker) in the site's
+service worker on Android, and [running tasks](#running-a-task--ongoing-notifications)
+that go on with the site's window closed, on Android.
+
 ## `window.napp` — notifications
 
 Tenna injects `window.napp` into an nsite when it can deliver notifications
@@ -514,9 +522,9 @@ Android and twenty seconds on iOS — see [The delivery deadline](#the-delivery-
 
 #### What is not there yet
 
-- **Anything past the standard.** There is no way for a site to *ask* for
-  anything — no naming of threads, no progress bar, no bundle key of its own,
-  no channel of its own. There briefly was, in `options.data.napp`, and it was
+- **Anything past the standard**, beyond Din's `ongoing` and `progress` for
+  [running a task](#running-a-task--ongoing-notifications). There is no
+  naming of threads, no bundle key of its own, no channel of its own. There briefly was, in `options.data.napp`, and it was
   withdrawn. Some of it is worth having, but not in a shape settled in the
   abstract, and anything that comes back will come back as the standard
   spelling of it wherever one exists.
@@ -875,6 +883,188 @@ it is fine to call `register()` on every page load.
 
 Treat it as a way to be fresher when the user comes back, not as a clock.
 
+## `window.nostr` — the accounts a site holds
+
+A site's `window.nostr` is NIP-07, and acts as whoever is signed in to Tenna,
+as NIP-07 always has. A client that keeps several accounts of its own — one
+that lets its user add a second account and switch between them, say — can
+keep acting as each of them whichever account Tenna is on. Tenna has the two
+additions Din gives websites, under the same names, so
+the same code holds accounts in both:
+
+```ts
+interface NostrProvider extends NostrSigner {
+  // NIP-07, as Tenna's account
+  getPublicKey(): Promise<string>
+  signEvent(event): Promise<NostrEvent>
+  nip04: { encrypt(pubkey, plaintext); decrypt(pubkey, ciphertext) }
+  nip44: { encrypt(pubkey, plaintext); decrypt(pubkey, ciphertext) }
+
+  // Din's additions
+  requestPublicKey(): Promise<string>             // the user gives the site an account
+  getSigner(pubkey: string): Promise<NostrSigner> // pinned to an account the site holds
+}
+```
+
+```ts
+if ('getSigner' in window.nostr) {
+  const pubkey = await window.nostr.requestPublicKey() // "Add account"
+  const signer = await window.nostr.getSigner(pubkey)  // later, and on every load
+}
+```
+
+- A site **holds** an account once it has been told it: by being opened while
+  that account was Tenna's, or by `requestPublicKey()`.
+- **`requestPublicKey()`** always asks: a sheet over the site lists the
+  accounts signed in to Tenna, the one it is on picked to begin with, and it
+  resolves with the key of the one chosen. Choosing one the site already holds
+  just returns it.
+- **`getSigner(pubkey)`** never asks. It resolves with a plain NIP-07 signer
+  that always acts as `pubkey`, whatever Tenna switches to, and whose
+  `getPublicKey()` answers at once — or rejects with `NotFoundError` if the
+  site does not hold it. A client keeps the keys it was given and calls this
+  for each one on load.
+- What a site may do without asking is remembered per site **and per
+  account**, as it always was, and asked about in the same sheet, which says
+  whose key it would be.
+- Revoking a site for an account in Settings → Apps takes that account away
+  from it too. Signing the account out of Tenna takes it away from every site.
+- An event whose `pubkey` is set to anybody but the signer's account is
+  refused, rather than signed with an id the site did not ask for.
+
+Refusals are `DOMException`s, as in Din, so a client can tell them apart by
+`name`:
+
+| `name` | Means | The client should |
+| --- | --- | --- |
+| `NotFoundError` | The site does not hold that account: never given it, revoked, or signed out of Tenna | Drop the account |
+| `NotAllowedError` | The user, or what they remembered, said no; or nobody is signed in | Keep the account; only this failed |
+| `TypeError` | A malformed call: a bad key, an event whose `pubkey` is not the signer's | Fix the call |
+
+A refusal's `message` is what it was before, `User rejected` for a no, so code
+that matched on it still does.
+
+On Android, iOS and the web alike: this is the page's provider, and the host
+behind it is the same on all three.
+
+## `self.nostr` — signing in the service worker
+
+On Android a site's service worker has `self.nostr`, the same provider its
+window has, `getSigner` included. A worker woken by a push is often the only
+thing running, and a push about a message is not much of a notification until
+something decrypts it:
+
+```js
+self.addEventListener('push', (event) => {
+  event.waitUntil((async () => {
+    const { event: wrap } = event.data.json();
+    const signer = await self.nostr.getSigner(me); // the account this device reads as
+    const seal = JSON.parse(await signer.nip44.decrypt(wrap.pubkey, wrap.content));
+    // ...
+  })());
+});
+```
+
+- **The same grants as the window.** A site allowed to decrypt in its window
+  is allowed to in its worker, and one switch in Settings → Apps turns off
+  both. They are kept natively for exactly this reason: a worker has no window
+  and none of the web layer's storage.
+- **It acts as its window does.** Its own methods act as Tenna's account, but
+  only once the site has been opened as it — a worker is not how a site learns
+  about an account its window was never shown — and reject with
+  `NotAllowedError` otherwise. `getSigner(pubkey)` works for any account the
+  site holds.
+- **It cannot be given an account.** `requestPublicKey()` needs an account
+  picker on screen, and a worker has no screen, so it rejects with
+  `NotAllowedError`. Ask from the window; what the window was given, the
+  worker holds.
+- **A question nobody has answered is a notification.** It names the site and
+  what it wants, never what is in it, and opens the same sheet an app on the
+  phone gets. The call waits for the answer, for up to two and a half
+  minutes, after which it is refused and the notification goes. Dismissing it
+  is a no. Hand the wait to `waitUntil`, and remember the worker woken by a
+  push has [five minutes](#the-delivery-deadline) for everything.
+- **One call at a time**, as in the window, so a worker looping over a
+  conversation puts one question in front of the user, not one per message.
+
+Not on iOS, where a push runs the worker inside a notification extension that
+has nobody to ask and no key to ask with; `self.nostr` is absent there.
+Feature-detect it.
+
+## Running a task — `ongoing` notifications
+
+A site can keep working with its window closed while a notification says so,
+which is Android's foreground service in the web's own terms and Din's
+`ongoing` option under its own name. Work the user starts and then walks away
+from — an upload, a sync, an assistant writing code — goes on in the site's
+service worker for as long as it takes.
+
+```js
+// The page, when the user asks for it:
+navigator.serviceWorker.controller?.postMessage({ type: 'sync' });
+
+// sw.js
+let stop = new AbortController();
+
+self.addEventListener('message', (event) => {
+  if (event.data?.type !== 'sync') return;
+  stop = new AbortController();
+  event.waitUntil(sync(stop.signal));
+});
+
+async function sync(signal) {
+  const show = (body, progress) =>
+    self.registration.showNotification('Syncing notes', { tag: 'sync', body, progress, ongoing: true, silent: true });
+  await show('Starting…', 0);
+  for (const [i, batch] of batches.entries()) {
+    if (signal.aborted) return;
+    await upload(batch, { signal });
+    await show(`${i + 1} of ${batches.length}`, (i + 1) / batches.length);
+  }
+  // The same tag without `ongoing`: the task is over, and this is news.
+  await self.registration.showNotification('Notes synced', { tag: 'sync' });
+}
+
+// Its Stop: the notification is gone, and the worker has ten seconds.
+self.addEventListener('notificationclose', (event) => {
+  if (event.notification.tag === 'sync') stop.abort();
+});
+```
+
+- **While it shows, the worker keeps running**, past Chromium's thirty
+  seconds of idling, and the app with it, with the notification as Tenna's
+  foreground service. Chromium still stops a worker whose one event waits past
+  five minutes, so once a task is granted, and each time it is updated, what
+  the worker's events handed `waitUntil()` counts as done to Chromium, and the
+  work goes on. Hand it over as usual.
+- **Who may:** a site allowed to notify, within a minute of the user touching
+  its window or acting on one of its notifications (`notificationclick` may
+  start one), or to update a task of its own that is running (the same tag).
+  Anything else asking for `ongoing` is shown as an ordinary notification.
+  From the window or the worker alike.
+- **Telling:** `'ongoing' in Notification.prototype` says it is here, in the
+  window and in the worker; a notification's `ongoing`, from
+  `getNotifications({ tag })`, says whether it got it. Elsewhere the same code
+  runs under the usual limits.
+- **What it looks like:** a notification of its own, apart from the site's
+  conversation, with the site's name and colour, the title and body, a bar
+  where `progress` (0 to 1) is given, up to two of the site's own `actions`,
+  and **Stop**. Showing the same tag updates it in place, silently.
+- **Ending it:** close it (`notification.close()`), quietly; or show its tag
+  without `ongoing`, which takes it out of the way and pops up in the site's
+  conversation as news.
+- **Stop**, or swiping it away where Android allows that, closes it, raises
+  `notificationclose`, and lets the worker go ten seconds later. Tapping it
+  opens the site and raises `notificationclick`, and leaves it up.
+- **If the worker stops** anyway — it crashed, or an update replaced it — its
+  tasks go with it. So do they if Tenna is closed from the system's settings
+  or the phone restarts: a task is a worker doing something, and nothing is
+  kept to bring it back.
+
+Android only. On iOS a site's worker runs for the moment a push or a tap
+lasts and never otherwise, so `ongoing` is not offered: the notification is an
+ordinary one and `'ongoing' in Notification.prototype` is false.
+
 ## `share_target` — a place in the OS share menu
 
 An nsite the user has put on their home screen can appear in Android's share
@@ -1167,6 +1357,9 @@ needs in IndexedDB.
 | Cache API | shared by page and worker | shared by the page and its workers, not the extension's worker — see [The Cache API](#the-cache-api) |
 | `napp.fetch` | yes | yes |
 | `share_target` | a sharing shortcut per site, and Tenna | Tenna, which asks which site; a POST is a `fetch` event in the push worker |
+| `window.nostr`'s `getSigner` and `requestPublicKey` | yes | yes |
+| `self.nostr` | in the worker | absent: the notification extension cannot put a question to anybody |
+| `ongoing` notifications | a [running task](#running-a-task--ongoing-notifications) | an ordinary notification; `'ongoing' in Notification.prototype` is false |
 
 A button's `icon` has nowhere to go: iOS draws an action's icon only from an SF
 Symbol or a picture in the app's own bundle. `badge` is the status bar's mark,

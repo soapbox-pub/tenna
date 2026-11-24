@@ -274,6 +274,17 @@ export function supportsNappWorkerShim(): boolean {
 }
 
 /**
+ * Whether a site can run a task with its window closed: Din's `ongoing`
+ * notification option, which keeps the site's service worker running while it
+ * shows. Android only — the site's worker is a real one there, and a
+ * foreground service can keep it and the process alive. iOS runs a site's
+ * worker only for the moment a push or a tap lasts. See `NappTasks.java`.
+ */
+export function supportsNappTasks(): boolean {
+  return Capacitor.getPlatform() === 'android' && Capacitor.isPluginAvailable('NappPush');
+}
+
+/**
  * Whether Tenna registers with a push service for this device.
  *
  * iOS only, and the same condition as the worker shim for the same reason: the

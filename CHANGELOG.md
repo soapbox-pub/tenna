@@ -1,5 +1,32 @@
 # Changelog
 
+## [0.16.0] - 2026-11-23
+
+Sites can keep working after you close them. On Android, a site can carry on
+with something you started, like an upload or an assistant writing code,
+while a notification shows its progress and a Stop button. Sites can also
+read their notifications in the background with your permission, and a site
+that lets you use more than one account can now ask which of your Tenna
+accounts to use, and keep using it when you switch.
+
+### Added
+
+- On Android, a site can keep doing something you started after you close
+  it. A notification shows what it's doing and how far along it is, with a
+  Stop button.
+- On Android, a site can sign and decrypt in the background with the same
+  permissions it has when open, so its notifications can say who a message
+  is from. Anything you haven't already allowed asks you with a
+  notification first.
+- A site can ask you to choose one of your Tenna accounts for it, and keep
+  using each account you gave it even after you switch accounts in Tenna.
+
+### Removed
+
+- Site links that name a site by a web address and username, such as
+  nsite://soapbox.pub+armada/, no longer open. Links that name the site
+  directly still work.
+
 ## [0.15.0] - 2026-10-18
 
 You can now log in to Din on a computer using your phone, with no key to
